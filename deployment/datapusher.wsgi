@@ -8,6 +8,6 @@ os.environ['JOB_CONFIG'] = config_filepath
 
 web.init()
 
-import datapusher.jobs as jobs
+import datapusher_plus.jobs as jobs
 
 application = web.app

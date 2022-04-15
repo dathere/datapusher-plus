@@ -5,7 +5,7 @@ import ckanserviceprovider.web as web
 
 web.init()
 
-import datapusher.jobs as jobs
+import datapusher_plus.jobs as jobs
 # check whether jobs have been imported properly
 assert(jobs.push_to_datastore)
 

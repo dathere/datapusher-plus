@@ -12,19 +12,19 @@ with open(path.join(here, 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 setup(
-    name='datapusher',
+    name='datapusher_plus',
 
     # Versions should comply with PEP440.  For a discussion on single-sourcing
     # the version across setup.py and the project code, see
     # http://packaging.python.org/en/latest/tutorial.html#version
     version=__version__,
 
-    description="A standalone web service that parses the contents of a CKAN site's data files and pushes them into its DataStore",
+    description="A standalone web service that parses the contents of a CKAN site's data files and pushes them into its DataStore. Accelerated by qsv.",
     long_description=long_description,
     long_description_content_type='text/markdown',
 
     # The project's main homepage.
-    url='https://github.com/ckan/datapusher',
+    url='https://github.com/dathere/datapusher-plus',
 
     # Choose your license
     license='AGPL',
@@ -50,7 +50,7 @@ setup(
     ],
 
     # What does your project relate to?
-    keywords='ckan csv xls excel',
+    keywords='ckan csv xls excel qsv',
 
     # You can just specify the packages manually here if your project is
     # simple. Or you can use find_packages().
