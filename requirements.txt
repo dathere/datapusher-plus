@@ -3,5 +3,6 @@ ckanserviceprovider==1.0.0
 html5lib==1.0.1
 certifi
 requests[security]==2.27.1
-psycopg2
+psycopg2-binary
 is_valid_postgres_column_name
+wheel
