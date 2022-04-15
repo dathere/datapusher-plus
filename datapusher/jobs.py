@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 
-
 import json
 import requests
 try:
@@ -16,8 +15,13 @@ import decimal
 import hashlib
 import time
 import tempfile
-
-import messytables
+import subprocess
+import csv
+import os
+import psycopg2
+import six
+from pathlib import Path
+from is_valid_postgres_column_name import is_valid_postgres_column_name
 
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
@@ -30,9 +34,14 @@ else:
     locale.setlocale(locale.LC_ALL, '')
 
 MAX_CONTENT_LENGTH = web.app.config.get('MAX_CONTENT_LENGTH') or 10485760
+QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvlite'
+PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 10000
+DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 CHUNK_INSERT_ROWS = web.app.config.get('CHUNK_INSERT_ROWS') or 250
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
+COPY_MODE_SIZE = web.app.config.get('COPY_MODE_SIZE') or 0
+COPY_WRITE_ENGINE_URL = web.app.config.get('COPY_WRITE_ENGINE_URL')
 USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
 if USE_PROXY:
     DOWNLOAD_PROXY = web.app.config.get('DOWNLOAD_PROXY')
@@ -50,12 +59,13 @@ _TYPE_MAPPING = {
     # 'int' may not be big enough,
     # and type detection may not realize it needs to be big
     'Integer': 'numeric',
-    'Decimal': 'numeric',
-    'DateUtil': 'timestamp'
+    'Float': 'numeric',
+    'DateTime': 'timestamp',
+    'Date': 'timestamp',
+    'NULL': 'text',
 }
 
-_TYPES = [messytables.StringType, messytables.DecimalType,
-          messytables.IntegerType, messytables.DateUtilType]
+_TYPES = ['String', 'Float', 'Integer', 'DateTime']
 
 TYPE_MAPPING = web.app.config.get('TYPE_MAPPING', _TYPE_MAPPING)
 TYPES = web.app.config.get('TYPES', _TYPES)
@@ -128,7 +138,8 @@ def get_url(action, ckan_url):
         ckan_url=ckan_url, action=action)
 
 
-def check_response(response, request_url, who, good_status=(201, 200), ignore_no_success=False):
+def check_response(response, request_url, who, good_status=(201, 200),
+                   ignore_no_success=False):
     """
     Checks the response and raises exceptions if something went terribly wrong
 
@@ -188,7 +199,7 @@ def chunky(items, num_items_per_chunk):
 
 
 class DatastoreEncoder(json.JSONEncoder):
-    # Custon JSON encoder
+    # Custom JSON encoder
     def default(self, obj):
         if isinstance(obj, datetime.datetime):
             return obj.isoformat()
@@ -220,7 +231,7 @@ def datastore_resource_exists(resource_id, api_key, ckan_url):
         response = requests.post(search_url,
                                  verify=SSL_VERIFY,
                                  data=json.dumps({'id': resource_id,
-                                         'limit': 0}),
+                                                  'limit': 0}),
                                  headers={'Content-Type': 'application/json',
                                           'Authorization': api_key}
                                  )
@@ -238,8 +249,8 @@ def datastore_resource_exists(resource_id, api_key, ckan_url):
             'Error getting datastore resource ({!s}).'.format(e))
 
 
-def send_resource_to_datastore(resource, headers, records,
-                               is_it_the_last_chunk, api_key, ckan_url):
+def send_resource_to_datastore(resource, headers, api_key, ckan_url,
+                               records, is_it_the_last_chunk, ):
     """
     Stores records in CKAN datastore
     """
@@ -295,7 +306,7 @@ def get_resource(resource_id, ckan_url, api_key):
 
 
 def validate_input(input):
-    # Especially validate metdata which is provided by the user
+    # Especially validate metadata which is provided by the user
     if 'metadata' not in input:
         raise util.JobError('Metadata missing')
 
@@ -338,7 +349,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     try:
         resource = get_resource(resource_id, ckan_url, api_key)
-    except util.JobError as e:
+    except util.JobError:
         # try again in 5 seconds just incase CKAN is slow at adding resource
         time.sleep(5)
         resource = get_resource(resource_id, ckan_url, api_key)
@@ -367,7 +378,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         kwargs = {'headers': headers, 'timeout': DOWNLOAD_TIMEOUT,
                   'verify': SSL_VERIFY, 'stream': True}
         if USE_PROXY:
-            kwargs['proxies'] = {'http': DOWNLOAD_PROXY, 'https': DOWNLOAD_PROXY}
+            kwargs['proxies'] = {
+                'http': DOWNLOAD_PROXY, 'https': DOWNLOAD_PROXY}
         response = requests.get(url, **kwargs)
         response.raise_for_status()
 
@@ -380,7 +392,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         except ValueError:
             pass
 
-        tmp = tempfile.TemporaryFile()
+        tmp = tempfile.NamedTemporaryFile()
         length = 0
         m = hashlib.md5()
         for chunk in response.iter_content(CHUNK_SIZE):
@@ -407,76 +419,128 @@ def push_to_datastore(task_id, input, dry_run=False):
     file_hash = m.hexdigest()
     tmp.seek(0)
 
-    if (resource.get('hash') == file_hash
-            and not data.get('ignore_hash')):
+    if (resource.get('hash') == file_hash and not data.get('ignore_hash')):
         logger.info("The file hash hasn't changed: {hash}.".format(
             hash=file_hash))
         return
 
     resource['hash'] = file_hash
 
-    try:
-        table_set = messytables.any_tableset(tmp, mimetype=ct, extension=ct)
-    except messytables.ReadError as e:
-        # try again with format
-        tmp.seek(0)
-        try:
-            format = resource.get('format')
-            table_set = messytables.any_tableset(tmp, mimetype=format, extension=format)
-        except:
-            raise util.JobError(e)
+    # we use qsv instead of messytables, as 1) its type inferences are bullet-proof
+    # not guesses as it scans the entire file, 2) its super-fast, and 3) it has
+    # addl data-wrangling capabilities we use in datapusher+ - slice, validate, count
+    if web.app.config.get('QSV_AUTOINDEX') in ['False', 'FALSE', '0', False, 0]:
+        os.environ.setdefault('QSV_AUTOINDEX', '1')
+    else:
+        if "QSV_AUTOINDEX" in os.environ:
+            os.environ.pop('QSV_AUTOINDEX')
 
-    get_row_set = web.app.config.get('GET_ROW_SET',
-                                     lambda table_set: table_set.tables.pop())
-    row_set = get_row_set(table_set)
-    offset, headers = messytables.headers_guess(row_set.sample)
+    # check content type or file extension if its a spreadsheet
+    spreadsheet_extensions = ['XLS', 'XLSX', 'ODS', 'XLSM', 'XLSB']
+    format = resource.get('format').upper()
+    if format in spreadsheet_extensions:
+        # if so, export it as a csv file
+        logger.info('Converting {} file to CSV...'.format(format))
+        # first, we need a temporary spreadsheet filename with the right file extension
+        # we only need the filename though, that's why we remove/delete it
+        # and create a hardlink to the file we got from CKAN
+        qsv_spreadsheet = tempfile.NamedTemporaryFile(suffix='.' + format)
+        os.remove(qsv_spreadsheet.name)
+        os.link(tmp.name, qsv_spreadsheet.name)
+
+        # run `qsv excel` and export it to a CSV
+        qsv_excel_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+        try:
+            qsv_excel = subprocess.run(
+                [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET), '--output', qsv_excel_csv.name], check=True)
+        except subprocess.CalledProcessError as e:
+            raise util.JobError(
+                'Cannot export spreadsheet to CSV: {}'.format(e)
+            )
+        qsv_spreadsheet.close()
+        tmp = qsv_excel_csv
+    else:
+        # its a regular CSV. Check if its valid
+        try:
+            qsv_excel = subprocess.run(
+                [QSV_BIN, 'validate', tmp.name], check=True)
+        except subprocess.CalledProcessError as e:
+            raise util.JobError(
+                'Invalid CSV file: {}'.format(e)
+            )
+
+    # get record count
+    try:
+        qsv_count = subprocess.run(
+            [QSV_BIN, 'count', tmp.name], capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        raise util.JobError(
+            'Cannot count records in CSV: {}'.format(e)
+        )
+    record_count = int(str(qsv_count.stdout).strip())
+    logger.info('{} records detected...'.format(record_count))
+
+    headers = []
+    types = []
+    qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+    try:
+        qsv_stats = subprocess.run(
+            [QSV_BIN, 'stats', tmp.name, '--infer-dates', '--output', qsv_stats_csv.name], check=True)
+    except subprocess.CalledProcessError as e:
+        tmp.close()
+        qsv_stats_csv.close()
+        raise util.JobError(
+            'Cannot infer data types and compile statistics: {}'.format(e)
+        )
+    with open(qsv_stats_csv.name, mode='r') as inp:
+        reader = csv.reader(inp)
+        next(reader)  # skip first element, which is a header
+        for rows in reader:
+            headers.append(rows[0])
+            types.append(rows[1])
+
+    # if rowcount > PREVIEW_ROWS create a preview using qsv slice
+    if PREVIEW_ROWS > 0 and record_count > PREVIEW_ROWS:
+        logger.info(
+            '{0} rows. Saving {1}-row preview in datastore.'.format(record_count, PREVIEW_ROWS))
+        qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+        try:
+            qsv_slice = subprocess.run(
+                [QSV_BIN, 'slice', '--len', str(PREVIEW_ROWS), tmp.name, '--output', qsv_slice_csv.name], check=True)
+        except subprocess.CalledProcessError as e:
+            tmp.close()
+            qsv_slice_csv.close()
+            raise util.JobError(
+                'Cannot create a preview slice: {}'.format(e)
+            )
+        tmp = qsv_slice_csv
 
     existing = datastore_resource_exists(resource_id, api_key, ckan_url)
     existing_info = None
     if existing:
         existing_info = dict((f['id'], f['info'])
-            for f in existing.get('fields', []) if 'info' in f)
-
-    # Some headers might have been converted from strings to floats and such.
-    headers = [str(header) for header in headers]
-
-    row_set.register_processor(messytables.headers_processor(headers))
-    row_set.register_processor(messytables.offset_processor(offset + 1))
-    types = messytables.type_guess(row_set.sample, types=TYPES, strict=True)
+                             for f in existing.get('fields', []) if 'info' in f)
 
     # override with types user requested
     if existing_info:
         types = [{
-            'text': messytables.StringType(),
-            'numeric': messytables.DecimalType(),
-            'timestamp': messytables.DateUtilType(),
-            }.get(existing_info.get(h, {}).get('type_override'), t)
+            'text': 'String',
+            'numeric': 'Decimal',
+            'timestamp': 'DateTime',
+        }.get(existing_info.get(h, {}).get('type_override'), t)
             for t, h in zip(types, headers)]
 
-    row_set.register_processor(messytables.types_processor(types))
-
-    headers = [header.strip() for header in headers if header.strip()]
-    headers_set = set(headers)
+    csvfile = open(tmp.name)
+    csvrdr = csv.DictReader(csvfile)
 
     def row_iterator():
-        for row in row_set:
-            data_row = {}
-            for index, cell in enumerate(row):
-                column_name = cell.column.strip()
-                if column_name not in headers_set:
-                    continue
-                if isinstance(cell.value, str):
-                    try:
-                        data_row[column_name] = cell.value.encode('latin-1').decode('utf-8')
-                    except (UnicodeDecodeError, UnicodeEncodeError):
-                        data_row[column_name] = cell.value
-                else:
-                    data_row[column_name] = cell.value
+        for data_row in csvrdr:
             yield data_row
+
     result = row_iterator()
 
     '''
-    Delete existing datstore resource before proceeding. Otherwise
+    Delete existing datastore resource before proceeding. Otherwise
     'datastore_create' will append to the existing datastore. And if
     the fields have significantly changed, it may also fail.
     '''
@@ -501,20 +565,116 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Determined headers and types: {headers}'.format(
         headers=headers_dicts))
 
+    # Check if the headers are valid postgresql column names
+    invalid_column_name = False
+    invalid_columns = []
+    for h in headers_dicts:
+        if not is_valid_postgres_column_name(h['id']):
+            invalid_column_name = True
+            invalid_columns.append(h['id'])
+    if invalid_column_name:
+        raise util.JobError(
+            'Invalid PostgreSQL column names, please change the following columns: {}'.format(
+                invalid_columns)
+        )
+
     if dry_run:
         return headers_dicts, result
 
-    count = 0
-    for i, chunk in enumerate(chunky(result, CHUNK_INSERT_ROWS)):
-        records, is_it_the_last_chunk = chunk
-        count += len(records)
-        logger.info('Saving chunk {number} {is_last}'.format(
-            number=i, is_last='(last)' if is_it_the_last_chunk else ''))
-        send_resource_to_datastore(resource, headers_dicts, records,
-                                   is_it_the_last_chunk, api_key, ckan_url)
+    fileSize = Path(tmp.name).stat().st_size
 
-    logger.info('Successfully pushed {n} entries to "{res_id}".'.format(
-        n=count, res_id=resource_id))
+    # If COPY_MODE_SIZE is zero, or the filesize is less than the
+    # COPY_MODE_SIZE threshold in bytes, push thru Datastore API.
+    # Otherwise, use COPY if we have a COPY_WRITE_ENGINE_URL
+    if not COPY_MODE_SIZE or not COPY_WRITE_ENGINE_URL or fileSize < COPY_MODE_SIZE:
+        count = 0
+        notify_time = timer_start = time.perf_counter()
+        for i, chunk in enumerate(chunky(result, CHUNK_INSERT_ROWS)):
+            records, is_it_the_last_chunk = chunk
+            count += len(records)
+            if is_it_the_last_chunk or notify_time < time.perf_counter():
+                logger.info('Saving chunk {number} {is_last}- {n} rows - {elapsed} seconds'.format(
+                    number=i, is_last='(last)' if is_it_the_last_chunk else '',
+                    n='{:,}'.format(count), elapsed='{:,.2f}'.format(time.perf_counter() - timer_start)))
+                notify_time += 20
+            send_resource_to_datastore(resource, headers_dicts, api_key,
+                                       ckan_url, records, is_it_the_last_chunk)
 
-    if data.get('set_url_type', False):
+        elapsed = time.perf_counter() - timer_start
+        logger.info('Successfully pushed {n} entries to "{res_id}" in {elapsed} seconds.'.format(
+            n='{:,}'.format(count), res_id=resource_id, elapsed='{:,.2f}'.format(elapsed)))
+
+        if data.get('set_url_type', False):
+            update_resource(resource, api_key, ckan_url)
+    else:
+        # for larger files, use Postgres COPY as its much faster
+        logger.info('Copying to database...')
+        timer_start = time.perf_counter()
+
+        # first, let's create an empty datastore table w/ guessed types
+        send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
+                                   records=None, is_it_the_last_chunk=False)
+
+        # Guess the delimiter used in the file for copy
+        with open(tmp.name, 'rb') as f:
+            header_line = f.readline()
+        try:
+            sniffer = csv.Sniffer()
+            delimiter = sniffer.sniff(six.ensure_text(header_line)).delimiter
+        except csv.Error:
+            logger.warning('Could not determine delimiter, using ","')
+            delimiter = ','
+
+        record_count = 0
+        try:
+            raw_connection = psycopg2.connect(COPY_WRITE_ENGINE_URL)
+        except psycopg2.Error as e:
+            logger.warning(str(e))
+        else:
+            cur = raw_connection.cursor()
+            # truncate table to use copy freeze option and further increase
+            # performance as there is no need for WAL logs to be maintained
+            # https://www.postgresql.org/docs/9.1/populate.html#POPULATE-COPY-FROM
+            cur.execute('TRUNCATE TABLE \"{resource_id}\";'.format(
+                resource_id=resource_id))
+
+            copy_sql = ("COPY \"{resource_id}\" ({column_names}) FROM STDIN "
+                        "WITH (DELIMITER '{delimiter}', FORMAT CSV, FREEZE 1, "
+                        "HEADER 1, ENCODING 'UTF8');").format(
+                            resource_id=resource_id,
+                            column_names=', '.join(['"{}"'.format(h['id'])
+                                                    for h in headers_dicts]),
+                            delimiter=delimiter)
+            logger.info(copy_sql)
+            with open(tmp.name, 'rb') as f:
+                try:
+                    cur.copy_expert(copy_sql, f)
+                except psycopg2.Error as e:
+                    logger.warning(str(e))
+                else:
+                    record_count = cur.rowcount
+
+            raw_connection.commit()
+            # this is needed to issue a VACUUM ANALYZE
+            raw_connection.set_isolation_level(
+                psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+            cur = raw_connection.cursor()
+            logger.info('Vacuum Analyzing table...')
+            cur.execute('VACUUM ANALYZE \"{resource_id}\";'.format(
+                resource_id=resource_id))
+            raw_connection.close()
+
+        elapsed = time.perf_counter() - timer_start
+        logger.info('...copying done. Copied {n} entries to "{res_id}" in {elapsed} seconds.'.format(
+            n='{:,}'.format(record_count), res_id=resource_id, elapsed='{:,.2f}'.format(elapsed)))
+
+        resource['datastore_active'] = True
         update_resource(resource, api_key, ckan_url)
+
+    # cleanup temporary files
+    csvfile.close()
+    tmp.close()
+    if 'qsv_slice_csv' in globals():
+        qsv_slice_csv.close()
+    if 'qsv_excel_csv' in globals():
+        qsv_excel_csv.close()
