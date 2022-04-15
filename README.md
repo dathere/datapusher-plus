@@ -21,13 +21,15 @@ It features:
 * **"Bullet-proof", ultra-fast data type inferencing with qsv**
 
   Unlike messytables which scans only the the first few rows to guess the type of
-  a column, [qsv](https://github.com/jqnatividad/qsv) scans the entire table in a 
-  performant manner (~3 seconds for a 500mb csv) so its data type inferences are guaranteed.
+  a column, [qsv](https://github.com/jqnatividad/qsv) scans the entire table 
+  so its data type inferences are guaranteed.
   
-  Even with the same dataset, qsv is still exponentially faster even if it scans the whole file.
+  Despite this, qsv is still exponentially faster even if it scans the whole file, not
+  only inferring data types, but some additional descriptive statistics as well. For example,
+  [scanning a 2.7 million row, 124MB CSV file took 2 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour).
 
-  It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded, and uses all kinds of 
-  [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning) 
+  It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded, 
+  and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning) 
   especially designed for data-wrangling.
 
 * **Exponentially faster loading speed**
@@ -38,10 +40,10 @@ It features:
   But unlike xloader, we load everything using the proper data types and not as text, so there's
   no need to reload the data again after adjusting the Data Dictionary, as you would with xloader.
   
-* **Robust**
+* **Production-ready Robustness**
   
   In production, the number one source of support issues is Datapusher - primarily, because of 
-  data quality issues, and Datapusher's inability correctly infer data types, gracefully handle 
+  data quality issues and Datapusher's inability correctly infer data types, gracefully handle 
   errors, and provide the Data Publisher actionable information to correct the data.
   
   Datapusher+'s design directly addresses all these issues.
