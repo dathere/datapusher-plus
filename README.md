@@ -43,7 +43,7 @@ It features:
 * **Production-ready Robustness**
   
   In production, the number one source of support issues is Datapusher - primarily, because of 
-  data quality issues and Datapusher's inability correctly infer data types, gracefully handle 
+  data quality issues and Datapusher's inability to correctly infer data types, gracefully handle 
   errors, and provide the Data Publisher actionable information to correct the data.
   
   Datapusher+'s design directly addresses all these issues.
