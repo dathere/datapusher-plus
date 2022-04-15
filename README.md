@@ -10,11 +10,11 @@
 
 # DataPusher+
 
-DataPusher+ is a fork of Datapusher that combines the speed and robustness of 
-ckanext-xloader with the data type guessing of Datapusher.
+DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of 
+[ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
 
 TNRIS/TWDB provided the use cases that informed and supported the development
-of Datapusher+.
+of Datapusher+, specifically, to support a [Resource-first upload workflow](#Resource-first-Upload-Workflow).
 
 It features:
 
@@ -23,6 +23,8 @@ It features:
   Unlike messytables which scans only the the first few rows to guess the type of
   a column, [qsv](https://github.com/jqnatividad/qsv) scans the entire table in a 
   performant manner (~3 seconds for a 500mb csv) so its data type inferences are guaranteed.
+  
+  Even with the same dataset, qsv is still exponentially faster even if it scans the whole file.
 
   It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded, and uses all kinds of 
   [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning) 
