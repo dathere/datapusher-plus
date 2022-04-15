@@ -79,6 +79,8 @@ uploads the resource and starts populating the rest of the form a few seconds la
 
 Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same way.
 
+> IMPORTANT: Be sure to install Datapusher+ in its own python virtual environment.
+
 Install the required packages::
 
     sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev
