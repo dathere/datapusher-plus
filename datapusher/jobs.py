@@ -40,7 +40,7 @@ DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 CHUNK_INSERT_ROWS = web.app.config.get('CHUNK_INSERT_ROWS') or 250
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
-COPY_MODE_SIZE = web.app.config.get('COPY_MODE_SIZE') or 0
+COPY_MODE_SIZE = web.app.config.get('COPY_MODE_SIZE') or 2000000
 COPY_WRITE_ENGINE_URL = web.app.config.get('COPY_WRITE_ENGINE_URL')
 USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
 if USE_PROXY:

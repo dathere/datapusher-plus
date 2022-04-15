@@ -21,7 +21,8 @@ SQLALCHEMY_DATABASE_URI = os.environ.get('DATAPUSHER_SQLALCHEMY_DATABASE_URI', '
 # PostgreSQL COPY settings
 
 COPY_WRITE_ENGINE_URL = 'postgresql://ckan_default:thepassword@localhost/datastore_default'
-COPY_MODE_SIZE = 1000
+# minimum size in bytes of file to use PostgreSQL COPY mode
+COPY_MODE_SIZE = 2000000
 
 # qsv settings
 
