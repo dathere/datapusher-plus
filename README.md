@@ -156,10 +156,16 @@ Here's a summary of the options available.
 | CHUNK_INSERT_ROWS | '250' | Number of records to send a request to datastore |
 | DOWNLOAD_TIMEOUT | '30' | Download timeout for requesting the file |
 | SSL_VERIFY | False | Do not validate SSL certificates when requesting the data file (*Warning*: Do not use this setting in production) |
-| TYPES | [messytables.StringType, messytables.DecimalType, messytables.IntegerType, messytables.DateUtilType] | [Messytables][] types used internally, can be modified to customize the type guessing |
-| TYPE_MAPPING | {'String': 'text', 'Integer': 'numeric', 'Decimal': 'numeric', 'DateUtil': 'timestamp'} | Internal Messytables type mapping |
+| TYPES | 'String', 'Float', 'Integer', 'DateTime' | can be modified to customize the type inferencing |
+| TYPE_MAPPING | {'String': 'text', 'Integer': 'numeric', 'Float': 'numeric', 'DateTime': 'timestamp', 'Date': 'timestamp', 'NULL': 'text'} | Internal qsv type mapping |
 | LOG_FILE | `/tmp/ckan_service.log` | Where to write the logs. Use an empty string to disable |
 | STDERR | `True` | Log to stderr? |
+| QSV_BIN | /usr/local/bin/qsvlite | The location of the qsv binary to use |
+| QSV_AUTO_INDEX | True | Automatically create an index when running qsv to speed it up |
+| PREVIEW_ROWS | 1000 | The number of rows to insert to the data store. Set to 0 to insert all rows |
+| DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
+| COPY_MODE_SIZE | 2097152 | The minimum filesize of the CSV/spreadsheet (in bytes - default 2MB), before Postgres COPY mode is used. Otherwise, fallback to using the traditional, chunked upload of Datapusher |
+| COPY_WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be equivalent to your `ckan.datastore.write_url` |
 
 
 Most of the configuration options above can be also provided as environment variables prepending the name with `DATAPUSHER_`, eg `DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. In the specific case of `DATAPUSHER_STDERR` the possible values are `1` and `0`.
