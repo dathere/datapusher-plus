@@ -114,37 +114,10 @@ To run the tests:
 
 ## Production deployment
 
-  - Ple
-
-
+ [Similar to Datapusher](https://github.com/ckan/datapusher#production-deployment).
 ### High Availability Setup
 
-The default DataPusher configuration uses SQLite as the backend for the jobs database and a single uWSGI thread. To increase performance and concurrency you can configure DataPusher in the following way:
-
-1. Use Postgres as database backend, which will allow concurrent writes (and provide a more reliable backend anyway). To use Postgres, create a user and a database and update the `SQLALCHEMY_DATABASE_URI` settting accordingly:
-
-    ```
-    # This assumes DataPusher is already installed
-    sudo apt-get install postgresql libpq-dev
-    sudo -u postgres createuser -S -D -R -P datapusher_jobs
-    sudo -u postgres createdb -O datapusher_jobs datapusher_jobs -E utf-8
-
-    # Run this in the virtualenv where DataPusher is installed
-    pip install psycopg2
-
-    # Edit SQLALCHEMY_DATABASE_URI in datapusher_settings.py accordingly
-    # eg SQLALCHEMY_DATABASE_URI=postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs
-    ```
-
-2. Start more uWSGI threads. On the `deployment/datapusher-uwsgi.ini` file, set `workers` and `threads` to a value that suits your needs, and add the `lazy-apps=true` setting to avoid concurrency issues with SQLAlchemy, eg:
-
-    ```
-    # ... rest of datapusher-uwsgi.ini
-    workers         =  3
-    threads         =  3
-    lazy-apps       =  true
-    ```
-
+ [Similar to Datapusher](https://github.com/ckan/datapusher#high-availability-setup).
 ## Configuring
 
 
@@ -161,12 +134,12 @@ added to the `[app:main]` section of your CKAN configuration file :
     ckan.datapusher.url = http://127.0.0.1:8800/
 
 There are other CKAN configuration options that allow to customize the CKAN - DataPusher
-integation. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/latest/maintaining/configuration.html#datapusher-settings) section in the CKAN documentation for more details.
+integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/latest/maintaining/configuration.html#datapusher-settings) section in the CKAN documentation for more details.
 
 
-### DataPusher Configuration
+### DataPusher+ Configuration
 
-The DataPusher instance is configured in the `deployment/datapusher_settings.py` file.
+The DataPusher+ instance is configured in the `deployment/datapusher_settings.py` file.
 Here's a summary of the options available.
 
 | Name | Default | Description |
