@@ -18,6 +18,18 @@ PORT = os.environ.get('DATAPUSHER_PORT', 8800)
 
 SQLALCHEMY_DATABASE_URI = os.environ.get('DATAPUSHER_SQLALCHEMY_DATABASE_URI', 'sqlite:////tmp/job_store.db')
 
+# PostgreSQL COPY settings
+
+COPY_WRITE_ENGINE_URL = 'postgresql://ckan_default:thepassword@localhost/datastore_default'
+COPY_MODE_SIZE = 1000
+
+# qsv settings
+
+QSV_BIN = '/usr/local/bin/qsvlite'
+QSV_AUTOINDEX = True
+PREVIEW_ROWS = 10000
+DEFAULT_EXCEL_SHEET = 0
+
 # Download and streaming settings
 
 MAX_CONTENT_LENGTH = int(os.environ.get('DATAPUSHER_MAX_CONTENT_LENGTH', '1024000'))
