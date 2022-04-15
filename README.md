@@ -37,6 +37,14 @@ It features:
 
   But unlike xloader, we load everything using the proper data types and not as text, so there's
   no need to reload the data again after adjusting the Data Dictionary, as you would with xloader.
+  
+* **Robust**
+  
+  In production, the number one source of support issues is Datapusher - primarily, because of 
+  data quality issues, and Datapusher's inability correctly infer data types, gracefully handle 
+  errors, and provide the Data Publisher actionable information to correct the data.
+  
+  Datapusher+'s design directly addresses all these issues.
 
 * **More informative datastore loading messages**
 
