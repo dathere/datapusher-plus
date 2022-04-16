@@ -98,8 +98,14 @@ Install the dependencies::
     pip install -r requirements-dev.txt
     pip install -e .
 
+> NOTE: run `python setup.py bdist_wheel` should you get errors while running `pip install` and run the commands again.
+
 Install qsv::   
 > Follow the instructions at https://github.com/jqnatividad/qsv#installation    
+
+Configure datapusher_settings.py
+
+    nano deployment/datapusher_settings.py
 
 Run the DataPusher::
 
