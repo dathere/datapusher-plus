@@ -21,7 +21,7 @@ import os
 import psycopg2
 import six
 from pathlib import Path
-from is_valid_postgres_column_name import is_valid_postgres_column_name
+# from is_valid_postgres_column_name import is_valid_postgres_column_name
 
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
@@ -40,7 +40,7 @@ DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 CHUNK_INSERT_ROWS = web.app.config.get('CHUNK_INSERT_ROWS') or 250
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
-COPY_MODE_SIZE = web.app.config.get('COPY_MODE_SIZE') or 2000000
+COPY_MODE_SIZE = web.app.config.get('COPY_MODE_SIZE') or 10
 COPY_WRITE_ENGINE_URL = web.app.config.get('COPY_WRITE_ENGINE_URL')
 USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
 if USE_PROXY:
@@ -565,18 +565,18 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Determined headers and types: {headers}'.format(
         headers=headers_dicts))
 
-    # Check if the headers are valid postgresql column names
-    invalid_column_name = False
-    invalid_columns = []
-    for h in headers_dicts:
-        if not is_valid_postgres_column_name(h['id']):
-            invalid_column_name = True
-            invalid_columns.append(h['id'])
-    if invalid_column_name:
-        raise util.JobError(
-            'Invalid PostgreSQL column names, please change the following columns: {}'.format(
-                invalid_columns)
-        )
+    # # Check if the headers are valid postgresql column names
+    # invalid_column_name = False
+    # invalid_columns = []
+    # for h in headers_dicts:
+    #     if not is_valid_postgres_column_name(h['id']):
+    #         invalid_column_name = True
+    #         invalid_columns.append(h['id'])
+    # if invalid_column_name:
+    #     raise util.JobError(
+    #         'Invalid PostgreSQL column names, please change the following columns: {}'.format(
+    #             invalid_columns)
+    #     )
 
     if dry_run:
         return headers_dicts, result
