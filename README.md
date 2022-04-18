@@ -221,8 +221,7 @@ Here's a summary of the options available.
 | QSV_AUTOINDEX | True | Automatically create an index when running qsv to speed it up |
 | PREVIEW_ROWS | 1000 | The number of rows to insert to the data store. Set to 0 to insert all rows |
 | DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
-| COPY_MODE_SIZE | 2000000 | The minimum filesize of the CSV/spreadsheet (in bytes - default 2MB), before Postgres COPY mode is used. Otherwise, fallback to using the traditional, chunked upload of Datapusher |
-| COPY_WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be equivalent to your `ckan.datastore.write_url` |
+| DATAPUSHER_WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be equivalent to your `ckan.datastore.write_url` |
 
 
 Most of the configuration options above can be also provided as environment variables prepending the name with `DATAPUSHER_`, eg `DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. In the specific case of `DATAPUSHER_STDERR` the possible values are `1` and `0`.
