@@ -125,7 +125,57 @@ To run the tests:
 
 ## Production deployment
 
- [Similar to Datapusher](https://github.com/ckan/datapusher#production-deployment).
+## Production deployment
+
+*Note*: If you installed CKAN via a [package install](http://docs.ckan.org/en/latest/install-from-package.html), the DataPusher has already been installed and deployed for you. You can skip directly to the [Configuring](#configuring) section.
+
+
+Thes instructions assume you already have CKAN installed on this server in the default
+location described in the CKAN install documentation
+(`/usr/lib/ckan/default`).  If this is correct you should be able to run the
+following commands directly, if not you will need to adapt the previous path to
+your needs.
+
+These instructions set up the DataPusher web service on [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) running on port 8800, but can be easily adapted to other WSGI servers like Gunicorn. You'll
+probably need to set up Nginx as a reverse proxy in front of it and something like
+Supervisor to keep the process up.
+
+
+     # Install requirements for the DataPusher
+     sudo apt install python3-venv python3-dev build-essential
+     sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev git libffi-dev
+
+     # Create a virtualenv for datapusher
+     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
+
+     # Create a source directory and switch to it
+     sudo mkdir /usr/lib/ckan/datapusher-plus/src
+     cd /usr/lib/ckan/datapusher-plus/src
+
+     # Clone the source (you should target the latest tagged version)
+     sudo git clone https://github.com/datHere/datapusher-plus.git
+
+     # Install DataPusher-plus and its requirements
+     cd datapusher-plus
+     sudo /usr/lib/ckan/datapusher-plus/bin/pip install -r requirements.txt
+     sudo /usr/lib/ckan/datapusher-plus/bin/python setup.py develop
+
+     # Create a user to run the web service (if necessary)
+     sudo addgroup www-data
+     sudo adduser -G www-data www-data
+
+     # Install uWSGI
+     sudo /usr/lib/ckan/datapusher-plus/bin/pip install uwsgi
+
+At this point you can run DataPusher-plus with the following command:
+
+    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /usr/lib/ckan/datapusher-plus/src/datapusher-plus/deployment/datapusher-uwsgi.ini
+
+
+*Note*: If you are installing DataPusher-plus on a different location than the default
+one you need to adapt the relevant paths in the `datapusher-uwsgi.ini` to the ones you are using. Also you might need to change the `uid` and `guid` settings when using a different user.
+
+
 ### High Availability Setup
 
  [Similar to Datapusher](https://github.com/ckan/datapusher#high-availability-setup).
