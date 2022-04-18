@@ -40,8 +40,11 @@ DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 CHUNK_INSERT_ROWS = web.app.config.get('CHUNK_INSERT_ROWS') or 250
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
-COPY_MODE_SIZE = web.app.config.get('COPY_MODE_SIZE') or 10
-COPY_WRITE_ENGINE_URL = web.app.config.get('COPY_WRITE_ENGINE_URL')
+DATAPUSHER_WRITE_ENGINE_URL = web.app.config.get('DATAPUSHER_WRITE_ENGINE_URL') or ''
+
+if not DATAPUSHER_WRITE_ENGINE_URL:
+    raise util.JobError('DATAPUSHER_WRITE_ENGINE_URL is required.')
+
 USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
 if USE_PROXY:
     DOWNLOAD_PROXY = web.app.config.get('DOWNLOAD_PROXY')
@@ -111,7 +114,7 @@ class HTTPError(util.JobError):
 
         """
         if self.response and len(self.response) > 200:
-            response = self.response[:200] + '...'
+            response = self.response[:200]  + str.encode('...')
         else:
             response = self.response
         return {
@@ -431,6 +434,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # addl data-wrangling capabilities we use in datapusher+ - slice, validate, count
     if web.app.config.get('QSV_AUTOINDEX') in ['False', 'FALSE', '0', False, 0]:
         os.environ.setdefault('QSV_AUTOINDEX', '1')
+        logger.info("QSV_AUTOINDEX on...")
     else:
         if "QSV_AUTOINDEX" in os.environ:
             os.environ.pop('QSV_AUTOINDEX')
@@ -530,15 +534,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         }.get(existing_info.get(h, {}).get('type_override'), t)
             for t, h in zip(types, headers)]
 
-    csvfile = open(tmp.name)
-    csvrdr = csv.DictReader(csvfile)
-
-    def row_iterator():
-        for data_row in csvrdr:
-            yield data_row
-
-    result = row_iterator()
-
     '''
     Delete existing datastore resource before proceeding. Otherwise
     'datastore_create' will append to the existing datastore. And if
@@ -565,114 +560,73 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Determined headers and types: {headers}'.format(
         headers=headers_dicts))
 
-    # # Check if the headers are valid postgresql column names
-    # invalid_column_name = False
-    # invalid_columns = []
-    # for h in headers_dicts:
-    #     if not is_valid_postgres_column_name(h['id']):
-    #         invalid_column_name = True
-    #         invalid_columns.append(h['id'])
-    # if invalid_column_name:
-    #     raise util.JobError(
-    #         'Invalid PostgreSQL column names, please change the following columns: {}'.format(
-    #             invalid_columns)
-    #     )
-
     if dry_run:
-        return headers_dicts, result
+        return headers_dicts
 
-    fileSize = Path(tmp.name).stat().st_size
+    logger.info('Copying to database...')
+    timer_start = time.perf_counter()
 
-    # If COPY_MODE_SIZE is zero, or the filesize is less than the
-    # COPY_MODE_SIZE threshold in bytes, push thru Datastore API.
-    # Otherwise, use COPY if we have a COPY_WRITE_ENGINE_URL
-    if not COPY_MODE_SIZE or not COPY_WRITE_ENGINE_URL or fileSize < COPY_MODE_SIZE:
-        count = 0
-        notify_time = timer_start = time.perf_counter()
-        for i, chunk in enumerate(chunky(result, CHUNK_INSERT_ROWS)):
-            records, is_it_the_last_chunk = chunk
-            count += len(records)
-            if is_it_the_last_chunk or notify_time < time.perf_counter():
-                logger.info('Saving chunk {number} {is_last}- {n} rows - {elapsed} seconds'.format(
-                    number=i, is_last='(last)' if is_it_the_last_chunk else '',
-                    n='{:,}'.format(count), elapsed='{:,.2f}'.format(time.perf_counter() - timer_start)))
-                notify_time += 20
-            send_resource_to_datastore(resource, headers_dicts, api_key,
-                                       ckan_url, records, is_it_the_last_chunk)
+    # first, let's create an empty datastore table w/ guessed types
+    send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
+                               records=None, is_it_the_last_chunk=False)
 
-        elapsed = time.perf_counter() - timer_start
-        logger.info('Successfully pushed {n} entries to "{res_id}" in {elapsed} seconds.'.format(
-            n='{:,}'.format(count), res_id=resource_id, elapsed='{:,.2f}'.format(elapsed)))
+    # Guess the delimiter used in the file for copy
+    with open(tmp.name, 'rb') as f:
+        header_line = f.readline()
+    try:
+        sniffer = csv.Sniffer()
+        delimiter = sniffer.sniff(six.ensure_text(header_line)).delimiter
+    except csv.Error:
+        logger.warning('Could not determine delimiter, using ","')
+        delimiter = ','
 
-        if data.get('set_url_type', False):
-            update_resource(resource, api_key, ckan_url)
+    record_count = 0
+    try:
+        raw_connection = psycopg2.connect(DATAPUSHER_WRITE_ENGINE_URL)
+    except psycopg2.Error as e:
+        logger.warning("Could not connect to Datastore: {}".format(e))
     else:
-        # for larger files, use Postgres COPY as its much faster
-        logger.info('Copying to database...')
-        timer_start = time.perf_counter()
+        cur = raw_connection.cursor()
+        # truncate table to use copy freeze option and further increase
+        # performance as there is no need for WAL logs to be maintained
+        # https://www.postgresql.org/docs/9.1/populate.html#POPULATE-COPY-FROM
+        cur.execute('TRUNCATE TABLE \"{resource_id}\";'.format(
+            resource_id=resource_id))
 
-        # first, let's create an empty datastore table w/ guessed types
-        send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
-                                   records=None, is_it_the_last_chunk=False)
-
-        # Guess the delimiter used in the file for copy
+        copy_sql = ("COPY \"{resource_id}\" ({column_names}) FROM STDIN "
+                    "WITH (DELIMITER '{delimiter}', FORMAT CSV, FREEZE 1, "
+                    "HEADER 1, ENCODING 'UTF8');").format(
+                        resource_id=resource_id,
+                        column_names=', '.join(['"{}"'.format(h['id'])
+                                                for h in headers_dicts]),
+                        delimiter=delimiter)
+        logger.info(copy_sql)
         with open(tmp.name, 'rb') as f:
-            header_line = f.readline()
-        try:
-            sniffer = csv.Sniffer()
-            delimiter = sniffer.sniff(six.ensure_text(header_line)).delimiter
-        except csv.Error:
-            logger.warning('Could not determine delimiter, using ","')
-            delimiter = ','
+            try:
+                cur.copy_expert(copy_sql, f)
+            except psycopg2.Error as e:
+                logger.warning("Postgres COPY failed: {}".format(e))
+            else:
+                record_count = cur.rowcount
 
-        record_count = 0
-        try:
-            raw_connection = psycopg2.connect(COPY_WRITE_ENGINE_URL)
-        except psycopg2.Error as e:
-            logger.warning(str(e))
-        else:
-            cur = raw_connection.cursor()
-            # truncate table to use copy freeze option and further increase
-            # performance as there is no need for WAL logs to be maintained
-            # https://www.postgresql.org/docs/9.1/populate.html#POPULATE-COPY-FROM
-            cur.execute('TRUNCATE TABLE \"{resource_id}\";'.format(
-                resource_id=resource_id))
+        raw_connection.commit()
+        # this is needed to issue a VACUUM ANALYZE
+        raw_connection.set_isolation_level(
+            psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+        cur = raw_connection.cursor()
+        logger.info('Vacuum Analyzing table...')
+        cur.execute('VACUUM ANALYZE \"{resource_id}\";'.format(
+            resource_id=resource_id))
+        raw_connection.close()
 
-            copy_sql = ("COPY \"{resource_id}\" ({column_names}) FROM STDIN "
-                        "WITH (DELIMITER '{delimiter}', FORMAT CSV, FREEZE 1, "
-                        "HEADER 1, ENCODING 'UTF8');").format(
-                            resource_id=resource_id,
-                            column_names=', '.join(['"{}"'.format(h['id'])
-                                                    for h in headers_dicts]),
-                            delimiter=delimiter)
-            logger.info(copy_sql)
-            with open(tmp.name, 'rb') as f:
-                try:
-                    cur.copy_expert(copy_sql, f)
-                except psycopg2.Error as e:
-                    logger.warning(str(e))
-                else:
-                    record_count = cur.rowcount
+    elapsed = time.perf_counter() - timer_start
+    logger.info('...copying done. Copied {n} entries to "{res_id}" in {elapsed} seconds.'.format(
+        n='{:,}'.format(record_count), res_id=resource_id, elapsed='{:,.2f}'.format(elapsed)))
 
-            raw_connection.commit()
-            # this is needed to issue a VACUUM ANALYZE
-            raw_connection.set_isolation_level(
-                psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
-            cur = raw_connection.cursor()
-            logger.info('Vacuum Analyzing table...')
-            cur.execute('VACUUM ANALYZE \"{resource_id}\";'.format(
-                resource_id=resource_id))
-            raw_connection.close()
-
-        elapsed = time.perf_counter() - timer_start
-        logger.info('...copying done. Copied {n} entries to "{res_id}" in {elapsed} seconds.'.format(
-            n='{:,}'.format(record_count), res_id=resource_id, elapsed='{:,.2f}'.format(elapsed)))
-
-        resource['datastore_active'] = True
-        update_resource(resource, api_key, ckan_url)
+    resource['datastore_active'] = True
+    update_resource(resource, api_key, ckan_url)
 
     # cleanup temporary files
-    csvfile.close()
     tmp.close()
     if 'qsv_slice_csv' in globals():
         qsv_slice_csv.close()
