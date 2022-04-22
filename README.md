@@ -75,7 +75,8 @@ This is why speed is qsv's speed is critical for a Resource-first upload workflo
 uploads the resource and starts populating the rest of the form a few seconds later, a lot of inferred metadata 
 (e.g. Data Dictionary, spatial extent, etc.) should be available for pre-populating the rest of the form.
 
-See this [discussion](https://github.com/ckan/ckan/discussions/6689) for additional context.
+See this [discussion](https://github.com/ckan/ckan/discussions/6689) and this [issue](https://github.com/ckan/ideas/issues/150)
+about the multi-pass Datapusher from May 2015 for additional context
 
 ## Development installation
 
@@ -122,8 +123,6 @@ If you need to change the host or port, copy `deployment/datapusher_settings.py`
 To run the tests:
 
     pytest
-
-## Production deployment
 
 ## Production deployment
 
