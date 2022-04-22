@@ -39,7 +39,7 @@ DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 CHUNK_INSERT_ROWS = web.app.config.get('CHUNK_INSERT_ROWS') or 250
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
-WRITE_ENGINE_URL = web.app.config.get('WRITE_ENGINE_URL') or 'postgresql://datastore_default:adminuser321@localhost/datastore_default'
+WRITE_ENGINE_URL = web.app.config.get('WRITE_ENGINE_URL') or 'postgresql://datapusher:thepassword@localhost/datastore_default'
 
 if not WRITE_ENGINE_URL:
     raise util.JobError('WRITE_ENGINE_URL is required.')
