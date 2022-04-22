@@ -21,7 +21,6 @@ import os
 import psycopg2
 import six
 from pathlib import Path
-# from is_valid_postgres_column_name import is_valid_postgres_column_name
 
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
@@ -40,10 +39,10 @@ DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 CHUNK_INSERT_ROWS = web.app.config.get('CHUNK_INSERT_ROWS') or 250
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
-DATAPUSHER_WRITE_ENGINE_URL = web.app.config.get('DATAPUSHER_WRITE_ENGINE_URL') or ''
+WRITE_ENGINE_URL = web.app.config.get('WRITE_ENGINE_URL') or 'postgresql://datastore_default:adminuser321@localhost/datastore_default'
 
-if not DATAPUSHER_WRITE_ENGINE_URL:
-    raise util.JobError('DATAPUSHER_WRITE_ENGINE_URL is required.')
+if not WRITE_ENGINE_URL:
+    raise util.JobError('WRITE_ENGINE_URL is required.')
 
 USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
 if USE_PROXY:
@@ -582,7 +581,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     record_count = 0
     try:
-        raw_connection = psycopg2.connect(DATAPUSHER_WRITE_ENGINE_URL)
+        raw_connection = psycopg2.connect(WRITE_ENGINE_URL)
     except psycopg2.Error as e:
         logger.warning("Could not connect to Datastore: {}".format(e))
     else:
