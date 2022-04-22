@@ -26,7 +26,7 @@ It features:
   
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
   only inferring data types, but some additional descriptive statistics as well. For example,
-  [scanning a 2.7 million row, 124MB CSV file took 2 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour).
+  [scanning a 2.7 million row, 124MB CSV file takes 2 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour).
 
   It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded, 
   and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning) 
@@ -73,10 +73,10 @@ be automatically inferred and populated based on the attributes of the dataset?
 
 This is why speed is qsv's speed is critical for a Resource-first upload workflow. By the time the data publisher 
 uploads the resource and starts populating the rest of the form a few seconds later, a lot of inferred metadata 
-(e.g. Data Dictionary, spatial extent, etc.) should be available for pre-populating the rest of the form.
+(Data Dictionary for this initial version) should be available for pre-populating the rest of the form.
 
 See this [discussion](https://github.com/ckan/ckan/discussions/6689) and this [issue](https://github.com/ckan/ideas/issues/150)
-about the multi-pass Datapusher from May 2015 for additional context
+about the "Multi-pass Datapusher" from May 2015 for additional context.
 
 ## Development installation
 
@@ -125,8 +125,6 @@ To run the tests:
     pytest
 
 ## Production deployment
-
-*Note*: If you installed CKAN via a [package install](http://docs.ckan.org/en/latest/install-from-package.html), the DataPusher has already been installed and deployed for you. You can skip directly to the [Configuring](#configuring) section.
 
 
 Thes instructions assume you already have CKAN installed on this server in the default
