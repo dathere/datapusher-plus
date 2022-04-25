@@ -82,7 +82,11 @@ about the "Multi-pass Datapusher" from May 2015 for additional context.
 
 Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same way.
 
-> IMPORTANT: Be sure to install Datapusher+ in its own python virtual environment.
+Create a virtual environment for Datapusher+:
+
+    python -m venv dpplus_venv
+    . dpplus_venv/bin/activate
+    cd dpplus_venv
 
 Install the required packages::
 
