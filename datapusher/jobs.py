@@ -407,12 +407,6 @@ def push_to_datastore(task_id, input, dry_run=False):
     # we use qsv instead of messytables, as 1) its type inferences are bullet-proof
     # not guesses as it scans the entire file, 2) its super-fast, and 3) it has
     # addl data-wrangling capabilities we use in datapusher+ - slice, validate, count
-    if web.app.config.get('QSV_AUTOINDEX') in ['False', 'FALSE', '0', False, 0]:
-        os.environ.setdefault('QSV_AUTOINDEX', '1')
-        logger.info("QSV_AUTOINDEX on...")
-    else:
-        if "QSV_AUTOINDEX" in os.environ:
-            os.environ.pop('QSV_AUTOINDEX')
 
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ['XLS', 'XLSX', 'ODS', 'XLSM', 'XLSB']
@@ -447,6 +441,15 @@ def push_to_datastore(task_id, input, dry_run=False):
             raise util.JobError(
                 'Invalid CSV file: {}'.format(e)
             )
+
+    # index csv for speed
+    try:
+        subprocess.run(
+            [QSV_BIN, 'index', tmp.name], capture_output=True)
+    except subprocess.CalledProcessError as e:
+        raise util.JobError(
+            'Cannot index CSV: {}'.format(e)
+        )
 
     # get record count
     try:
@@ -602,6 +605,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     update_resource(resource, api_key, ckan_url)
 
     # cleanup temporary files
+    if os.path.exists(tmp.name + ".idx"):
+        os.remove(tmp.name + ".idx")        
     tmp.close()
     if 'qsv_slice_csv' in globals():
         qsv_slice_csv.close()
