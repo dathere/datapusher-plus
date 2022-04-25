@@ -37,7 +37,6 @@ QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvlite'
 PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 10000
 DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
-CHUNK_INSERT_ROWS = web.app.config.get('CHUNK_INSERT_ROWS') or 250
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
 WRITE_ENGINE_URL = web.app.config.get('WRITE_ENGINE_URL') or 'postgresql://datapusher:thepassword@localhost/datastore_default'
 
@@ -176,29 +175,6 @@ def check_response(response, request_url, who, good_status=(201, 200),
         raise HTTPError(
             message, status_code=response.status_code, request_url=request_url,
             response=response.text)
-
-
-def chunky(items, num_items_per_chunk):
-    """
-    Breaks up a list of items into chunks - multiple smaller lists of items.
-    The last chunk is flagged up.
-
-    :param items: Size of each chunks
-    :type items: iterable
-    :param num_items_per_chunk: Size of each chunks
-    :type num_items_per_chunk: int
-
-    :returns: multiple tuples: (chunk, is_it_the_last_chunk)
-    :rtype: generator of (list, bool)
-    """
-    items_ = iter(items)
-    chunk = list(itertools.islice(items_, num_items_per_chunk))
-    while chunk:
-        next_chunk = list(itertools.islice(items_, num_items_per_chunk))
-        chunk_is_the_last_one = not next_chunk
-        yield chunk, chunk_is_the_last_one
-        chunk = next_chunk
-
 
 class DatastoreEncoder(json.JSONEncoder):
     # Custom JSON encoder
