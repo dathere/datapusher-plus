@@ -103,7 +103,20 @@ Install the dependencies::
 > NOTE: run `python setup.py bdist_wheel` should you get errors while running `pip install` and run the commands again.
 
 Install qsv::   
-> Follow the instructions at https://github.com/jqnatividad/qsv#installation    
+[Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy 
+it to the appropriate directory, e.g. for Linux: 
+
+    wget https://github.com/jqnatividad/qsv/releases/download/0.42.2/qsv-0.42.2-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.42.2-x86_64-unknown-linux-gnu.zip
+    sudo mv qsv /usr/local/bin
+    sudo mv qsvlite /usr/local/bin
+
+Alternatively, if you want to install from source, follow
+the instructions at https://github.com/jqnatividad/qsv#installation.    
+
+> NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run 
+`sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
+   
 
 Configure datapusher_settings.py
 
