@@ -258,7 +258,8 @@ into the DataStore.
 
 You can also manually trigger resources to be resubmitted. When editing a resource in CKAN (clicking the "Manage" button on a resource page), a new tab named "DataStore" will appear. This will contain a log of the last attempted upload and a button to retry the upload.
 
-![DataPusher UI](images/ui.png)
+![DataPusher UI](images/datapusher-plus-scn1.png)
+![DataPusher UI 2](images/datapusher-plus-scn2.png)
 
 ### Command line
 
