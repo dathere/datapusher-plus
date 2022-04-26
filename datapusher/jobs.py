@@ -21,6 +21,7 @@ import os
 import psycopg2
 import six
 from pathlib import Path
+from datasize import DataSize
 
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
@@ -38,7 +39,8 @@ PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 10000
 DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
-WRITE_ENGINE_URL = web.app.config.get('WRITE_ENGINE_URL') or 'postgresql://datapusher:thepassword@localhost/datastore_default'
+WRITE_ENGINE_URL = web.app.config.get(
+    'WRITE_ENGINE_URL') or 'postgresql://datapusher:thepassword@localhost/datastore_default'
 
 if not WRITE_ENGINE_URL:
     raise util.JobError('WRITE_ENGINE_URL is required.')
@@ -112,7 +114,7 @@ class HTTPError(util.JobError):
 
         """
         if self.response and len(self.response) > 200:
-            response = self.response[:200]  + str.encode('...')
+            response = self.response[:200] + str.encode('...')
         else:
             response = self.response
         return {
@@ -175,6 +177,7 @@ def check_response(response, request_url, who, good_status=(201, 200),
         raise HTTPError(
             message, status_code=response.status_code, request_url=request_url,
             response=response.text)
+
 
 class DatastoreEncoder(json.JSONEncoder):
     # Custom JSON encoder
@@ -345,8 +348,10 @@ def push_to_datastore(task_id, input, dry_run=False):
             'Only http, https, and ftp resources may be fetched.'
         )
 
+    timer_start = time.perf_counter()
+
     # fetch the resource data
-    logger.info('Fetching from: {0}'.format(url))
+    logger.info('Fetching from: {0}...'.format(url))
     headers = {}
     if resource.get('url_type') == 'upload':
         # If this is an uploaded file to CKAN, authenticate the request,
@@ -404,9 +409,13 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource['hash'] = file_hash
 
-    # we use qsv instead of messytables, as 1) its type inferences are bullet-proof
+    # Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
     # not guesses as it scans the entire file, 2) its super-fast, and 3) it has
     # addl data-wrangling capabilities we use in datapusher+ - slice, validate, count
+    fetch_elapsed = time.perf_counter() - timer_start
+    logger.info('Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...'.format(
+        DataSize(cl), fetch_elapsed))
+    analysis_start = time.perf_counter()
 
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ['XLS', 'XLSX', 'ODS', 'XLSM', 'XLSB']
@@ -442,7 +451,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                 'Invalid CSV file: {}'.format(e)
             )
 
-    # index csv for speed
+    # index csv for speed - count, stats and slice
+    # are all accelerated/multithreaded when an index is present
     try:
         subprocess.run(
             [QSV_BIN, 'index', tmp.name], capture_output=True)
@@ -460,8 +470,9 @@ def push_to_datastore(task_id, input, dry_run=False):
             'Cannot count records in CSV: {}'.format(e)
         )
     record_count = int(str(qsv_count.stdout).strip())
-    logger.info('{} records detected...'.format(record_count))
+    logger.info('{:,} records detected...'.format(record_count))
 
+    # run qsv stats to get data types and descriptive statistics
     headers = []
     types = []
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
@@ -484,7 +495,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # if rowcount > PREVIEW_ROWS create a preview using qsv slice
     if PREVIEW_ROWS > 0 and record_count > PREVIEW_ROWS:
         logger.info(
-            '{0} rows. Saving {1}-row preview in datastore.'.format(record_count, PREVIEW_ROWS))
+            'Preparing {:,}-row preview...'.format(PREVIEW_ROWS))
         qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         try:
             qsv_slice = subprocess.run(
@@ -535,14 +546,18 @@ def push_to_datastore(task_id, input, dry_run=False):
                 if type_override in list(_TYPE_MAPPING.values()):
                     h['type'] = type_override
 
-    logger.info('Determined headers and types: {headers}'.format(
+    logger.info('Determined headers and types: {headers}...'.format(
         headers=headers_dicts))
+
+    analysis_elapsed = time.perf_counter() - analysis_start
+    logger.info(
+        'Analyzed and prepped in {:,.2f} seconds.'.format(analysis_elapsed))
 
     if dry_run:
         return headers_dicts
 
     logger.info('Copying to database...')
-    timer_start = time.perf_counter()
+    copy_start = time.perf_counter()
 
     # first, let's create an empty datastore table w/ guessed types
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
@@ -597,18 +612,22 @@ def push_to_datastore(task_id, input, dry_run=False):
             resource_id=resource_id))
         raw_connection.close()
 
-    elapsed = time.perf_counter() - timer_start
-    logger.info('...copying done. Copied {n} entries to "{res_id}" in {elapsed} seconds.'.format(
-        n='{:,}'.format(record_count), res_id=resource_id, elapsed='{:,.2f}'.format(elapsed)))
+    copy_elapsed = time.perf_counter() - copy_start
+    logger.info('...copying done. Copied {n} entries to "{res_id}" in {copy_elapsed} seconds.'.format(
+        n='{:,}'.format(record_count), res_id=resource_id, copy_elapsed='{:,.2f}'.format(copy_elapsed)))
 
     resource['datastore_active'] = True
     update_resource(resource, api_key, ckan_url)
 
     # cleanup temporary files
     if os.path.exists(tmp.name + ".idx"):
-        os.remove(tmp.name + ".idx")        
+        os.remove(tmp.name + ".idx")
     tmp.close()
     if 'qsv_slice_csv' in globals():
         qsv_slice_csv.close()
     if 'qsv_excel_csv' in globals():
         qsv_excel_csv.close()
+
+    total_elapsed = time.perf_counter() - timer_start
+    logger.info(
+        'Datapusher+ job done. Total elapsed time: {:,.2f} seconds.'.format(total_elapsed))
