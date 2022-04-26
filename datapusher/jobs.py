@@ -363,7 +363,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         cl = response.headers.get('content-length')
         try:
-            if cl and int(cl) > MAX_CONTENT_LENGTH:
+            if cl and int(cl) > MAX_CONTENT_LENGTH and not PREVIEW_ROWS:
                 raise util.JobError(
                     'Resource too large to download: {cl} > max ({max_cl}).'
                     .format(cl=cl, max_cl=MAX_CONTENT_LENGTH))
@@ -375,7 +375,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         m = hashlib.md5()
         for chunk in response.iter_content(CHUNK_SIZE):
             length += len(chunk)
-            if length > MAX_CONTENT_LENGTH:
+            if length > MAX_CONTENT_LENGTH and not PREVIEW_ROWS:
                 raise util.JobError(
                     'Resource too large to process: {cl} > max ({max_cl}).'
                     .format(cl=length, max_cl=MAX_CONTENT_LENGTH))
