@@ -1,17 +1,15 @@
-[![Tests](https://github.com/ckan/datapusher/actions/workflows/test.yml/badge.svg)](https://github.com/ckan/datapusher/actions/workflows/test.yml)
-[![Latest Version](https://img.shields.io/pypi/v/datapusher.svg)](https://pypi.python.org/pypi/datapusher/)
-[![Downloads](https://img.shields.io/pypi/dm/datapusher.svg)](https://pypi.python.org/pypi/datapusher/)
-[![Supported Python versions](https://img.shields.io/pypi/pyversions/datapusher.svg)](https://pypi.python.org/pypi/datapusher/)
-[![License](https://img.shields.io/badge/license-GPL-blue.svg)](https://pypi.python.org/pypi/datapusher/)
 
 [CKAN Service Provider]: https://github.com/ckan/ckan-service-provider
 [Messytables]: https://github.com/okfn/messytables
+[qsv]: https://github.com/jqnatividad/qsv
 
 
 # DataPusher+
 
 DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of 
 [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
+
+Datapusher+ is built using [CKAN Service Provider][], with [Messytables] replaced by [qsv].
 
 [TNRIS](https://tnris.org)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
 of Datapusher+, specifically, to support a [Resource-first upload workflow](#Resource-first-Upload-Workflow).
@@ -20,9 +18,8 @@ It features:
 
 * **"Bullet-proof", ultra-fast data type inferencing with qsv**
 
-  Unlike messytables which scans only the the first few rows to guess the type of
-  a column, [qsv](https://github.com/jqnatividad/qsv) scans the entire table 
-  so its data type inferences are guaranteed.
+  Unlike [Messytables][] which scans only the the first few rows to guess the type of
+  a column, [qsv][] scans the entire table so its data type inferences are guaranteed.
   
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
   only inferring data types, but some additional descriptive statistics as well. For example,
