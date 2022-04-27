@@ -422,7 +422,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     format = resource.get('format').upper()
     if format in spreadsheet_extensions:
         # if so, export it as a csv file
-        logger.info('Converting {} file to CSV...'.format(format))
+        logger.info('Converting {} sheet {} to CSV...'.format(format, DEFAULT_EXCEL_SHEET))
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove/delete it
         # and create a hardlink to the file we got from CKAN
