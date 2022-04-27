@@ -174,6 +174,9 @@ Supervisor to keep the process up.
      sudo /usr/lib/ckan/datapusher-plus/bin/pip install -r requirements.txt
      sudo /usr/lib/ckan/datapusher-plus/bin/python setup.py develop
 
+     # Initialize the database
+     sudo /usr/lib/ckan/datapusher-plus/bin/datapusher_initdb /usr/lib/ckan/datapusher-plus/src/datapusher/deployment/datapusher_settings.py
+
      # Create a user to run the web service (if necessary)
      sudo addgroup www-data
      sudo adduser -G www-data www-data
@@ -183,7 +186,7 @@ Supervisor to keep the process up.
 
 At this point you can run DataPusher-plus with the following command:
 
-    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /usr/lib/ckan/datapusher-plus/src/datapusher-plus/deployment/datapusher-uwsgi.ini
+    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /usr/lib/ckan/datapusher-plus/src/datapusher/deployment/datapusher-uwsgi.ini
 
 
 *Note*: If you are installing DataPusher-plus on a different location than the default
