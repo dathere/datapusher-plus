@@ -152,7 +152,7 @@ To run the tests:
 ## Production deployment
 
 
-Thes instructions assume you already have CKAN installed on this server in the default
+These instructions assume you already have CKAN installed on this server in the default
 location described in the CKAN install documentation
 (`/usr/lib/ckan/default`).  If this is correct you should be able to run the
 following commands directly, if not you will need to adapt the previous path to
@@ -248,7 +248,7 @@ Here's a summary of the options available.
 | QSV_BIN | /usr/local/bin/qsvlite | The location of the qsv binary to use |
 | PREVIEW_ROWS | 1000 | The number of rows to insert to the data store. Set to 0 to insert all rows |
 | DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
-| WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to specify use a new role with SUPERUSER privileges, |
+| WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to specify a new role with SUPERUSER privileges, |
 
 > NOTE: To do native PostgreSQL native operations like TRUNCATE, VACUUM and COPY, a new postgres role on the datastore_default database
 needs to be created with SUPERUSER privileges.
