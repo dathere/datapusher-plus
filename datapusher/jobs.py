@@ -492,22 +492,6 @@ def push_to_datastore(task_id, input, dry_run=False):
             headers.append(rows[0])
             types.append(rows[1])
 
-    # if rowcount > PREVIEW_ROWS create a preview using qsv slice
-    if PREVIEW_ROWS > 0 and record_count > PREVIEW_ROWS:
-        logger.info(
-            'Preparing {:,}-row preview...'.format(PREVIEW_ROWS))
-        qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
-        try:
-            qsv_slice = subprocess.run(
-                [QSV_BIN, 'slice', '--len', str(PREVIEW_ROWS), tmp.name, '--output', qsv_slice_csv.name], check=True)
-        except subprocess.CalledProcessError as e:
-            tmp.close()
-            qsv_slice_csv.close()
-            raise util.JobError(
-                'Cannot create a preview slice: {}'.format(e)
-            )
-        tmp = qsv_slice_csv
-
     existing = datastore_resource_exists(resource_id, api_key, ckan_url)
     existing_info = None
     if existing:
@@ -548,6 +532,22 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     logger.info('Determined headers and types: {headers}...'.format(
         headers=headers_dicts))
+
+    # if rowcount > PREVIEW_ROWS create a preview using qsv slice
+    if PREVIEW_ROWS > 0 and record_count > PREVIEW_ROWS:
+        logger.info(
+            'Preparing {:,}-row preview...'.format(PREVIEW_ROWS))
+        qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+        try:
+            qsv_slice = subprocess.run(
+                [QSV_BIN, 'slice', '--len', str(PREVIEW_ROWS), tmp.name, '--output', qsv_slice_csv.name], check=True)
+        except subprocess.CalledProcessError as e:
+            tmp.close()
+            qsv_slice_csv.close()
+            raise util.JobError(
+                'Cannot create a preview slice: {}'.format(e)
+            )
+        tmp = qsv_slice_csv        
 
     analysis_elapsed = time.perf_counter() - analysis_start
     logger.info(
