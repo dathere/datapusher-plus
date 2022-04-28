@@ -1,7 +1,0 @@
-argparse
-ckanserviceprovider==1.0.0
-html5lib==1.0.1
-certifi
-requests[security]==2.27.1
-psycopg2-binary
-datasize

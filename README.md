@@ -1,4 +1,3 @@
-
 [CKAN Service Provider]: https://github.com/ckan/ckan-service-provider
 [Messytables]: https://github.com/okfn/messytables
 [qsv]: https://github.com/jqnatividad/qsv
@@ -6,7 +5,7 @@
 
 # DataPusher+
 
-DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of 
+DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
 [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
 
 Datapusher+ is built using [CKAN Service Provider][], with [Messytables] replaced by [qsv].
@@ -20,13 +19,13 @@ It features:
 
   Unlike [Messytables][] which scans only the the first few rows to guess the type of
   a column, [qsv][] scans the entire table so its data type inferences are guaranteed.
-  
+
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
   only inferring data types, but some additional descriptive statistics as well. For example,
   [scanning a 2.7 million row, 124MB CSV file takes 2 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour).
 
-  It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded, 
-  and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning) 
+  It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded,
+  and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning)
   especially designed for data-wrangling.
 
 * **Exponentially faster loading speed**
@@ -36,13 +35,13 @@ It features:
 
   But unlike xloader, we load everything using the proper data types and not as text, so there's
   no need to reload the data again after adjusting the Data Dictionary, as you would with xloader.
-  
+
 * **Production-ready Robustness**
-  
-  In production, the number one source of support issues is Datapusher - primarily, because of 
-  data quality issues and Datapusher's inability to correctly infer data types, gracefully handle 
+
+  In production, the number one source of support issues is Datapusher - primarily, because of
+  data quality issues and Datapusher's inability to correctly infer data types, gracefully handle
   errors, and provide the Data Publisher actionable information to correct the data.
-  
+
   Datapusher+'s design directly addresses all these issues.
 
 * **More informative datastore loading messages**
@@ -53,11 +52,11 @@ It features:
 * **Extended data-wrangling with qsv**
 
   Apart from bullet-proof data type inferences, qsv is leveraged by Datapusher+ to convert XLS/ODS files;
-  count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180); 
+  count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180);
   and create a preview subset in this initial version.
 
   Future versions of Datapusher+ will further leverage qsv's 70+ commands to do additional
-  data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/discussions/4). 
+  data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/discussions/4).
   Ideas, suggestions and your feedback are most welcome!
 
 
@@ -67,20 +66,20 @@ In traditional CKAN, the dataset package upload workflow is as follows:
 
 1. Enter package metadata
 2. Upload resource/s
-3. Check if the datapusher uploaded the dataset correctly. 
-   - With the Datapusher,this make take a while, and when it fails, it doesn't really give you 
+3. Check if the datapusher uploaded the dataset correctly.
+   - With the Datapusher,this make take a while, and when it fails, it doesn't really give you
      actionable information on why it failed.
    - With xloader, its 10x faster. But then, that speed comes at the cost of all columns defined as text,
      and the Data Publisher will need to manually change the data types in the Data Dictionary and
      reload the data again.
 
 In [TNRIS/TWDB's extensive user research](https://internetofwater.org/blog/building-the-texas-water-data-hub-from-the-ground-up/),
-one of the key usability gaps they found with CKAN is this workflow. Why can't the data publisher 
-upload the primary resource first, before entering the metadata? And more importantly, why can't some of the metadata 
+one of the key usability gaps they found with CKAN is this workflow. Why can't the data publisher
+upload the primary resource first, before entering the metadata? And more importantly, why can't some of the metadata
 be automatically inferred and populated based on the attributes of the dataset?
 
-This is why speed is qsv's speed is critical for a Resource-first upload workflow. By the time the data publisher 
-uploads the resource and starts populating the rest of the form a few seconds later, a lot of inferred metadata 
+This is why qsv's speed is critical for a Resource-first upload workflow. By the time the data publisher
+uploads the resource and starts populating the rest of the form a few seconds later, a lot of inferred metadata
 (Data Dictionary for this initial version) should be available for pre-populating the rest of the form.
 
 See this [discussion](https://github.com/ckan/ckan/discussions/6689) and this [issue](https://github.com/ckan/ideas/issues/150)
@@ -107,16 +106,14 @@ Get the code::
 
 Install the dependencies::
 
-    pip install wheel
-    pip install -r requirements.txt
     pip install -r requirements-dev.txt
     pip install -e .
 
 > NOTE: run `python setup.py bdist_wheel` should you get errors while running `pip install` and run the commands again.
 
-Install qsv::   
-[Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy 
-it to the appropriate directory, e.g. for Linux: 
+Install qsv::
+[Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
+it to the appropriate directory, e.g. for Linux:
 
     wget https://github.com/jqnatividad/qsv/releases/download/0.42.2/qsv-0.42.2-x86_64-unknown-linux-gnu.zip
     unzip qsv-0.42.2-x86_64-unknown-linux-gnu.zip
@@ -124,26 +121,24 @@ it to the appropriate directory, e.g. for Linux:
     sudo mv qsvlite /usr/local/bin
 
 Alternatively, if you want to install from source, follow
-the instructions at https://github.com/jqnatividad/qsv#installation.    
+the instructions at https://github.com/jqnatividad/qsv#installation.
 
-> NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run 
+> NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
 `sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
-   
 
-Configure datapusher_settings.py
 
-    nano deployment/datapusher_settings.py
+Copy `datapusher/settings.py` to a new file like `settings_local.py` and adjust.
+
+    cp datapusher/settings.py settings_local.py
+    nano settings_local.py
 
 Run the DataPusher::
 
-    python datapusher/main.py deployment/datapusher_settings.py
+    python datapusher/main.py settings_local.py
 
 By default DataPusher should be running at the following port:
 
     http://localhost:8800/
-
-If you need to change the host or port, copy `deployment/datapusher_settings.py` to
-`deployment/datapusher_local_settings.py` and modify the file to suit your needs. Also if running a production setup, make sure that the host and port matcht the `http` settings in the uWSGI configuration.
 
 To run the tests:
 
@@ -152,54 +147,47 @@ To run the tests:
 ## Production deployment
 
 
-These instructions assume you already have CKAN installed on this server in the default
-location described in the CKAN install documentation
+These instructions assume you already have CKAN installed on this server in the
+default location described in the CKAN install documentation
 (`/usr/lib/ckan/default`).  If this is correct you should be able to run the
 following commands directly, if not you will need to adapt the previous path to
 your needs.
 
-These instructions set up the DataPusher web service on [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) running on port 8800, but can be easily adapted to other WSGI servers like Gunicorn. You'll
-probably need to set up Nginx as a reverse proxy in front of it and something like
-Supervisor to keep the process up.
+These instructions set up the DataPusher web service on
+[uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) running on port 8800, but
+can be easily adapted to other WSGI servers like Gunicorn. You'll probably need
+to set up Nginx as a reverse proxy in front of it and something like Supervisor
+to keep the process up.
 
 
-     # Install requirements for the DataPusher
-     sudo apt install python3-venv python3-dev build-essential
-     sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev git libffi-dev
+    # Install requirements for the DataPusher
+    sudo apt install python3-venv python3-dev build-essential
+    sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev git libffi-dev
 
-     # Create a virtualenv for datapusher
-     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
+    # Create a virtualenv for datapusher
+    sudo python3 -m venv /usr/lib/ckan/datapusher-plus
 
-     # Create a source directory and switch to it
-     sudo mkdir /usr/lib/ckan/datapusher-plus/src
-     cd /usr/lib/ckan/datapusher-plus/src
+    # Install DataPusher-plus, uwsgi and psycopg2 for production
+    sudo /usr/lib/ckan/datapusher-plus/bin/pip install datapusher-plus uwsgi psycopg2-binary
 
-     # Clone the source (you should target the latest tagged version)
-     sudo git clone https://github.com/datHere/datapusher-plus.git
+    # generate a settings file and tune it, as well as a uwsgi ini file
+    sudo mkdir -p /etc/ckan/datapusher
+    sudo curl https://github.com/dathere/datapusher-plus/blob/master/datapusher/settings.py -o /etc/ckan/datapusher/settings.py
+    sudo curl https://github.com/dathere/datapusher-plus/blob/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher/uwsgi.ini
 
-     # Install DataPusher-plus and its requirements
-     cd datapusher-plus
-     sudo /usr/lib/ckan/datapusher-plus/bin/pip install -r requirements.txt
-     sudo /usr/lib/ckan/datapusher-plus/bin/python setup.py develop
+    # Initialize the database
+    /usr/lib/ckan/datapusher-plus/bin/datapusher_initdb /etc/ckan/datapusher/settings.py
 
-     # Initialize the database
-     sudo /usr/lib/ckan/datapusher-plus/bin/datapusher_initdb /usr/lib/ckan/datapusher-plus/src/datapusher/deployment/datapusher_settings.py
-
-     # Create a user to run the web service (if necessary)
-     sudo addgroup www-data
-     sudo adduser -G www-data www-data
-
-     # Install uWSGI
-     sudo /usr/lib/ckan/datapusher-plus/bin/pip install uwsgi
+    # Create a user to run the web service (if necessary)
+    sudo addgroup www-data
+    sudo adduser -G www-data www-data
 
 At this point you can run DataPusher-plus with the following command:
 
-    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /usr/lib/ckan/datapusher-plus/src/datapusher/deployment/datapusher-uwsgi.ini
+    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /etc/ckan/datapusher/uwsgi.ini
 
-
-*Note*: If you are installing DataPusher-plus on a different location than the default
-one you need to adapt the relevant paths in the `datapusher-uwsgi.ini` to the ones you are using. Also you might need to change the `uid` and `guid` settings when using a different user.
-
+You might need to change the `uid` and `guid` settings when using a different
+user.
 
 ### High Availability Setup
 
@@ -260,7 +248,10 @@ CREATE ROLE datapusher LOGIN SUPERUSER PASSWORD 'thepassword';
 quit
 ```
 
-Most of the configuration options above can be also provided as environment variables prepending the name with `DATAPUSHER_`, eg `DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. In the specific case of `DATAPUSHER_STDERR` the possible values are `1` and `0`.
+Most of the configuration options above can be also provided as environment
+variables prepending the name with `DATAPUSHER_`, eg
+`DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. For variables with
+boolean values you must use `1` or `0`.
 
 
 By default, DataPusher uses SQLite as the database backend for jobs information. This is fine for local development and sites with low activity, but for sites that need more performance, Postgres should be used as the backend for the jobs database (eg `SQLALCHEMY_DATABASE_URI=postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs`. See also [High Availability Setup](#high-availability-setup). If SQLite is used, its probably a good idea to store the database in a location other than `/tmp`. This will prevent the database being dropped, causing out of sync errors in the CKAN side. A good place to store it is the CKAN storage folder (if DataPusher is installed in the same server), generally in `/var/lib/ckan/`.
