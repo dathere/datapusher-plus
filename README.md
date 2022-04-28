@@ -106,8 +106,6 @@ Get the code::
 
 Install the dependencies::
 
-    pip install wheel
-    pip install -r requirements.txt
     pip install -r requirements-dev.txt
     pip install -e .
 
@@ -128,20 +126,19 @@ the instructions at https://github.com/jqnatividad/qsv#installation.
 > NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
 `sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
 
-Configure datapusher_settings.py
 
-    nano deployment/datapusher_settings.py
+Copy `datapusher/settings.py` to a new file like `settings_local.py` and adjust.
+
+    cp datapusher/settings.py settings_local.py
+    nano settings_local.py
 
 Run the DataPusher::
 
-    python datapusher/main.py deployment/datapusher_settings.py
+    python datapusher/main.py settings_local.py
 
 By default DataPusher should be running at the following port:
 
     http://localhost:8800/
-
-If you need to change the host or port, copy `deployment/datapusher_settings.py` to
-`deployment/datapusher_local_settings.py` and modify the file to suit your needs. Also if running a production setup, make sure that the host and port matcht the `http` settings in the uWSGI configuration.
 
 To run the tests:
 
@@ -150,54 +147,47 @@ To run the tests:
 ## Production deployment
 
 
-These instructions assume you already have CKAN installed on this server in the default
-location described in the CKAN install documentation
+These instructions assume you already have CKAN installed on this server in the
+default location described in the CKAN install documentation
 (`/usr/lib/ckan/default`).  If this is correct you should be able to run the
 following commands directly, if not you will need to adapt the previous path to
 your needs.
 
-These instructions set up the DataPusher web service on [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) running on port 8800, but can be easily adapted to other WSGI servers like Gunicorn. You'll
-probably need to set up Nginx as a reverse proxy in front of it and something like
-Supervisor to keep the process up.
+These instructions set up the DataPusher web service on
+[uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) running on port 8800, but
+can be easily adapted to other WSGI servers like Gunicorn. You'll probably need
+to set up Nginx as a reverse proxy in front of it and something like Supervisor
+to keep the process up.
 
 
-     # Install requirements for the DataPusher
-     sudo apt install python3-venv python3-dev build-essential
-     sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev git libffi-dev
+    # Install requirements for the DataPusher
+    sudo apt install python3-venv python3-dev build-essential
+    sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev git libffi-dev
 
-     # Create a virtualenv for datapusher
-     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
+    # Create a virtualenv for datapusher
+    sudo python3 -m venv /usr/lib/ckan/datapusher-plus
 
-     # Create a source directory and switch to it
-     sudo mkdir /usr/lib/ckan/datapusher-plus/src
-     cd /usr/lib/ckan/datapusher-plus/src
+    # Install DataPusher-plus, uwsgi and psycopg2 for production
+    sudo /usr/lib/ckan/datapusher-plus/bin/pip install datapusher-plus uwsgi psycopg2-binary
 
-     # Clone the source (you should target the latest tagged version)
-     sudo git clone https://github.com/datHere/datapusher-plus.git
+    # generate a settings file and tune it, as well as a uwsgi ini file
+    sudo mkdir -p /etc/ckan/datapusher
+    sudo curl https://github.com/dathere/datapusher-plus/blob/master/datapusher/settings.py -o /etc/ckan/datapusher/settings.py
+    sudo curl https://github.com/dathere/datapusher-plus/blob/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher/uwsgi.ini
 
-     # Install DataPusher-plus and its requirements
-     cd datapusher-plus
-     sudo /usr/lib/ckan/datapusher-plus/bin/pip install -r requirements.txt
-     sudo /usr/lib/ckan/datapusher-plus/bin/python setup.py develop
+    # Initialize the database
+    /usr/lib/ckan/datapusher-plus/bin/datapusher_initdb /etc/ckan/datapusher/settings.py
 
-     # Initialize the database
-     sudo /usr/lib/ckan/datapusher-plus/bin/datapusher_initdb /usr/lib/ckan/datapusher-plus/src/datapusher/deployment/datapusher_settings.py
-
-     # Create a user to run the web service (if necessary)
-     sudo addgroup www-data
-     sudo adduser -G www-data www-data
-
-     # Install uWSGI
-     sudo /usr/lib/ckan/datapusher-plus/bin/pip install uwsgi
+    # Create a user to run the web service (if necessary)
+    sudo addgroup www-data
+    sudo adduser -G www-data www-data
 
 At this point you can run DataPusher-plus with the following command:
 
-    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /usr/lib/ckan/datapusher-plus/src/datapusher/deployment/datapusher-uwsgi.ini
+    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /etc/ckan/datapusher/uwsgi.ini
 
-
-*Note*: If you are installing DataPusher-plus on a different location than the default
-one you need to adapt the relevant paths in the `datapusher-uwsgi.ini` to the ones you are using. Also you might need to change the `uid` and `guid` settings when using a different user.
-
+You might need to change the `uid` and `guid` settings when using a different
+user.
 
 ### High Availability Setup
 
@@ -258,7 +248,10 @@ CREATE ROLE datapusher LOGIN SUPERUSER PASSWORD 'thepassword';
 quit
 ```
 
-Most of the configuration options above can be also provided as environment variables prepending the name with `DATAPUSHER_`, eg `DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. In the specific case of `DATAPUSHER_STDERR` the possible values are `1` and `0`.
+Most of the configuration options above can be also provided as environment
+variables prepending the name with `DATAPUSHER_`, eg
+`DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. For variables with
+boolean values you must use `1` or `0`.
 
 
 By default, DataPusher uses SQLite as the database backend for jobs information. This is fine for local development and sites with low activity, but for sites that need more performance, Postgres should be used as the backend for the jobs database (eg `SQLALCHEMY_DATABASE_URI=postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs`. See also [High Availability Setup](#high-availability-setup). If SQLite is used, its probably a good idea to store the database in a location other than `/tmp`. This will prevent the database being dropped, causing out of sync errors in the CKAN side. A good place to store it is the CKAN storage folder (if DataPusher is installed in the same server), generally in `/var/lib/ckan/`.
