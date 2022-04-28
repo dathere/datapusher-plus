@@ -1,4 +1,3 @@
-
 [CKAN Service Provider]: https://github.com/ckan/ckan-service-provider
 [Messytables]: https://github.com/okfn/messytables
 [qsv]: https://github.com/jqnatividad/qsv
@@ -6,7 +5,7 @@
 
 # DataPusher+
 
-DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of 
+DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
 [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
 
 Datapusher+ is built using [CKAN Service Provider][], with [Messytables] replaced by [qsv].
@@ -20,13 +19,13 @@ It features:
 
   Unlike [Messytables][] which scans only the the first few rows to guess the type of
   a column, [qsv][] scans the entire table so its data type inferences are guaranteed.
-  
+
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
   only inferring data types, but some additional descriptive statistics as well. For example,
   [scanning a 2.7 million row, 124MB CSV file takes 2 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour).
 
-  It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded, 
-  and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning) 
+  It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded,
+  and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning)
   especially designed for data-wrangling.
 
 * **Exponentially faster loading speed**
@@ -36,13 +35,13 @@ It features:
 
   But unlike xloader, we load everything using the proper data types and not as text, so there's
   no need to reload the data again after adjusting the Data Dictionary, as you would with xloader.
-  
+
 * **Production-ready Robustness**
-  
-  In production, the number one source of support issues is Datapusher - primarily, because of 
-  data quality issues and Datapusher's inability to correctly infer data types, gracefully handle 
+
+  In production, the number one source of support issues is Datapusher - primarily, because of
+  data quality issues and Datapusher's inability to correctly infer data types, gracefully handle
   errors, and provide the Data Publisher actionable information to correct the data.
-  
+
   Datapusher+'s design directly addresses all these issues.
 
 * **More informative datastore loading messages**
@@ -53,11 +52,11 @@ It features:
 * **Extended data-wrangling with qsv**
 
   Apart from bullet-proof data type inferences, qsv is leveraged by Datapusher+ to convert XLS/ODS files;
-  count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180); 
+  count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180);
   and create a preview subset in this initial version.
 
   Future versions of Datapusher+ will further leverage qsv's 70+ commands to do additional
-  data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/discussions/4). 
+  data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/discussions/4).
   Ideas, suggestions and your feedback are most welcome!
 
 
@@ -67,20 +66,20 @@ In traditional CKAN, the dataset package upload workflow is as follows:
 
 1. Enter package metadata
 2. Upload resource/s
-3. Check if the datapusher uploaded the dataset correctly. 
-   - With the Datapusher,this make take a while, and when it fails, it doesn't really give you 
+3. Check if the datapusher uploaded the dataset correctly.
+   - With the Datapusher,this make take a while, and when it fails, it doesn't really give you
      actionable information on why it failed.
    - With xloader, its 10x faster. But then, that speed comes at the cost of all columns defined as text,
      and the Data Publisher will need to manually change the data types in the Data Dictionary and
      reload the data again.
 
 In [TNRIS/TWDB's extensive user research](https://internetofwater.org/blog/building-the-texas-water-data-hub-from-the-ground-up/),
-one of the key usability gaps they found with CKAN is this workflow. Why can't the data publisher 
-upload the primary resource first, before entering the metadata? And more importantly, why can't some of the metadata 
+one of the key usability gaps they found with CKAN is this workflow. Why can't the data publisher
+upload the primary resource first, before entering the metadata? And more importantly, why can't some of the metadata
 be automatically inferred and populated based on the attributes of the dataset?
 
-This is why speed is qsv's speed is critical for a Resource-first upload workflow. By the time the data publisher 
-uploads the resource and starts populating the rest of the form a few seconds later, a lot of inferred metadata 
+This is why qsv's speed is critical for a Resource-first upload workflow. By the time the data publisher
+uploads the resource and starts populating the rest of the form a few seconds later, a lot of inferred metadata
 (Data Dictionary for this initial version) should be available for pre-populating the rest of the form.
 
 See this [discussion](https://github.com/ckan/ckan/discussions/6689) and this [issue](https://github.com/ckan/ideas/issues/150)
@@ -114,9 +113,9 @@ Install the dependencies::
 
 > NOTE: run `python setup.py bdist_wheel` should you get errors while running `pip install` and run the commands again.
 
-Install qsv::   
-[Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy 
-it to the appropriate directory, e.g. for Linux: 
+Install qsv::
+[Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
+it to the appropriate directory, e.g. for Linux:
 
     wget https://github.com/jqnatividad/qsv/releases/download/0.42.2/qsv-0.42.2-x86_64-unknown-linux-gnu.zip
     unzip qsv-0.42.2-x86_64-unknown-linux-gnu.zip
@@ -124,11 +123,10 @@ it to the appropriate directory, e.g. for Linux:
     sudo mv qsvlite /usr/local/bin
 
 Alternatively, if you want to install from source, follow
-the instructions at https://github.com/jqnatividad/qsv#installation.    
+the instructions at https://github.com/jqnatividad/qsv#installation.
 
-> NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run 
+> NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
 `sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
-   
 
 Configure datapusher_settings.py
 
