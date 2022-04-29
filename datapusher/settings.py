@@ -19,7 +19,7 @@ SQLALCHEMY_DATABASE_URI = os.environ.get('DATAPUSHER_SQLALCHEMY_DATABASE_URI', '
 
 # PostgreSQL COPY settings
 # set this to the same value as your ckan.datastore.write_url
-WRITE_ENGINE_URL = os.environ.get('WRITE_ENGINE_URL', 'postgresql://datapusher:THEPASSWORD@localhost/datastore_default')
+WRITE_ENGINE_URL = os.environ.get('DATAPUSHER_WRITE_ENGINE_URL', 'postgresql://datapusher:THEPASSWORD@localhost/datastore_default')
 
 # qsv settings
 QSV_BIN = os.environ.get('DATAPUSHER_QSV_BIN', '/usr/local/bin/qsvlite')
