@@ -121,8 +121,8 @@ it to the appropriate directory, e.g. for Linux:
     sudo mv qsvlite /usr/local/bin
     sudo mv qsvdp /usr/local/bin
 
-Alternatively, if you want to install from source, follow
-the instructions at https://github.com/jqnatividad/qsv#installation. Note that when compiling from source,
+Alternatively, if you want to install qsv from source, follow
+the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
 you may want to look into the [Performance Tuning](https://github.com/jqnatividad/qsv#performance-tuning)
 section to squeeze even more performance from qsv.
 
