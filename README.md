@@ -2,9 +2,7 @@
 [Messytables]: https://github.com/okfn/messytables
 [qsv]: https://github.com/jqnatividad/qsv
 
-### DataPusher+
-[*Push it good, push it real good!*](https://www.youtube.com/watch?v=vCadcBR95oU)
-<hr>
+# DataPusher+
 
 DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
 [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
