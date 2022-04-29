@@ -15,10 +15,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install requirements (Python 2)
         if: ${{ matrix.python-version == '2.7' }}
-        run: pip install -r requirements-dev-py2.txt && pip install .
+        run: pip install -r requirements-dev-py2.txt
       - name: Install requirements (Python 3)
         if: ${{ matrix.python-version != '2.7' }}
-        run: pip install -r requirements-dev.txt && pip install .
+        run: pip install -r requirements-dev.txt
       - name: Run tests
         run: pytest --cov=datapusher --cov-append --cov-report=xml --disable-warnings tests
       - name: Upload coverage report to codecov
