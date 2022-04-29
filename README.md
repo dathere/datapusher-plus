@@ -40,7 +40,7 @@ It features:
 
   In production, the number one source of support issues is Datapusher - primarily, because of
   data quality issues and Datapusher's inability to correctly infer data types, gracefully handle
-  errors, and provide the Data Publisher actionable information to correct the data.
+  errors[^2], and provide the Data Publisher actionable information to correct the data.
 
   Datapusher+'s design directly addresses all these issues.
 
@@ -60,6 +60,10 @@ It features:
   Ideas, suggestions and your feedback are most welcome!
 
 [^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
+[^2]: Imagine you have a 1M row CSV, and the last row has an invalid value for a numeric column (e.g. "N/A" instead of a number). 
+      After spending hours pushing the data very slowly, legacy datapusher will abort on the last row and the ENTIRE job is invalid. 
+      Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what 
+      caused the job to fail! YIKES!!!!
 
 ## Resource-first Upload Workflow
 
@@ -298,4 +302,4 @@ This material is copyright (c) 2020 Open Knowledge Foundation and other contribu
 It is open and licensed under the GNU Affero General Public License (AGPL) v3.0
 whose full text may be found at:
 
-[http://www.fsf.org/licensing/licenses/agpl-3.0.html]()
+http://www.fsf.org/licensing/licenses/agpl-3.0.html
