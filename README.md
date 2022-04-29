@@ -127,7 +127,7 @@ you may want to look into the [Performance Tuning](https://github.com/jqnativida
 section to squeeze even more performance from qsv.
 
 
-> NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
+> NOTE: qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
 `sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
 
 
