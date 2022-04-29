@@ -161,8 +161,7 @@ to keep the process up.
 
 
     # Install requirements for the DataPusher
-    sudo apt install python3-venv python3-dev build-essential
-    sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev git libffi-dev
+    sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
 
     # Create a virtualenv for datapusher
     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
@@ -238,8 +237,9 @@ Here's a summary of the options available.
 | DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
 | WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to specify a new role with SUPERUSER privileges, |
 
-> NOTE: To do native PostgreSQL native operations like TRUNCATE, VACUUM and COPY, a new postgres role on the datastore_default database
-needs to be created with SUPERUSER privileges.
+> NOTE: To do native PostgreSQL operations like TRUNCATE, VACUUM and COPY, a new
+> postgres role on the datastore_default database
+> needs to be created with SUPERUSER privileges.
 
 ```
 su - postgres
