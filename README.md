@@ -18,7 +18,7 @@ It features:
 * **"Bullet-proof", ultra-fast data type inferencing with qsv**
 
   Unlike [Messytables][] which scans only the the first few rows to guess the type of
-  a column, [qsv][] scans the entire table so its data type inferences are guaranteed.
+  a column, [qsv][] scans the entire table so its data type inferences are guaranteed[^1].
 
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
   only inferring data types, but some additional descriptive statistics as well. For example,
@@ -59,6 +59,7 @@ It features:
   data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/discussions/4).
   Ideas, suggestions and your feedback are most welcome!
 
+[^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
 
 ## Resource-first Upload Workflow
 
