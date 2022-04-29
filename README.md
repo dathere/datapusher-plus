@@ -252,7 +252,7 @@ CREATE ROLE datapusher LOGIN SUPERUSER PASSWORD 'thepassword';
 quit
 ```
 
-Most of the configuration options above can be also provided as environment
+All of the configuration options above can be also provided as environment
 variables prepending the name with `DATAPUSHER_`, eg
 `DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. For variables with
 boolean values you must use `1` or `0`.
