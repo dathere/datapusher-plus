@@ -122,7 +122,10 @@ it to the appropriate directory, e.g. for Linux:
     sudo mv qsvdp /usr/local/bin
 
 Alternatively, if you want to install from source, follow
-the instructions at https://github.com/jqnatividad/qsv#installation.
+the instructions at https://github.com/jqnatividad/qsv#installation. Note that when compiling from source,
+you may want to look into the [Performance Tuning](https://github.com/jqnatividad/qsv#performance-tuning)
+section to squeeze even more performance from qsv.
+
 
 > NOTE: qsv is a general CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
 `sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
