@@ -34,7 +34,7 @@ else:
     locale.setlocale(locale.LC_ALL, '')
 
 MAX_CONTENT_LENGTH = web.app.config.get('MAX_CONTENT_LENGTH') or 10485760
-QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvlite'
+QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvdp'
 PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 10000
 DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
@@ -422,7 +422,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     format = resource.get('format').upper()
     if format in spreadsheet_extensions:
         # if so, export it as a csv file
-        logger.info('Converting {} sheet {} to CSV...'.format(format, DEFAULT_EXCEL_SHEET))
+        logger.info('Converting {} sheet {} to CSV...'.format(
+            format, DEFAULT_EXCEL_SHEET))
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove/delete it
         # and create a hardlink to the file we got from CKAN
@@ -442,14 +443,18 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_spreadsheet.close()
         tmp = qsv_excel_csv
     else:
-        # its a regular CSV. Check if its valid
+        # its a CSV/TSV? Check if its valid and
+        # transcode it to UTF-8 at the same time
+        qsv_input_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+        logger.info('Validating/Transcoding {}...'.format(format))
         try:
-            qsv_excel = subprocess.run(
-                [QSV_BIN, 'validate', tmp.name], check=True)
+            qsv_input = subprocess.run(
+                [QSV_BIN, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             raise util.JobError(
                 'Invalid CSV file: {}'.format(e)
             )
+        tmp = qsv_input_csv
 
     # index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
@@ -547,7 +552,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             raise util.JobError(
                 'Cannot create a preview slice: {}'.format(e)
             )
-        tmp = qsv_slice_csv        
+        tmp = qsv_slice_csv
 
     analysis_elapsed = time.perf_counter() - analysis_start
     logger.info(
@@ -627,6 +632,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_slice_csv.close()
     if 'qsv_excel_csv' in globals():
         qsv_excel_csv.close()
+    if 'qsv_input_csv' in globals():
+        qsv_input_csv.close()
 
     total_elapsed = time.perf_counter() - timer_start
     logger.info(
