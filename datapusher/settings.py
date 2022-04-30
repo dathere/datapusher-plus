@@ -23,7 +23,7 @@ WRITE_ENGINE_URL = os.environ.get('DATAPUSHER_WRITE_ENGINE_URL', 'postgresql://d
 
 # qsv settings
 QSV_BIN = os.environ.get('DATAPUSHER_QSV_BIN', '/usr/local/bin/qsvlite')
-QSV_AUTOINDEX = bool(int(os.environ.get('DATAPUSHER_QSV_AUTOINDEX', '1')))
+QSV_DEDUP = bool(int(os.environ.get('DATAPUSHER_QSV_DEDUP', '1')))
 PREVIEW_ROWS = int(os.environ.get('DATAPUSHER_PREVIEW_ROWS', '10000'))
 DEFAULT_EXCEL_SHEET = int(os.environ.get('DATAPUSHER_DEFAULT_EXCEL_SHEET', '0'))
 
