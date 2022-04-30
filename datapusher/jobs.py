@@ -34,7 +34,7 @@ else:
     locale.setlocale(locale.LC_ALL, '')
 
 MAX_CONTENT_LENGTH = web.app.config.get('MAX_CONTENT_LENGTH') or 10485760
-QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvlite'
+QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvdp'
 PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 10000
 DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
