@@ -478,8 +478,11 @@ def push_to_datastore(task_id, input, dry_run=False):
             raise util.JobError(
                 'Check for duplicates error: {}'.format(e)
             )
-        dupe_count = int(str(qsv_count.stderr).strip())
-        logger.info('{:,} duplicates detected...'.format(dupe_count))
+        dupe_count = int(str(qsv_dedup.stderr).strip())
+        if dupe_count > 0:
+            logger.info('{:,} duplicates found...'.format(dupe_count))
+        else:
+            logger.info('No duplicates found...')
 
     # index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
@@ -566,6 +569,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         headers=headers_dicts))
 
     # if rowcount > PREVIEW_ROWS create a preview using qsv slice
+    rows_to_copy = record_count
     if PREVIEW_ROWS > 0 and record_count > PREVIEW_ROWS:
         logger.info(
             'Preparing {:,}-row preview...'.format(PREVIEW_ROWS))
@@ -579,6 +583,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             raise util.JobError(
                 'Cannot create a preview slice: {}'.format(e)
             )
+        rows_to_copy = PREVIEW_ROWS
         tmp = qsv_slice_csv
 
     analysis_elapsed = time.perf_counter() - analysis_start
@@ -588,7 +593,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if dry_run:
         return headers_dicts
 
-    logger.info('Copying to database...')
+    logger.info('Copying {:,} rows to database...'.format(rows_to_copy))
     copy_start = time.perf_counter()
 
     # first, let's create an empty datastore table w/ guessed types
@@ -645,7 +650,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         raw_connection.close()
 
     copy_elapsed = time.perf_counter() - copy_start
-    logger.info('...copying done. Copied {n} entries to "{res_id}" in {copy_elapsed} seconds.'.format(
+    logger.info('...copying done. Copied {n} rows to "{res_id}" in {copy_elapsed} seconds.'.format(
         n='{:,}'.format(record_count), res_id=resource_id, copy_elapsed='{:,.2f}'.format(copy_elapsed)))
 
     resource['datastore_active'] = True
