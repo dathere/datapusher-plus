@@ -49,6 +49,11 @@ USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
 if USE_PROXY:
     DOWNLOAD_PROXY = web.app.config.get('DOWNLOAD_PROXY')
 
+if web.app.config.get('QSV_DEDUP') in ['False', 'FALSE', '0', False, 0]:
+    QSV_DEDUP = False
+else:
+    QSV_DEDUP = True
+
 if web.app.config.get('SSL_VERIFY') in ['False', 'FALSE', '0', False, 0]:
     SSL_VERIFY = False
 else:
@@ -437,6 +442,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_excel = subprocess.run(
                 [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET), '--output', qsv_excel_csv.name], check=True)
         except subprocess.CalledProcessError as e:
+            tmp.close()
+            qsv_excel_csv.close()
             raise util.JobError(
                 'Cannot export spreadsheet to CSV: {}'.format(e)
             )
@@ -451,10 +458,31 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_input = subprocess.run(
                 [QSV_BIN, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
+            tmp.close()
+            qsv_input_csv.close()
             raise util.JobError(
                 'Invalid CSV file: {}'.format(e)
             )
         tmp = qsv_input_csv
+
+    # do we need to dedup?
+    if QSV_DEDUP:
+        qsv_dedup_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+        logger.info('Checking for duplicate rows...')
+        try:
+            qsv_dedup = subprocess.run(
+                [QSV_BIN, 'dedup', tmp.name, '--output', qsv_dedup_csv.name], capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            tmp.close()
+            qsv_dedup_csv.close()
+            raise util.JobError(
+                'Check for duplicates error: {}'.format(e)
+            )
+        dupe_count = int(str(qsv_dedup.stderr).strip())
+        if dupe_count > 0:
+            logger.info('{:,} duplicates found...'.format(dupe_count))
+        else:
+            logger.info('No duplicates found...')
 
     # index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
@@ -462,6 +490,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         subprocess.run(
             [QSV_BIN, 'index', tmp.name], capture_output=True)
     except subprocess.CalledProcessError as e:
+        tmp.close()
         raise util.JobError(
             'Cannot index CSV: {}'.format(e)
         )
@@ -471,6 +500,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_count = subprocess.run(
             [QSV_BIN, 'count', tmp.name], capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
+        tmp.close()
         raise util.JobError(
             'Cannot count records in CSV: {}'.format(e)
         )
@@ -539,6 +569,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         headers=headers_dicts))
 
     # if rowcount > PREVIEW_ROWS create a preview using qsv slice
+    rows_to_copy = record_count
     if PREVIEW_ROWS > 0 and record_count > PREVIEW_ROWS:
         logger.info(
             'Preparing {:,}-row preview...'.format(PREVIEW_ROWS))
@@ -552,6 +583,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             raise util.JobError(
                 'Cannot create a preview slice: {}'.format(e)
             )
+        rows_to_copy = PREVIEW_ROWS
         tmp = qsv_slice_csv
 
     analysis_elapsed = time.perf_counter() - analysis_start
@@ -561,7 +593,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if dry_run:
         return headers_dicts
 
-    logger.info('Copying to database...')
+    logger.info('Copying {:,} rows to database...'.format(rows_to_copy))
     copy_start = time.perf_counter()
 
     # first, let's create an empty datastore table w/ guessed types
@@ -618,7 +650,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         raw_connection.close()
 
     copy_elapsed = time.perf_counter() - copy_start
-    logger.info('...copying done. Copied {n} entries to "{res_id}" in {copy_elapsed} seconds.'.format(
+    logger.info('...copying done. Copied {n} rows to "{res_id}" in {copy_elapsed} seconds.'.format(
         n='{:,}'.format(record_count), res_id=resource_id, copy_elapsed='{:,.2f}'.format(copy_elapsed)))
 
     resource['datastore_active'] = True
@@ -634,6 +666,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_excel_csv.close()
     if 'qsv_input_csv' in globals():
         qsv_input_csv.close()
+    if 'qsv_dedup_csv' in globals():
+        qsv_dedup_csv.close()
 
     total_elapsed = time.perf_counter() - timer_start
     logger.info(
