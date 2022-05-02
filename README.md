@@ -119,8 +119,8 @@ Install qsv::
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.44.0/qsv-0.44.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.44.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.45.2/qsv-0.45.2-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.45.2-x86_64-unknown-linux-gnu.zip
     sudo mv qsv /usr/local/bin
     sudo mv qsvlite /usr/local/bin
     sudo mv qsvdp /usr/local/bin
