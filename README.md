@@ -55,7 +55,7 @@ It features:
   and optionally create a preview subset in this initial version.
 
   Future versions of Datapusher+ will further leverage qsv's 70+ commands to do additional
-  data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/discussions/4).
+  data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/issues/5).
   Ideas, suggestions and your feedback are most welcome!
 
 [^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
