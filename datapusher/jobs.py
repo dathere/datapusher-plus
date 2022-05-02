@@ -702,7 +702,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info('Vacuum Analyzing table...')
         cur.execute('VACUUM ANALYZE \"{resource_id}\";'.format(
             resource_id=resource_id))
-        raw_connection.close()
 
     copy_elapsed = time.perf_counter() - copy_start
     logger.info('...copying done. Copied {n} rows to "{res_id}" in {copy_elapsed} seconds.'.format(
@@ -721,13 +720,18 @@ def push_to_datastore(task_id, input, dry_run=False):
         if owner_org:
             owner_org_name = owner_org.get('name')
         if resource_name and package_name and owner_org_name:
-            alias = f"{resource_name}-{package_name}-{owner_org_name}"
+            alias = f"{resource_name}-{package_name}-{owner_org_name}"[:60]
+            # check if the alias exist, if it does
+            # add a sequence suffix so the new alias can be created
+            cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
+                alias))
+            alias_count = cur.fetchone()[0]
+            if alias_count:
+                alias_sequence = alias_count + 1
+                alias = f'{alias}-{alias_sequence:03}'    
         else:
             alias = None
-
-        # TODO: check if the alias exist, if it does
-        # add a sequence suffix or the last few chars of 
-        # the resourceid until it can be created
+    raw_connection.close()
 
     # tell CKAN to calculate_record_count and set alias if set
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
