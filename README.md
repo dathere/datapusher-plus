@@ -21,7 +21,7 @@ It features:
 
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
   only inferring data types, but some additional descriptive statistics as well. For example,
-  [scanning a 2.7 million row, 124MB CSV file takes 0.16 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour).
+  [scanning a 2.7 million row, 124MB CSV file takes 0.16 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour)[^2].
 
   It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded,
   and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv#performance-tuning)
@@ -39,7 +39,7 @@ It features:
 
   In production, the number one source of support issues is Datapusher - primarily, because of
   data quality issues and Datapusher's inability to correctly infer data types, gracefully handle
-  errors[^2], and provide the Data Publisher actionable information to correct the data.
+  errors[^3], and provide the Data Publisher actionable information to correct the data.
 
   Datapusher+'s design directly addresses all these issues.
 
@@ -59,6 +59,8 @@ It features:
   Ideas, suggestions and your feedback are most welcome!
 
 [^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
+[^2]: It takes 0.16 seconds with an index to run `qsv stats` against the [qsv whirlwind tour sample file](https://raw.githubusercontent.com/wiki/jqnatividad/qsv/files/wcp.zip) on a Ryzen 4800H (16 logical cores) with 32 gb memory and a 1 TB SSD.
+Without an index, it takes 1.3 seconds.
 [^2]: Imagine you have a 1M row CSV, and the last row has an invalid value for a numeric column (e.g. "N/A" instead of a number). 
       After spending hours pushing the data very slowly, legacy datapusher will abort on the last row and the ENTIRE job is invalid. 
       Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what 
