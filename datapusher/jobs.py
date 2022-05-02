@@ -83,12 +83,15 @@ _TYPES = ['String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL']
 TYPE_MAPPING = web.app.config.get('TYPE_MAPPING', _TYPE_MAPPING)
 TYPES = web.app.config.get('TYPES', _TYPES)
 
-_DATEFIELD_NAMES = ['date', 'time']
+# if a field has any of these anywhere in their name, date inferencing
+# is turned on when scanning for data types, which is a relatively expensive op
+# if DATELIKE_FIELDNAMES is empty, date inferencing will always be on
+_DATELIKE_FIELDNAMES = ['date', 'time', 'open', 'close', 'due']
 
-DATEFIELD_NAME = web.app.config.get(
-    'DATEFIELD_NAMES', _DATEFIELD_NAMES)
+DATELIKE_FIELDNAMES = web.app.config.get(
+    'DATELIKE_FIELDNAMES', _DATELIKE_FIELDNAMES)
 
-DATEFIELD_NAME = [field.lower() for field in DATEFIELD_NAME]
+DATELIKE_FIELDNAMES = [field.lower() for field in DATELIKE_FIELDNAMES]
 
 DATASTORE_URLS = {
     'datastore_delete': '{ckan_url}/api/action/datastore_delete',
@@ -537,22 +540,21 @@ def push_to_datastore(task_id, input, dry_run=False):
     record_count = int(str(qsv_count.stdout).strip())
     logger.info('{:,} records detected...'.format(record_count))
 
-    # scan CSV headers for date-like field
-    try:
-        qsv_headers = subprocess.run(
-            [QSV_BIN, 'headers', tmp.name], capture_output=True, text=True)
-    except subprocess.CalledProcessError as e:
-        tmp.close()
-        raise util.JobError(
-            'Cannot scan CSV headers: {}'.format(e)
-        )
-    header_fields = str(qsv_headers.stdout).strip().lower()
-    if any(datefield_name in header_fields for datefield_name in DATEFIELD_NAME):
-        datefield_present = True
-        print('Dates found!\n')
-    else:
-        datefield_present = False
-        print('NO DATES!\n')
+    # if DATELIKE_FIELDNAMES is not empty, scan CSV headers for date-like field,
+    # otherwise, always --infer-dates when scanning for types
+    inferdates_flag = True
+    if DATELIKE_FIELDNAMES:
+        try:
+            qsv_headers = subprocess.run(
+                [QSV_BIN, 'headers', tmp.name], capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            tmp.close()
+            raise util.JobError(
+                'Cannot scan CSV headers: {}'.format(e)
+            )
+        header_fields = str(qsv_headers.stdout).strip().lower()
+        if not any(datelike_fieldname in header_fields for datelike_fieldname in DATELIKE_FIELDNAMES):
+            inferdates_flag = False
 
     # run qsv stats to get data types and descriptive statistics
     headers = []
@@ -560,8 +562,9 @@ def push_to_datastore(task_id, input, dry_run=False):
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
     qsv_stats_cmd = [QSV_BIN, 'stats', tmp.name,
                      '--output', qsv_stats_csv.name]
-    if datefield_present:
+    if inferdates_flag:
         qsv_stats_cmd.append('--infer-dates')
+        logger.info('Date-like fields detected. Date inferencing enabled...')
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
