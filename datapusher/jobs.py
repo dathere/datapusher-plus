@@ -54,6 +54,11 @@ if web.app.config.get('QSV_DEDUP') in ['False', 'FALSE', '0', False, 0]:
 else:
     QSV_DEDUP = True
 
+if web.app.config.get('AUTO_ALIAS') in ['False', 'FALSE', '0', False, 0]:
+    AUTO_ALIAS = False
+else:
+    AUTO_ALIAS = True
+
 if web.app.config.get('SSL_VERIFY') in ['False', 'FALSE', '0', False, 0]:
     SSL_VERIFY = False
 else:
@@ -119,7 +124,7 @@ class HTTPError(util.JobError):
 
         """
         if self.response and len(self.response) > 200:
-            response = self.response[:200] + str.encode('...')
+            response = str.encode(self.response[:200] + '...')
         else:
             response = self.response
         return {
@@ -236,7 +241,7 @@ def datastore_resource_exists(resource_id, api_key, ckan_url):
 
 
 def send_resource_to_datastore(resource, headers, api_key, ckan_url,
-                               records, is_it_the_last_chunk, ):
+                               records, aliases, calculate_record_count, ):
     """
     Stores records in CKAN datastore
     """
@@ -244,7 +249,8 @@ def send_resource_to_datastore(resource, headers, api_key, ckan_url,
                'fields': headers,
                'force': True,
                'records': records,
-               'calculate_record_count': is_it_the_last_chunk}
+               'aliases': aliases,
+               'calculate_record_count': calculate_record_count}
 
     url = get_url('datastore_create', ckan_url)
     r = requests.post(url,
@@ -283,6 +289,22 @@ def get_resource(resource_id, ckan_url, api_key):
     r = requests.post(url,
                       verify=SSL_VERIFY,
                       data=json.dumps({'id': resource_id}),
+                      headers={'Content-Type': 'application/json',
+                               'Authorization': api_key}
+                      )
+    check_response(r, url, 'CKAN')
+
+    return r.json()['result']
+
+
+def get_package(package_id, ckan_url, api_key):
+    """
+    Gets available information about a package from CKAN
+    """
+    url = get_url('package_show', ckan_url)
+    r = requests.post(url,
+                      verify=SSL_VERIFY,
+                      data=json.dumps({'id': package_id}),
                       headers={'Content-Type': 'application/json',
                                'Authorization': api_key}
                       )
@@ -598,7 +620,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # first, let's create an empty datastore table w/ guessed types
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
-                               records=None, is_it_the_last_chunk=False)
+                               records=None, aliases=None, calculate_record_count=False)
 
     # Guess the delimiter used in the file for copy
     with open(tmp.name, 'rb') as f:
@@ -655,6 +677,26 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource['datastore_active'] = True
     update_resource(resource, api_key, ckan_url)
+
+    if AUTO_ALIAS:
+        # get package info, so we can construct the alias
+        package = get_package(resource['package_id'], ckan_url, api_key)
+
+        resource_name = resource.get('name')
+        package_name = package.get('name')
+        owner_org = package.get('organization')
+        if owner_org:
+            owner_org_name = owner_org.get('name')
+        if resource_name and package_name and owner_org_name:
+            alias = f"{resource_name}-{package_name}-{owner_org_name}"
+        else:
+            alias = None
+
+    # tell CKAN to calculate_record_count and set alias if set
+    send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
+                                records=None, aliases=alias, calculate_record_count=True)
+    if alias:
+        logger.info('Created alias: {}'.format(alias))
 
     # cleanup temporary files
     if os.path.exists(tmp.name + ".idx"):
