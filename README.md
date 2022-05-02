@@ -236,7 +236,7 @@ Here's a summary of the options available.
 | CHUNK_SIZE | '16384' | Chunk size when processing the data file |
 | DOWNLOAD_TIMEOUT | '30' | Download timeout for requesting the file |
 | SSL_VERIFY | False | Do not validate SSL certificates when requesting the data file (*Warning*: Do not use this setting in production) |
-| TYPES | 'String', 'Float', 'Integer', 'DateTime' | can be modified to customize the type inferencing |
+| TYPES | 'String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL' | can be modified to customize the type inferencing |
 | TYPE_MAPPING | {'String': 'text', 'Integer': 'numeric', 'Float': 'numeric', 'DateTime': 'timestamp', 'Date': 'timestamp', 'NULL': 'text'} | Internal qsv type mapping |
 | LOG_FILE | `/tmp/ckan_service.log` | Where to write the logs. Use an empty string to disable |
 | STDERR | `True` | Log to stderr? |

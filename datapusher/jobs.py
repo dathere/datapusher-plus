@@ -78,7 +78,7 @@ _TYPE_MAPPING = {
     'NULL': 'text',
 }
 
-_TYPES = ['String', 'Float', 'Integer', 'DateTime']
+_TYPES = ['String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL']
 
 TYPE_MAPPING = web.app.config.get('TYPE_MAPPING', _TYPE_MAPPING)
 TYPES = web.app.config.get('TYPES', _TYPES)
@@ -694,7 +694,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # tell CKAN to calculate_record_count and set alias if set
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
-                                records=None, aliases=alias, calculate_record_count=True)
+                               records=None, aliases=alias, calculate_record_count=True)
     if alias:
         logger.info('Created alias: {}'.format(alias))
 
