@@ -448,7 +448,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
     # not guesses as it scans the entire file, 2) its super-fast, and 3) it has
-    # addl data-wrangling capabilities we use in datapusher+ - slice, validate, count
+    # addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
     fetch_elapsed = time.perf_counter() - timer_start
     logger.info('Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...'.format(
         DataSize(cl), fetch_elapsed))
@@ -654,6 +654,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                                records=None, aliases=None, calculate_record_count=False)
 
     # Guess the delimiter used in the file for copy
+    # TODO: Do we even need to do this with DP+ as we always
+    # create a comma-delimited CSV during the analysis phase?
     with open(tmp.name, 'rb') as f:
         header_line = f.readline()
     try:
@@ -723,8 +725,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         else:
             alias = None
 
-        # check if the alias exist, if it does
-        # add a sequence suffix until it can be created
+        # TODO: check if the alias exist, if it does
+        # add a sequence suffix or the last few chars of 
+        # the resourceid until it can be created
 
     # tell CKAN to calculate_record_count and set alias if set
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
