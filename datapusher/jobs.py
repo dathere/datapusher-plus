@@ -83,6 +83,13 @@ _TYPES = ['String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL']
 TYPE_MAPPING = web.app.config.get('TYPE_MAPPING', _TYPE_MAPPING)
 TYPES = web.app.config.get('TYPES', _TYPES)
 
+_DATEFIELD_NAMES = ['date', 'time']
+
+DATEFIELD_NAME = web.app.config.get(
+    'DATEFIELD_NAMES', _DATEFIELD_NAMES)
+
+DATEFIELD_NAME = [field.lower() for field in DATEFIELD_NAME]
+
 DATASTORE_URLS = {
     'datastore_delete': '{ckan_url}/api/action/datastore_delete',
     'resource_update': '{ckan_url}/api/action/resource_update'
@@ -124,7 +131,7 @@ class HTTPError(util.JobError):
 
         """
         if self.response and len(self.response) > 200:
-            response = str.encode(self.response[:200] + '...')
+            response = self.response[:200]
         else:
             response = self.response
         return {
@@ -502,7 +509,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
         dupe_count = int(str(qsv_dedup.stderr).strip())
         if dupe_count > 0:
-            logger.info('{:,} duplicates found and removed...'.format(dupe_count))
+            logger.info(
+                '{:,} duplicates found and removed...'.format(dupe_count))
         else:
             logger.info('No duplicates found...')
 
@@ -529,13 +537,33 @@ def push_to_datastore(task_id, input, dry_run=False):
     record_count = int(str(qsv_count.stdout).strip())
     logger.info('{:,} records detected...'.format(record_count))
 
+    # scan CSV headers for date-like field
+    try:
+        qsv_headers = subprocess.run(
+            [QSV_BIN, 'headers', tmp.name], capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        tmp.close()
+        raise util.JobError(
+            'Cannot scan CSV headers: {}'.format(e)
+        )
+    header_fields = str(qsv_headers.stdout).strip().lower()
+    if any(datefield_name in header_fields for datefield_name in DATEFIELD_NAME):
+        datefield_present = True
+        print('Dates found!\n')
+    else:
+        datefield_present = False
+        print('NO DATES!\n')
+
     # run qsv stats to get data types and descriptive statistics
     headers = []
     types = []
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+    qsv_stats_cmd = [QSV_BIN, 'stats', tmp.name,
+                     '--output', qsv_stats_csv.name]
+    if datefield_present:
+        qsv_stats_cmd.append('--infer-dates')
     try:
-        qsv_stats = subprocess.run(
-            [QSV_BIN, 'stats', tmp.name, '--infer-dates', '--output', qsv_stats_csv.name], check=True)
+        qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
         tmp.close()
         qsv_stats_csv.close()
@@ -691,6 +719,9 @@ def push_to_datastore(task_id, input, dry_run=False):
             alias = f"{resource_name}-{package_name}-{owner_org_name}"
         else:
             alias = None
+
+        # check if the alias exist, if it does
+        # add a sequence suffix until it can be created
 
     # tell CKAN to calculate_record_count and set alias if set
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
