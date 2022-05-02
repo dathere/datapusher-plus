@@ -21,6 +21,8 @@ SQLALCHEMY_DATABASE_URI = os.environ.get('DATAPUSHER_SQLALCHEMY_DATABASE_URI', '
 # set this to the same value as your ckan.datastore.write_url
 WRITE_ENGINE_URL = os.environ.get('DATAPUSHER_WRITE_ENGINE_URL', 'postgresql://datapusher:THEPASSWORD@localhost/datastore_default')
 
+AUTO_ALIAS = bool(int(os.environ.get('DATAPUSHER_AUTO_ALIAS', '1')))
+
 # qsv settings
 QSV_BIN = os.environ.get('DATAPUSHER_QSV_BIN', '/usr/local/bin/qsvlite')
 QSV_DEDUP = bool(int(os.environ.get('DATAPUSHER_QSV_DEDUP', '1')))
