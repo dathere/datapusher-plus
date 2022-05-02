@@ -61,7 +61,7 @@ It features:
 [^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
 [^2]: It takes 0.16 seconds with an index to run `qsv stats` against the [qsv whirlwind tour sample file](https://raw.githubusercontent.com/wiki/jqnatividad/qsv/files/wcp.zip) on a Ryzen 4800H (16 logical cores) with 32 gb memory and a 1 TB SSD.
 Without an index, it takes 1.3 seconds.
-[^2]: Imagine you have a 1M row CSV, and the last row has an invalid value for a numeric column (e.g. "N/A" instead of a number). 
+[^3]: Imagine you have a 1M row CSV, and the last row has an invalid value for a numeric column (e.g. "N/A" instead of a number). 
       After spending hours pushing the data very slowly, legacy datapusher will abort on the last row and the ENTIRE job is invalid. 
       Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what 
       caused the job to fail! YIKES!!!!
