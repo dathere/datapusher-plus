@@ -41,3 +41,9 @@ SSL_VERIFY = bool(int(os.environ.get('DATAPUSHER_SSL_VERIFY', '1')))
 # logging
 LOG_FILE = os.environ.get('DATAPUSHER_LOG_FILE', '/tmp/ckan_service.log')
 STDERR = bool(int(os.environ.get('DATAPUSHER_STDERR', '1')))
+
+# other config values that can be overriden here if you don't want to modify jobs.py
+# see jobs.py for their current default values
+# DATELIKE_FIELDNAMES
+# TYPE_MAPPING
+# TYPES 
