@@ -93,6 +93,12 @@ DATELIKE_FIELDNAMES = web.app.config.get(
 
 DATELIKE_FIELDNAMES = [field.lower() for field in DATELIKE_FIELDNAMES]
 
+PII_SCREENING_REGEX_SET = web.app.config.get('PII_SCREENING_REGEX_SET') or 'pii-regexes.txt'
+if web.app.config.get('PII_SCREENING') in ['False', 'FALSE', '0', False, 0]:
+    PII_SCREENING = False
+else:
+    PII_SCREENING = True
+
 DATASTORE_URLS = {
     'datastore_delete': '{ckan_url}/api/action/datastore_delete',
     'resource_update': '{ckan_url}/api/action/resource_update'
