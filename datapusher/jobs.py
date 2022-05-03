@@ -412,7 +412,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         except ValueError:
             pass
 
-        tmp = tempfile.NamedTemporaryFile()
+        tmp = tempfile.NamedTemporaryFile(
+            suffix='.' + resource.get('format').lower())
         length = 0
         m = hashlib.md5()
         for chunk in response.iter_content(CHUNK_SIZE):
@@ -512,6 +513,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
         dupe_count = int(str(qsv_dedup.stderr).strip())
         if dupe_count > 0:
+            tmp = qsv_dedup_csv
             logger.info(
                 '{:,} duplicates found and removed...'.format(dupe_count))
         else:
@@ -728,7 +730,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             alias_count = cur.fetchone()[0]
             if alias_count:
                 alias_sequence = alias_count + 1
-                alias = f'{alias}-{alias_sequence:03}'    
+                alias = f'{alias}-{alias_sequence:03}'
         else:
             alias = None
     raw_connection.close()
