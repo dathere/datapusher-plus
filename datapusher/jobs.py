@@ -655,23 +655,14 @@ def push_to_datastore(task_id, input, dry_run=False):
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
                                records=None, aliases=None, calculate_record_count=False)
 
-    # Guess the delimiter used in the file for copy
-    # TODO: Do we even need to do this with DP+ as we always
-    # create a comma-delimited CSV during the analysis phase?
-    with open(tmp.name, 'rb') as f:
-        header_line = f.readline()
-    try:
-        sniffer = csv.Sniffer()
-        delimiter = sniffer.sniff(six.ensure_text(header_line)).delimiter
-    except csv.Error:
-        logger.warning('Could not determine delimiter, using ","')
-        delimiter = ','
-
     record_count = 0
     try:
         raw_connection = psycopg2.connect(WRITE_ENGINE_URL)
     except psycopg2.Error as e:
-        logger.warning("Could not connect to Datastore: {}".format(e))
+        tmp.close()
+        raise util.JobError(
+            'Could not connect to the Datastore: {}'.format(e)
+        )
     else:
         cur = raw_connection.cursor()
         # truncate table to use copy freeze option and further increase
@@ -681,12 +672,11 @@ def push_to_datastore(task_id, input, dry_run=False):
             resource_id=resource_id))
 
         copy_sql = ("COPY \"{resource_id}\" ({column_names}) FROM STDIN "
-                    "WITH (DELIMITER '{delimiter}', FORMAT CSV, FREEZE 1, "
+                    "WITH (FORMAT CSV, FREEZE 1, "
                     "HEADER 1, ENCODING 'UTF8');").format(
                         resource_id=resource_id,
                         column_names=', '.join(['"{}"'.format(h['id'])
-                                                for h in headers_dicts]),
-                        delimiter=delimiter)
+                                                for h in headers_dicts]))
         logger.info(copy_sql)
         with open(tmp.name, 'rb') as f:
             try:
