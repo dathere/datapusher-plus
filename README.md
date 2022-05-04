@@ -255,9 +255,9 @@ Here's a summary of the options available.
 
 ```
 su - postgres
-pgsql -d datastore_default
+psql -d datastore_default
 CREATE ROLE datapusher LOGIN SUPERUSER PASSWORD 'thepassword';
-quit
+\q
 ```
 
 All of the configuration options above can be also provided as environment
