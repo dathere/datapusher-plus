@@ -242,7 +242,7 @@ Here's a summary of the options available.
 | TYPE_MAPPING | {'String': 'text', 'Integer': 'numeric', 'Float': 'numeric', 'DateTime': 'timestamp', 'Date': 'timestamp', 'NULL': 'text'} | Internal qsv type mapping to PostgreSQL types |
 | LOG_FILE | `/tmp/ckan_service.log` | Where to write the logs. Use an empty string to disable |
 | STDERR | `True` | Log to stderr? |
-| QSV_BIN | /usr/local/bin/qsvdp | The location of the qsv binary to use |
+| QSV_BIN | /usr/local/bin/qsvdp | The location of the qsv binary to use. qsvdp is the DP+ optimized version of qsv. It only has the commands used by DP+, has the self-update engine removed, and is 6x smaller than qsv and 3x smaller than qsvlite. |
 | PREVIEW_ROWS | 1000 | The number of rows to insert to the data store. Set to 0 to insert all rows |
 | QSV_DEDUP | `True` | Automatically deduplicate rows? |
 | DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
