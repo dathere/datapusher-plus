@@ -61,7 +61,7 @@ setup(
     install_requires=[
         'ckanserviceprovider >= 1.0',
         'requests',
-        "psycopg2",
+        "psycopg2-binary",
         'datasize',
     ],
 
