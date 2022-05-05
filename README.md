@@ -95,11 +95,13 @@ about the "Multi-pass Datapusher" from May 2015 for additional context.
 
 Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same way.
 
-Create a virtual environment for Datapusher+:
+Create a virtual environment for Datapusher+ using at least python 3.7:
 
     python -m venv dpplus_venv
     . dpplus_venv/bin/activate
     cd dpplus_venv
+
+> ℹ️ **NOTE:** Even though DP+ requires python 3.7, it can still work with CKAN<=2.8
 
 Install the required packages::
 
@@ -114,8 +116,6 @@ Install the dependencies::
 
     pip install -r requirements-dev.txt
     pip install -e .
-
-> NOTE: run `python setup.py bdist_wheel` should you get errors while running `pip install` and run the commands again.
 
 Install qsv::
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
@@ -133,11 +133,11 @@ you may want to look into the [Performance Tuning](https://github.com/jqnativida
 section to squeeze even more performance from qsv.
 
 
-> NOTE: qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
+> ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
 `sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
 
 
-Copy `datapusher/settings.py` to a new file like `settings_local.py` and adjust.
+Copy `datapusher/settings.py` to a new file like `settings_local.py` and modify your configuration as required.
 
     cp datapusher/settings.py settings_local.py
     nano settings_local.py
