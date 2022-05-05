@@ -177,7 +177,7 @@ to keep the process up.
     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
 
     # Install DataPusher-plus, uwsgi and psycopg2 for production
-    sudo /usr/lib/ckan/datapusher-plus/bin/pip install datapusher-plus uwsgi psycopg2-binary
+    sudo /usr/lib/ckan/datapusher-plus/bin/pip install datapusher-plus uwsgi
 
     # generate a settings file and tune it, as well as a uwsgi ini file
     sudo mkdir -p /etc/ckan/datapusher
