@@ -198,8 +198,12 @@ At this point you can run DataPusher-plus with the following command:
 
     /usr/lib/ckan/datapusher-plus/bin/uwsgi --enable-threads -i /etc/ckan/datapusher/uwsgi.ini
 
-You might need to change the `uid` and `guid` settings when using a different
-user.
+You might need to change the `uid` and `guid` settings when using a different user.
+
+To deploy it using supervisor:
+
+    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.conf -o /etc/supervisor/conf.d/datapusher-uwsgi.conf
+    sudo service supervisor restart
 
 > ℹ️ **NOTE:** Ubuntu 18.04 comes with python 3.6. To install python 3.7 on Ubuntu 18.04, follow the procedure below:
 > 
