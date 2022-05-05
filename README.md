@@ -173,11 +173,16 @@ to keep the process up.
     # Install requirements for the DataPusher
     sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
 
-    # Create a virtualenv for datapusher. Note that DP+ requires python 3.7
-    # If you are on Ubuntu 18.04 LTS and installed python3.7 as noted below
+    # Create a virtualenv for datapusher. DP+ requires python 3.7+.
+    # If you are on Ubuntu 18.04 LTS and installed python3.7 manually as noted below
     sudo python3.7 -m venv /usr/lib/ckan/datapusher-plus
     # If you already have Python 3.7+
     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
+
+    # Install qsvdp binary, if required
+    wget https://github.com/jqnatividad/qsv/releases/download/0.45.2/qsv-0.45.2-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.45.2-x86_64-unknown-linux-gnu.zip
+    sudo mv qsvdp /usr/local/bin
 
     # Install DataPusher-plus and uwsgi for production
     sudo /usr/lib/ckan/datapusher-plus/bin/pip install datapusher-plus uwsgi
@@ -205,7 +210,7 @@ To deploy it using supervisor:
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.conf -o /etc/supervisor/conf.d/datapusher-uwsgi.conf
     sudo service supervisor restart
 
-> ℹ️ **NOTE:** Ubuntu 18.04 comes with python 3.6. To install python 3.7 on Ubuntu 18.04, follow the procedure below:
+> ℹ️ **NOTE:** Ubuntu 18.04 LTS comes with python 3.6. To install python 3.7 on Ubuntu 18.04, follow the procedure below:
 > 
 > ```
 > sudo add-apt-repository ppa:deadsnakes/ppa
