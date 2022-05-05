@@ -52,7 +52,7 @@ It features:
 
   Apart from bullet-proof data type inferences, qsv is leveraged by Datapusher+ to convert XLS/ODS files;
   count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180);
-  and optionally create a preview subset in this initial version.
+  optionally create a preview subset and optionally deduplicate rows in this initial version.
 
   Future versions of Datapusher+ will further leverage qsv's 70+ commands to do additional
   data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/issues/5).
