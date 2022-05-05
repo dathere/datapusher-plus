@@ -247,7 +247,7 @@ Here's a summary of the options available.
 | -- | -- | -- |
 | HOST | '0.0.0.0' | Web server host |
 | PORT | 8800 | Web server port |
-| SQLALCHEMY_DATABASE_URI | 'postgresql://datapusher_jobs:<br/>YOURPASSWORD<br/>@localhost/datapusher_jobs' | SQLAlchemy Database URL. See note about database backend below. |
+| SQLALCHEMY_DATABASE_URI | 'postgresql://datapusher_jobs:<br/>YOURPASSWORD<br/>@localhost/datapusher_jobs' | SQLAlchemy Database URL. See note below about setting up the `datapusher_jobs` db beforehand. |
 | MAX_CONTENT_LENGTH | '1024000' | Max size of files to process in bytes |
 | CHUNK_SIZE | '16384' | Chunk size when processing the data file |
 | DOWNLOAD_TIMEOUT | '30' | Download timeout for requesting the file |
@@ -279,9 +279,12 @@ variables prepending the name with `DATAPUSHER_`, eg
 `DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. For variables with
 boolean values you must use `1` or `0`.
 
+DP+ requires a job_store database. In Datapusher, this was a sqlite database by default. Though DP+ can still use a sqlite database, we are discouraging its use.
 
-By default, DataPusher uses SQLite as the database backend for jobs information. This is fine for local development and sites with low activity, but for sites that need more performance, Postgres should be used as the backend for the jobs database (eg `SQLALCHEMY_DATABASE_URI=postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs`. See also [High Availability Setup](#high-availability-setup). If SQLite is used, its probably a good idea to store the database in a location other than `/tmp`. This will prevent the database being dropped, causing out of sync errors in the CKAN side. A good place to store it is the CKAN storage folder (if DataPusher is installed in the same server), generally in `/var/lib/ckan/`.
+Therefore, you need to setup the datapusher_jobs database and its user before using DP+:
 
+    sudo -u postgres createuser -S -D -R -P datapusher_jobs
+    sudo -u postgres createdb -O datapusher_jobs datapusher_jobs -E utf-8
 
 ## Usage
 
