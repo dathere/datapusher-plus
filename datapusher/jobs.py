@@ -544,6 +544,9 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # if DATELIKE_FIELDNAMES is not empty, scan CSV headers for date-like field,
     # otherwise, always --infer-dates when scanning for types
+    # we do this since date type inference is a very expensive op
+    # as qsv needs to check if a string is a date using 15 date formats and permutations thereof
+    # exponentially slowing down qsv, even if its using SIMD-accelerated, multithreaded regex parsing 
     inferdates_flag = True
     if DATELIKE_FIELDNAMES:
         try:
@@ -566,7 +569,10 @@ def push_to_datastore(task_id, input, dry_run=False):
                      '--output', qsv_stats_csv.name]
     if inferdates_flag:
         qsv_stats_cmd.append('--infer-dates')
-        logger.info('Date-like fields detected. Date inferencing enabled...')
+        # only show the log message when smart date inferencing is on
+        # when smart date inferencing is off, we always infer dates
+        if DATELIKE_FIELDNAMES:
+            logger.info('Date-like fields detected. Date inferencing enabled...')
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
