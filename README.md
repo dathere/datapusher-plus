@@ -247,7 +247,7 @@ Here's a summary of the options available.
 | -- | -- | -- |
 | HOST | '0.0.0.0' | Web server host |
 | PORT | 8800 | Web server port |
-| SQLALCHEMY_DATABASE_URI | 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs' | SQLAlchemy Database URL. See note about database backend below. |
+| SQLALCHEMY_DATABASE_URI | 'postgresql://datapusher_jobs:<br/>YOURPASSWORD@localhost/datapusher_jobs' | SQLAlchemy Database URL. See note about database backend below. |
 | MAX_CONTENT_LENGTH | '1024000' | Max size of files to process in bytes |
 | CHUNK_SIZE | '16384' | Chunk size when processing the data file |
 | DOWNLOAD_TIMEOUT | '30' | Download timeout for requesting the file |
