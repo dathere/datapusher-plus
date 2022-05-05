@@ -173,7 +173,7 @@ to keep the process up.
     # Install requirements for the DataPusher
     sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
 
-    # Create a virtualenv for datapusher
+    # Create a virtualenv for datapusher. Note that DP+ requires python 3.7
     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
 
     # Install DataPusher-plus and uwsgi for production
@@ -193,10 +193,12 @@ to keep the process up.
 
 At this point you can run DataPusher-plus with the following command:
 
-    /usr/lib/ckan/datapusher-plus/bin/uwsgi -i /etc/ckan/datapusher/uwsgi.ini
+    /usr/lib/ckan/datapusher-plus/bin/uwsgi --enable-threads -i /etc/ckan/datapusher/uwsgi.ini
 
 You might need to change the `uid` and `guid` settings when using a different
 user.
+
+> ℹ️ **NOTE:** Ubuntu 18.04 comes with python 3.6. To install python 3.7 on Ubuntu 18.04, follow the procedure [here](https://linuxize.com/post/how-to-install-python-3-7-on-ubuntu-18-04/#installing-python-37-on-ubuntu-with-apt).
 
 ### High Availability Setup
 
