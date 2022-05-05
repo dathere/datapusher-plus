@@ -712,7 +712,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         if owner_org:
             owner_org_name = owner_org.get('name')
         if resource_name and package_name and owner_org_name:
-            alias = f"{resource_name}-{package_name}-{owner_org_name}"[:60]
+            alias = f"{resource_name}-{package_name}-{owner_org_name}"[:59]
             # check if the alias exist, if it does
             # add a sequence suffix so the new alias can be created
             cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
@@ -720,7 +720,16 @@ def push_to_datastore(task_id, input, dry_run=False):
             alias_count = cur.fetchone()[0]
             if alias_count:
                 alias_sequence = alias_count + 1
-                alias = f'{alias}-{alias_sequence:03}'
+                while True:
+                    # we do this, so we're certain the new alias does not exist
+                    # just in case they deleted an older alias with a lower sequence #
+                    alias = f'{alias}-{alias_sequence:03}'
+                    cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
+                        alias))
+                    alias_exists = cur.fetchone()[0]
+                    if not alias_exists:
+                        break
+                    alias_sequence += 1
         else:
             alias = None
     raw_connection.close()
