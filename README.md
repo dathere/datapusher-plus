@@ -210,10 +210,13 @@ To deploy it using supervisor:
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.conf -o /etc/supervisor/conf.d/datapusher-uwsgi.conf
     sudo service supervisor restart
 
-> ℹ️ **NOTE:** Ubuntu 18.04 LTS comes with python 3.6. To install python 3.7 on Ubuntu 18.04, follow the procedure below:
+> ℹ️ **NOTE:** DP+ requires at least python 3.7. However, Ubuntu 18.04 LTS only comes with python 3.6. 
+> To install python 3.7 on Ubuntu 18.04 (or even a higher version, as DP+ works with python 3.7 and above),
+> follow the procedure below:
 > 
 > ```
 > sudo add-apt-repository ppa:deadsnakes/ppa
+> # we use 3.7 here, but you can get a higher version 
 > sudo apt install python3.7 python3.7-venv python3.7-dev
 > ```
 
