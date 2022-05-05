@@ -447,9 +447,11 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource['hash'] = file_hash
 
-    # Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
-    # not guesses as it scans the entire file, 2) its super-fast, and 3) it has
-    # addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
+    '''
+    Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
+    not guesses as it scans the entire file, 2) its super-fast, and 3) it has
+    addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
+    '''
     fetch_elapsed = time.perf_counter() - timer_start
     logger.info('Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...'.format(
         DataSize(cl), fetch_elapsed))
@@ -462,9 +464,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         # if so, export it as a csv file
         logger.info('Converting {} sheet {} to CSV...'.format(
             format, DEFAULT_EXCEL_SHEET))
-        # first, we need a temporary spreadsheet filename with the right file extension
-        # we only need the filename though, that's why we remove/delete it
-        # and create a hardlink to the file we got from CKAN
+        '''
+        first, we need a temporary spreadsheet filename with the right file extension
+        we only need the filename though, that's why we remove/delete it
+        and create a hardlink to the file we got from CKAN
+        '''
         qsv_spreadsheet = tempfile.NamedTemporaryFile(suffix='.' + format)
         os.remove(qsv_spreadsheet.name)
         os.link(tmp.name, qsv_spreadsheet.name)
@@ -483,8 +487,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_spreadsheet.close()
         tmp = qsv_excel_csv
     else:
-        # its a CSV/TSV? Check if its valid and
-        # transcode it to UTF-8 at the same time
+        '''
+        its a CSV/TSV? Check if its RFC4180 valid & transcode to UTF-8 at the same time
+        if its a TSV/TAB file, convert to CSV as well for standard handling downstream
+        note that we only change the working file, the resource file itself is unchanged
+        '''
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         logger.info('Validating/Transcoding {}...'.format(format))
         try:
@@ -499,6 +506,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_input_csv
 
     # do we need to dedup?
+    # note that deduping also ends up creating a sorted CSV
     if QSV_DEDUP:
         qsv_dedup_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         logger.info('Checking for duplicate rows...')
@@ -543,13 +551,16 @@ def push_to_datastore(task_id, input, dry_run=False):
     unique_qualifier = ''
     if QSV_DEDUP:
         unique_qualifier = 'unique'
-    logger.info('{:,} {} records detected...'.format(unique_qualifier, record_count))
+    logger.info('{:,} {} records detected...'.format(
+        record_count, unique_qualifier))
 
-    # if DATELIKE_FIELDNAMES is not empty, scan CSV headers for date-like field,
-    # otherwise, always --infer-dates when scanning for types
-    # we do this since date type inference is a very expensive op
-    # as qsv needs to check if a string is a date using 15 date formats and permutations thereof
-    # exponentially slowing down qsv, even if its using SIMD-accelerated, multithreaded regex parsing 
+    '''
+    if DATELIKE_FIELDNAMES is not empty, scan CSV headers for date-like field,
+    otherwise, always --infer-dates when scanning for types
+    we do this since date type inference is a very expensive op
+    as qsv needs to check if a string is a date using 15 date formats and permutations thereof
+    exponentially slowing down qsv, even if its using SIMD-accelerated, multithreaded regex parsing
+    '''
     inferdates_flag = True
     if DATELIKE_FIELDNAMES:
         try:
@@ -575,7 +586,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         # only show the log message when smart date inferencing is on
         # when smart date inferencing is off, we always infer dates
         if DATELIKE_FIELDNAMES:
-            logger.info('Date-like fields detected. Date inferencing enabled...')
+            logger.info(
+                'Date-like fields detected. Date inferencing enabled...')
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
@@ -674,9 +686,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     else:
         cur = raw_connection.cursor()
-        # truncate table to use copy freeze option and further increase
-        # performance as there is no need for WAL logs to be maintained
-        # https://www.postgresql.org/docs/9.1/populate.html#POPULATE-COPY-FROM
+        '''
+        truncate table to use copy freeze option and further increase
+        performance as there is no need for WAL logs to be maintained
+        https://www.postgresql.org/docs/9.1/populate.html#POPULATE-COPY-FROM
+        '''
         cur.execute('TRUNCATE TABLE \"{resource_id}\";'.format(
             resource_id=resource_id))
 
