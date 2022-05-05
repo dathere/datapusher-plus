@@ -212,9 +212,6 @@ To deploy it using supervisor:
 > sudo apt install python3.7 python3.7-venv python3.7-dev
 > ```
 
-### High Availability Setup
-
- [Similar to Datapusher](https://github.com/ckan/datapusher#high-availability-setup).
 ## Configuring
 
 
