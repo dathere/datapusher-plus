@@ -540,7 +540,10 @@ def push_to_datastore(task_id, input, dry_run=False):
             'Cannot count records in CSV: {}'.format(e)
         )
     record_count = int(str(qsv_count.stdout).strip())
-    logger.info('{:,} records detected...'.format(record_count))
+    unique_qualifier = ''
+    if QSV_DEDUP:
+        unique_qualifier = 'unique'
+    logger.info('{:,} {} records detected...'.format(unique_qualifier, record_count))
 
     # if DATELIKE_FIELDNAMES is not empty, scan CSV headers for date-like field,
     # otherwise, always --infer-dates when scanning for types
