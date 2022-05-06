@@ -113,21 +113,22 @@ Create a virtual environment for Datapusher+ using at least python 3.7:
 >
 > Even though DP+ requires python 3.7+, it still works with CKAN<=2.8, which uses older versions of python.
 
-Install the required packages::
+Install the required packages:
 
     sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev
 
-Get the code::
+Get the code:
 
     git clone https://github.com/datHere/datapusher-plus
     cd datapusher-plus
 
-Install the dependencies::
+Install the dependencies:
 
     pip install -r requirements-dev.txt
     pip install -e .
 
-Install qsv::
+Install qsv:
+
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
@@ -153,7 +154,7 @@ Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database 
     cp datapusher/settings.py settings_local.py
     nano settings_local.py
 
-Run the DataPusher::
+Run the DataPusher:
 
     python datapusher/main.py settings_local.py
 
