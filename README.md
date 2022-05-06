@@ -138,6 +138,7 @@ section to squeeze even more performance from qsv.
 
 
 Copy `datapusher/settings.py` to a new file like `settings_local.py` and modify your configuration as required.
+Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
     cp datapusher/settings.py settings_local.py
     nano settings_local.py
@@ -216,7 +217,7 @@ To deploy it using supervisor:
 > 
 > ```
 > sudo add-apt-repository ppa:deadsnakes/ppa
-> # we use 3.7 here, but you can get a higher version 
+> # we use 3.7 here, but you can get a higher version by changing the version suffix of the packages below
 > sudo apt install python3.7 python3.7-venv python3.7-dev
 > ```
 
@@ -266,27 +267,32 @@ Here's a summary of the options available.
 | QSV_DEDUP | `True` | Automatically deduplicate rows? |
 | DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
 | AUTO_ALIAS | `True` | Automatically create a resource alias - RESOURCE_NAME-PACKAGE_NAME-OWNER_ORG, that's easier to use in API calls and with scheming datastore_choices helper |
-| WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to specify a new role with SUPERUSER privileges, |
-
-> NOTE: To do native PostgreSQL operations like TRUNCATE, VACUUM and COPY, a new
-> postgres role on the datastore_default database
-> needs to be created with SUPERUSER privileges.
-
-```
-su - postgres
-psql -d datastore_default
-CREATE ROLE datapusher LOGIN SUPERUSER PASSWORD 'thepassword';
-\q
-```
+| WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to use the `datapusher` user |
 
 All of the configuration options above can be also provided as environment
 variables prepending the name with `DATAPUSHER_`, eg
 `DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. For variables with
 boolean values you must use `1` or `0`.
 
-DP+ requires a job_store database. In Datapusher, this was a sqlite database by default. Though DP+ can still use a sqlite database, we are discouraging its use.
+### DataPusher+ Database Setup
 
-Therefore, you need to setup the datapusher_jobs database and its user before using DP+:
+DP+ requires a dedicated PostgreSQL account named `datapusher` to connect to the CKAN Datastore.
+
+To create the `datapusher` user and give it the required privileges to the `datastore_default` database:
+
+```
+su - postgres
+psql -d datastore_default
+CREATE ROLE datapusher LOGIN PASSWORD 'thepassword';
+GRANT CREATE, CONNECT, TEMPORARY ON DATABASE datastore_default TO datapusher;
+GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public TO datapusher;
+\q
+```
+
+DP+ also requires its own job_store database to keep track of all the DP+ jobs. In the original Datapusher,
+this was a sqlite database by default. Though DP+ can still use a sqlite database, we are discouraging its use.
+
+To setup the `datapusher_jobs` database and its user:
 
     sudo -u postgres createuser -S -D -R -P datapusher_jobs
     sudo -u postgres createdb -O datapusher_jobs datapusher_jobs -E utf-8
