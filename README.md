@@ -154,11 +154,11 @@ Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database 
     cp datapusher/settings.py settings_local.py
     nano settings_local.py
 
-Run the DataPusher:
+Run DataPusher+:
 
     python datapusher/main.py settings_local.py
 
-By default DataPusher should be running at the following port:
+By default, DataPusher+ should be running at the following port:
 
     http://localhost:8800/
 
@@ -182,10 +182,10 @@ to set up Nginx as a reverse proxy in front of it and something like Supervisor
 to keep the process up.
 
 
-    # Install requirements for the DataPusher
+    # Install requirements for DataPusher+
     sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
 
-    # Create a virtualenv for datapusher. DP+ requires python 3.7+.
+    # Create a virtualenv for DataPusher+. DP+ requires python 3.7+.
     # If you are on Ubuntu 18.04 LTS and installed python3.7 manually as noted below
     sudo python3.7 -m venv /usr/lib/ckan/datapusher-plus
     # If you already have Python 3.7+
@@ -211,7 +211,7 @@ to keep the process up.
     sudo addgroup www-data
     sudo adduser -G www-data www-data
 
-At this point you can run DataPusher-plus with the following command:
+At this point you can run DataPusher+ with the following command:
 
     /usr/lib/ckan/datapusher-plus/bin/uwsgi --enable-threads -i /etc/ckan/datapusher/uwsgi.ini
 
@@ -244,7 +244,7 @@ integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/
 
 ### DataPusher+ Configuration
 
-The DataPusher instance is configured in the `deployment/datapusher_settings.py`
+The DataPusher+ instance is configured in the `deployment/datapusher_settings.py`
 file. The location of this file can be adjusted using the `JOB_CONFIG`
 environment variable which should provide an absolute path to a python-formatted
 config file.
@@ -306,8 +306,8 @@ into the DataStore.
 
 You can also manually trigger resources to be resubmitted. When editing a resource in CKAN (clicking the "Manage" button on a resource page), a new tab named "DataStore" will appear. This will contain a log of the last attempted upload and a button to retry the upload.
 
-![DataPusher UI](images/datapusher-plus-scn1.png)
-![DataPusher UI 2](images/datapusher-plus-scn2.png)
+![DataPusher+ UI](images/datapusher-plus-scn1.png)
+![DataPusher+ UI 2](images/datapusher-plus-scn2.png)
 
 ### Command line
 
