@@ -20,7 +20,7 @@ PORT = os.environ.get('DATAPUSHER_PORT', 8800)
 # 2) adjust the settings here, and
 # 3) run the INIT_DB command
 SQLALCHEMY_DATABASE_URI = os.environ.get('DATAPUSHER_SQLALCHEMY_DATABASE_URI',
-                                         'SQLALCHEMY_DATABASE_URI=postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs')
+                                         'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs')
 
 # PostgreSQL COPY settings
 # set this to the same value as your ckan.datastore.write_url
