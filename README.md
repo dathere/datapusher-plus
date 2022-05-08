@@ -111,7 +111,7 @@ Create a virtual environment for Datapusher+ using at least python 3.7:
 > sudo apt install python3.7 python3.7-venv python3.7-dev
 > ```
 >
-> Even though DP+ requires python 3.7+, it still works with CKAN<=2.8, which uses older versions of python.
+> Note that DP+ still works with CKAN<=2.8, which uses older versions of python.
 
 Install the required packages:
 
@@ -132,8 +132,8 @@ Install qsv:
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.45.2/qsv-0.45.2-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.45.2-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.46.0/qsv-0.46.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.46.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv /usr/local/bin
     sudo mv qsvlite /usr/local/bin
     sudo mv qsvdp /usr/local/bin
@@ -161,10 +161,6 @@ Run DataPusher+:
 By default, DataPusher+ should be running at the following port:
 
     http://localhost:8800/
-
-To run the tests:
-
-    pytest
 
 ## Production deployment
 
