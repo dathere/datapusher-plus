@@ -192,8 +192,8 @@ to keep the process up.
     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
 
     # Install qsvdp binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.45.2/qsv-0.45.2-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.45.2-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.46.0/qsv-0.46.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.46.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsvdp /usr/local/bin
 
     # Install DataPusher-plus and uwsgi for production
@@ -264,7 +264,7 @@ Here's a summary of the options available.
 | TYPE_MAPPING | {'String': 'text', 'Integer': 'numeric', 'Float': 'numeric', 'DateTime': 'timestamp', 'Date': 'timestamp', 'NULL': 'text'} | Internal qsv type mapping to PostgreSQL types |
 | LOG_FILE | `/tmp/ckan_service.log` | Where to write the logs. Use an empty string to disable |
 | STDERR | `True` | Log to stderr? |
-| QSV_BIN | /usr/local/bin/qsvdp | The location of the qsv binary to use. qsvdp is the DP+ optimized version of qsv. It only has the commands used by DP+, has the self-update engine removed, and is 6x smaller than qsv and 3x smaller than qsvlite. |
+| QSV_BIN | /usr/local/bin/qsvdp | The location of the qsv binary to use. qsvdp is the DP+ optimized version of qsv. It only has the commands used by DP+, has the self-update engine removed, and is 6x smaller than qsv and 3x smaller than qsvlite. You may also want to look into using [qsvdp_nightly](https://github.com/jqnatividad/qsv#nightly-release-builds), for even more performance. |
 | PREVIEW_ROWS | 1000 | The number of rows to insert to the data store. Set to 0 to insert all rows |
 | QSV_DEDUP | `True` | Automatically deduplicate rows? |
 | DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
