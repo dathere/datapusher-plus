@@ -22,9 +22,7 @@ def main():
     import argparse
 
     argparser = argparse.ArgumentParser(
-        description='Service that allows automatic migration of data to the CKAN DataStore',
-        epilog='''"He reached out and pressed an invitingly large red button on a nearby panel.
-                The panel lit up with the words Please do not press this button again."''')
+        description='Service that allows automatic migration of data to the CKAN DataStore')
     if six.PY3:
         argparser.add_argument('config', metavar='CONFIG', type=argparse.FileType('r'),
                             help='configuration file')
@@ -41,7 +39,7 @@ def main():
 def initdb():
     import argparse
 
-    argparser = argparse.ArgumentParser(description='Initializes de database')
+    argparser = argparse.ArgumentParser(description='Initializes the database')
 
     argparser.add_argument('config', metavar='CONFIG', type=argparse.FileType('r'),
                             help='configuration file')
