@@ -237,6 +237,17 @@ added to the `[app:main]` section of your CKAN configuration file :
 There are other CKAN configuration options that allow to customize the CKAN - DataPusher
 integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/latest/maintaining/configuration.html#datapusher-settings) section in the CKAN documentation for more details.
 
+> ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - xlsm and xlsb for Excel Spreadsheets, and tab for TSV files. To process these subformats, use the following in your CKAN.INI file:
+>
+>```
+> ckan.datapusher.formats = csv xls xlsx xlsm xlsb tsv tab application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet ods application/vnd.oasis.opendocument.spreadsheet
+>```
+>and add this entry to your CKAN's `resource_formats.json` file.
+>
+>```
+> ["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
+>```
+
 
 ### DataPusher+ Configuration
 
