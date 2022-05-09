@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.23] - 2022-05-09
+ ### Changed
+* use `psycopg2-binary` instead of `psycopg2` to ease installation and eliminate need to have postgres dev files
+* made logging messages auto-dedup aware if dupes are detected, by adding "unique" qualifier to record count
+* pointed to the latest qsv version (0.46.1) with the excel off by 1 fix
+* added note about nightly builds of qsv for maximum performance
+* added note about additional DP+ supported Excel and TSV subformats
+* use JOB_CONFIG consistently for setting DP+ settings
+* made qsvdp the default QSV_BIN
+* added note about how to install python 3.7 and above in DP+ virtual environment
+
+### Removed
+* removed Hitchiker's guide quote from setup.py epilog
+* removed `six` as DP+ requires at least python 3.7
+* removed `pytest` step in Development installation until the tests are adapted to DP+
+
+### Fixed
+* fixed development installation procedure, so no assumptions are made
+* fixed production deployment procedure and made it more detailed
+* fixed off by 1 error in `excel` export message in qsv
+
 ## [0.0.21] - 2022-05-04
 ### Added
 * additional analysis & preparation steps enabled by qsv
