@@ -356,6 +356,13 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
 
+    # check if QSV_BIN exists
+    qsv_path = Path(QSV_BIN)
+    if not qsv_path.is_file():
+        raise util.JobError(
+            '{} not found.'.format(QSV_BIN)
+        )
+
     validate_input(input)
 
     data = input['metadata']
