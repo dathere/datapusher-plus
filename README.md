@@ -156,7 +156,8 @@ Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database 
 
 Run DataPusher+:
 
-    python datapusher/main.py settings_local.py
+    export JOB_CONFIG=$(realpath settings_local.py)
+    python datapusher/main.py
 
 By default, DataPusher+ should be running at the following port:
 
@@ -200,7 +201,7 @@ to keep the process up.
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher/settings.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher/uwsgi.ini
 
-    # Initialize the database
+    # Initialize the database. Be sure to edit settings.py first!
     /usr/lib/ckan/datapusher-plus/bin/datapusher_initdb /etc/ckan/datapusher/settings.py
 
     # Create a user to run the web service (if necessary)
@@ -209,6 +210,7 @@ to keep the process up.
 
 At this point you can run DataPusher+ with the following command:
 
+    export JOB_CONFIG=/etc/ckan/datapusher/settings.py 
     /usr/lib/ckan/datapusher-plus/bin/uwsgi --enable-threads -i /etc/ckan/datapusher/uwsgi.ini
 
 You might need to change the `uid` and `guid` settings when using a different user.
