@@ -19,7 +19,6 @@ import subprocess
 import csv
 import os
 import psycopg2
-import six
 from pathlib import Path
 from datasize import DataSize
 
@@ -462,11 +461,10 @@ def push_to_datastore(task_id, input, dry_run=False):
     format = resource.get('format').upper()
     if format in spreadsheet_extensions:
         # if so, export it as a csv file
-        logger.info('Converting {} sheet {} to CSV...'.format(
-            format, DEFAULT_EXCEL_SHEET))
+        logger.info('Converting {} to CSV...'.format(format))
         '''
         first, we need a temporary spreadsheet filename with the right file extension
-        we only need the filename though, that's why we remove/delete it
+        we only need the filename though, that's why we remove it
         and create a hardlink to the file we got from CKAN
         '''
         qsv_spreadsheet = tempfile.NamedTemporaryFile(suffix='.' + format)
@@ -477,7 +475,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_excel_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         try:
             qsv_excel = subprocess.run(
-                [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET), '--output', qsv_excel_csv.name], check=True)
+                [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET),
+                 '--output', qsv_excel_csv.name], check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
             tmp.close()
             qsv_excel_csv.close()
@@ -485,6 +484,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                 'Cannot export spreadsheet to CSV: {}'.format(e)
             )
         qsv_spreadsheet.close()
+        excel_export_msg = (qsv_excel.stderr).decode('utf-8')
+        logger.info("{}...".format(excel_export_msg))
         tmp = qsv_excel_csv
     else:
         '''
