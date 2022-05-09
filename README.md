@@ -132,8 +132,8 @@ Install qsv:
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.46.0/qsv-0.46.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.46.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.46.1/qsv-0.46.1-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.46.1-x86_64-unknown-linux-gnu.zip
     sudo mv qsv /usr/local/bin
     sudo mv qsvlite /usr/local/bin
     sudo mv qsvdp /usr/local/bin
@@ -188,8 +188,8 @@ to keep the process up.
     sudo python3 -m venv /usr/lib/ckan/datapusher-plus
 
     # Install qsvdp binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.46.0/qsv-0.46.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.46.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.46.1/qsv-0.46.1-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.46.1-x86_64-unknown-linux-gnu.zip
     sudo mv qsvdp /usr/local/bin
 
     # Install DataPusher-plus and uwsgi for production
@@ -237,11 +237,13 @@ added to the `[app:main]` section of your CKAN configuration file :
 There are other CKAN configuration options that allow to customize the CKAN - DataPusher
 integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/latest/maintaining/configuration.html#datapusher-settings) section in the CKAN documentation for more details.
 
-> ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - xlsm and xlsb for Excel Spreadsheets, and tab for TSV files. To process these subformats, use the following in your CKAN.INI file:
+> ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - `xlsm` and `xlsb` for Excel Spreadsheets,
+> and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
 >
 >```
 > ckan.datapusher.formats = csv xls xlsx xlsm xlsb tsv tab application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet ods application/vnd.oasis.opendocument.spreadsheet
 >```
+>
 >and add this entry to your CKAN's `resource_formats.json` file.
 >
 >```
@@ -275,7 +277,7 @@ Here's a summary of the options available.
 | PREVIEW_ROWS | 1000 | The number of rows to insert to the data store. Set to 0 to insert all rows |
 | QSV_DEDUP | `True` | Automatically deduplicate rows? |
 | DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
-| AUTO_ALIAS | `True` | Automatically create a resource alias - RESOURCE_NAME-PACKAGE_NAME-OWNER_ORG, that's easier to use in API calls and with scheming datastore_choices helper |
+| AUTO_ALIAS | `True` | Automatically create a resource alias - RESOURCE_NAME-PACKAGE_NAME-OWNER_ORG, that's easier to use in API calls and with the scheming datastore_choices helper |
 | WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to use the `datapusher` user |
 
 All of the configuration options above can be also provided as environment
