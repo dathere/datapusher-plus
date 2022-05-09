@@ -30,7 +30,7 @@ WRITE_ENGINE_URL = os.environ.get(
 AUTO_ALIAS = bool(int(os.environ.get('DATAPUSHER_AUTO_ALIAS', '1')))
 
 # qsv settings
-QSV_BIN = os.environ.get('DATAPUSHER_QSV_BIN', '/usr/local/bin/qsvlite')
+QSV_BIN = os.environ.get('DATAPUSHER_QSV_BIN', '/usr/local/bin/qsvdp')
 QSV_DEDUP = bool(int(os.environ.get('DATAPUSHER_QSV_DEDUP', '1')))
 PREVIEW_ROWS = int(os.environ.get('DATAPUSHER_PREVIEW_ROWS', '10000'))
 DEFAULT_EXCEL_SHEET = int(os.environ.get(
