@@ -1,4 +1,0 @@
--r requirements.txt
-httpretty==0.9.4
-pytest
-pytest-cov
