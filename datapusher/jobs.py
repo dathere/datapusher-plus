@@ -652,12 +652,14 @@ def push_to_datastore(task_id, input, dry_run=False):
     headers_dicts = []
     for idx, header in enumerate(temp_headers_dicts):
         if header['type'] == 'smartint':
-            if headers_max[idx] <= POSTGRES_INT_MAX and headers_min[idx] >= POSTGRES_INT_MIN:
+            if int(headers_max[idx]) <= POSTGRES_INT_MAX and int(headers_min[idx]) >= POSTGRES_INT_MIN:
                 header_type = 'integer'
-            elif headers_max[idx] <= POSTGRES_BIGINT_MAX and headers_min[idx] >= POSTGRES_BIGINT_MIN:
+            elif int(headers_max[idx]) <= POSTGRES_BIGINT_MAX and int(headers_min[idx]) >= POSTGRES_BIGINT_MIN:
                 header_type = 'bigint'
             else:
                 header_type = 'numeric'
+        else:
+            header_type = header['type']
         headers_dicts.append(dict(id=header['id'], type=header_type))
 
     # Maintain data dictionaries from matching column names
