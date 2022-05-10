@@ -73,7 +73,7 @@ _TYPE_MAPPING = {
     'Integer': 'numeric',
     'Float': 'numeric',
     'DateTime': 'timestamp',
-    'Date': 'timestamp',
+    'Date': 'date',
     'NULL': 'text',
 }
 
