@@ -539,7 +539,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # are all accelerated/multithreaded when an index is present
     try:
         subprocess.run(
-            [QSV_BIN, 'index', tmp.name], capture_output=True)
+            [QSV_BIN, 'index', tmp.name], capture_output=True, check=True)
     except subprocess.CalledProcessError as e:
         tmp.close()
         raise util.JobError(
@@ -549,7 +549,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # get record count
     try:
         qsv_count = subprocess.run(
-            [QSV_BIN, 'count', tmp.name], capture_output=True, text=True)
+            [QSV_BIN, 'count', tmp.name], capture_output=True, check=True, text=True)
     except subprocess.CalledProcessError as e:
         tmp.close()
         raise util.JobError(
@@ -573,7 +573,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if DATELIKE_FIELDNAMES:
         try:
             qsv_headers = subprocess.run(
-                [QSV_BIN, 'headers', tmp.name], capture_output=True, text=True)
+                [QSV_BIN, 'headers', tmp.name], capture_output=True, check=True, text=True)
         except subprocess.CalledProcessError as e:
             tmp.close()
             raise util.JobError(
