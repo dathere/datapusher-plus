@@ -483,7 +483,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         try:
             qsv_excel = subprocess.run(
                 [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET),
-                 '--output', qsv_excel_csv.name], check=True, capture_output=True)
+                 '--output', qsv_excel_csv.name], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             tmp.close()
             qsv_excel_csv.close()
@@ -491,7 +491,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 'Cannot export spreadsheet to CSV: {}'.format(e)
             )
         qsv_spreadsheet.close()
-        excel_export_msg = (qsv_excel.stderr).decode('utf-8')
+        excel_export_msg = qsv_excel.stderr
         logger.info("{}...".format(excel_export_msg))
         tmp = qsv_excel_csv
     else:
