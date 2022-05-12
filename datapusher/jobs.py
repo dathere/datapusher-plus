@@ -745,7 +745,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         raw_connection.set_isolation_level(
             psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
         cur = raw_connection.cursor()
-        logger.info('Vacuum Analyzing table...')
         cur.execute('VACUUM ANALYZE \"{resource_id}\";'.format(
             resource_id=resource_id))
 
@@ -767,7 +766,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             owner_org_name = owner_org.get('name')
         if resource_name and package_name and owner_org_name:
             alias = f"{resource_name}-{package_name}-{owner_org_name}"[:59]
-            # check if the alias exist, if it does
+            # check if the alias already exist, if it does
             # add a sequence suffix so the new alias can be created
             cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
                 alias))
@@ -785,6 +784,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                         break
                     alias_sequence += 1
         else:
+            logger.info(
+                'Cannot create alias: {}-{}-{}'.format(resource_name, package_name, owner_org))
             alias = None
     raw_connection.close()
 
