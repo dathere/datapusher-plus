@@ -458,6 +458,20 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource['hash'] = file_hash
 
+    def cleanup_tempfiles():
+        # cleanup temporary files
+        if os.path.exists(tmp.name + ".idx"):
+            os.remove(tmp.name + ".idx")
+        tmp.close()
+        if 'qsv_slice_csv' in globals():
+            qsv_slice_csv.close()
+        if 'qsv_excel_csv' in globals():
+            qsv_excel_csv.close()
+        if 'qsv_input_csv' in globals():
+            qsv_input_csv.close()
+        if 'qsv_dedup_csv' in globals():
+            qsv_dedup_csv.close()
+
     '''
     Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
     not guesses as it scans the entire file, 2) its super-fast, and 3) it has
@@ -490,7 +504,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET),
                  '--output', qsv_excel_csv.name], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            tmp.close()
+            cleanup_tempfiles()
             qsv_excel_csv.close()
             raise util.JobError(
                 'Cannot export spreadsheet to CSV: {}'.format(e)
@@ -511,7 +525,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_input = subprocess.run(
                 [QSV_BIN, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
-            tmp.close()
+            cleanup_tempfiles()
             qsv_input_csv.close()
             raise util.JobError(
                 'Invalid CSV file: {}'.format(e)
@@ -527,7 +541,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_dedup = subprocess.run(
                 [QSV_BIN, 'dedup', tmp.name, '--output', qsv_dedup_csv.name], capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
-            tmp.close()
+            cleanup_tempfiles()
             qsv_dedup_csv.close()
             raise util.JobError(
                 'Check for duplicates error: {}'.format(e)
@@ -546,7 +560,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         subprocess.run(
             [QSV_BIN, 'index', tmp.name], check=True)
     except subprocess.CalledProcessError as e:
-        tmp.close()
+        cleanup_tempfiles
         raise util.JobError(
             'Cannot index CSV: {}'.format(e)
         )
@@ -556,7 +570,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_count = subprocess.run(
             [QSV_BIN, 'count', tmp.name], capture_output=True, check=True, text=True)
     except subprocess.CalledProcessError as e:
-        tmp.close()
+        cleanup_tempfiles()
         raise util.JobError(
             'Cannot count records in CSV: {}'.format(e)
         )
@@ -580,7 +594,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_headers = subprocess.run(
                 [QSV_BIN, 'headers', '--just-names', tmp.name], capture_output=True, check=True, text=True)
         except subprocess.CalledProcessError as e:
-            tmp.close()
+            cleanup_tempfiles()
             raise util.JobError(
                 'Cannot scan CSV headers: {}'.format(e)
             )
@@ -606,7 +620,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
-        tmp.close()
+        cleanup_tempfiles()
         qsv_stats_csv.close()
         raise util.JobError(
             'Cannot infer data types and compile statistics: {}'.format(e)
@@ -685,7 +699,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_slice = subprocess.run(
                 [QSV_BIN, 'slice', '--len', str(PREVIEW_ROWS), tmp.name, '--output', qsv_slice_csv.name], check=True)
         except subprocess.CalledProcessError as e:
-            tmp.close()
+            cleanup_tempfiles()
             qsv_slice_csv.close()
             raise util.JobError(
                 'Cannot create a preview slice: {}'.format(e)
@@ -711,7 +725,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     try:
         raw_connection = psycopg2.connect(WRITE_ENGINE_URL)
     except psycopg2.Error as e:
-        tmp.close()
+        cleanup_tempfiles()
         raise util.JobError(
             'Could not connect to the Datastore: {}'.format(e)
         )
@@ -722,8 +736,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         performance as there is no need for WAL logs to be maintained
         https://www.postgresql.org/docs/9.1/populate.html#POPULATE-COPY-FROM
         '''
-        cur.execute('TRUNCATE TABLE \"{resource_id}\";'.format(
-            resource_id=resource_id))
+        try:
+            cur.execute('TRUNCATE TABLE \"{resource_id}\";'.format(
+                resource_id=resource_id))
+        except psycopg2.Error as e:
+            logger.warning("Could not TRUNCATE: {}".format(e))
 
         copy_sql = ("COPY \"{resource_id}\" ({column_names}) FROM STDIN "
                     "WITH (FORMAT CSV, FREEZE 1, "
@@ -736,7 +753,10 @@ def push_to_datastore(task_id, input, dry_run=False):
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
-                logger.warning("Postgres COPY failed: {}".format(e))
+                cleanup_tempfiles()
+                raise util.JobError(
+                    'Postgres COPY failed: {}'.format(e)
+                )
             else:
                 record_count = cur.rowcount
 
@@ -795,18 +815,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if alias:
         logger.info('Created alias: {}'.format(alias))
 
-    # cleanup temporary files
-    if os.path.exists(tmp.name + ".idx"):
-        os.remove(tmp.name + ".idx")
-    tmp.close()
-    if 'qsv_slice_csv' in globals():
-        qsv_slice_csv.close()
-    if 'qsv_excel_csv' in globals():
-        qsv_excel_csv.close()
-    if 'qsv_input_csv' in globals():
-        qsv_input_csv.close()
-    if 'qsv_dedup_csv' in globals():
-        qsv_dedup_csv.close()
+    cleanup_tempfiles()
 
     total_elapsed = time.perf_counter() - timer_start
     logger.info(
