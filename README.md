@@ -1,6 +1,6 @@
 [CKAN Service Provider]: https://github.com/ckan/ckan-service-provider
 [Messytables]: https://github.com/okfn/messytables
-[qsv]: https://github.com/jqnatividad/qsv
+[qsv]: https://github.com/jqnatividad/qsv#qsv-ultra-fast-csv-data-wrangling-toolkit
 
 # DataPusher+
 
