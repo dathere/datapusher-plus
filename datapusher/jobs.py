@@ -498,11 +498,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         os.link(tmp.name, qsv_spreadsheet.name)
 
         # run `qsv excel` and export it to a CSV
+        # use --trim option to trim column names and the data
         qsv_excel_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         try:
             qsv_excel = subprocess.run(
                 [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET),
-                 '--output', qsv_excel_csv.name], check=True, capture_output=True, text=True)
+                 '--trim', '--output', qsv_excel_csv.name],
+                 check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             qsv_excel_csv.close()
