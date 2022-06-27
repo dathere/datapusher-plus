@@ -551,7 +551,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         dupe_count = int(str(qsv_dedup.stderr).strip())
         if dupe_count > 0:
             tmp = qsv_dedup_csv
-            logger.info(
+            logger.warning(
                 '{:,} duplicates found and removed...'.format(dupe_count))
         else:
             logger.info('No duplicates found...')
