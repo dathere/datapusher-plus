@@ -34,7 +34,7 @@ else:
 
 MAX_CONTENT_LENGTH = web.app.config.get('MAX_CONTENT_LENGTH') or 10485760
 QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvdp'
-PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 10000
+PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 1000
 DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
 CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
 DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
@@ -723,7 +723,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
                                records=None, aliases=None, calculate_record_count=False)
 
-    record_count = 0
+    copied_count = 0
     try:
         raw_connection = psycopg2.connect(WRITE_ENGINE_URL)
     except psycopg2.Error as e:
@@ -760,7 +760,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     'Postgres COPY failed: {}'.format(e)
                 )
             else:
-                record_count = cur.rowcount
+                copied_count = cur.rowcount
 
         raw_connection.commit()
         # this is needed to issue a VACUUM ANALYZE
@@ -772,9 +772,13 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     copy_elapsed = time.perf_counter() - copy_start
     logger.info('...copying done. Copied {n} rows to "{res_id}" in {copy_elapsed} seconds.'.format(
-        n='{:,}'.format(record_count), res_id=resource_id, copy_elapsed='{:,.2f}'.format(copy_elapsed)))
+        n='{:,}'.format(copied_count), res_id=resource_id, copy_elapsed='{:,.2f}'.format(copy_elapsed)))
 
     resource['datastore_active'] = True
+    resource['total_record_count'] = record_count
+    if PREVIEW_ROWS < record_count:
+        resource['preview'] = True
+        resource['preview_rows'] = copied_count
     update_resource(resource, api_key, ckan_url)
 
     if AUTO_ALIAS:
