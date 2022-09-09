@@ -6,6 +6,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2022-09-09
+
+### Added
+* available smarter data type mapping to Postgres data types. By looking at the min/max values of a column,
+  we can infer the best postgres data type - integer, bigint or numeric, instead of using the numeric Postgres type
+  for all integers.
+  This is done by changing TYPE_MAPPING of `Integer` from `numeric` to `smartint`.
+* Add resource preview metadata fields:
+    * `preview` - if the resource is a preview, and not the entire file, containing only the first PREVIEW_ROWS of the file (boolean)
+    * `preview_rows` - the number of rows of the preview
+    * `total_record_count` - the actual number of rows of the file
+
+### Changed
+* change mapping of inferred Date fields to the Postgres `date` data type, instead of using Postgres `timestamp` data type for
+  both Date (YYYY-MM-DD) and Datetime (YYYY-MM-DD HH:MM:SS TZ) columns.
+* warn when duplicates are found, instead of info
+* decreased default preview to 1,000 rows
+* better error handling when calling qsv binary
+* update instructions to use the latest qsv binary - qsv 0.67.0
+
+### Fixed
+* trimmed header and column values when processing spreadsheets. As spreadsheets are more often than not, manually curated,
+  there are often invisible whitespaces that "look" right that may cause invalid CSVs - e.g. column names with leading/trailing whitespaces
+  that cause Postgres errors when columns are created using the Excel column name.
+
 ## [0.0.23] - 2022-05-09
  ### Changed
 * use `psycopg2-binary` instead of `psycopg2` to ease installation and eliminate need to have postgres dev files
