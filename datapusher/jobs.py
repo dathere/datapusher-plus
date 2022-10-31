@@ -788,6 +788,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         resource_name = resource.get('name')
         package_name = package.get('name')
         owner_org = package.get('organization')
+        owner_org_name = ''
         if owner_org:
             owner_org_name = owner_org.get('name')
         if resource_name and package_name and owner_org_name:
