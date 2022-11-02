@@ -27,16 +27,16 @@ import ckanserviceprovider.util as util
 from ckanserviceprovider import web
 from config import config
 
+
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
 else:
     locale.setlocale(locale.LC_ALL, '')
 
-
-USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
+USE_PROXY = 'DOWNLOAD_PROXY' in config
 if USE_PROXY:
-    DOWNLOAD_PROXY = web.app.config.get('DOWNLOAD_PROXY')
+    DOWNLOAD_PROXY = config.get('DOWNLOAD_PROXY')
 
 if not config.get('SSL_VERIFY'):
     requests.packages.urllib3.disable_warnings()
@@ -377,7 +377,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         max_content_length = int(config.get('MAX_CONTENT_LENGTH'))
         preview_rows = config.get('PREVIEW_ROWS')
         try:
-            breakpoint()
             if cl and int(cl) > max_content_length and not preview_rows:
                 raise util.JobError(
                     'Resource too large to download: {cl} > max ({max_cl}).'

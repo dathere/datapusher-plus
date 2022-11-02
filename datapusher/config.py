@@ -49,6 +49,7 @@ class DataPusherPlusConfig(MutableMapping):
     DEFAULT_EXCEL_SHEET: int = 0
     AUTO_ALIAS: bool = True
     WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
+    DOWNLOAD_PROXY: str = ''
 
     """
     Map environment variables to class fields according to these rules:
