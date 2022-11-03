@@ -25,6 +25,8 @@ from datasize import DataSize
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
 from ckanserviceprovider import web
+from config import config
+
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
@@ -32,60 +34,17 @@ if locale.getdefaultlocale()[0]:
 else:
     locale.setlocale(locale.LC_ALL, '')
 
-MAX_CONTENT_LENGTH = web.app.config.get('MAX_CONTENT_LENGTH') or 10485760
-QSV_BIN = web.app.config.get('QSV_BIN') or '/usr/local/bin/qsvdp'
-PREVIEW_ROWS = web.app.config.get('PREVIEW_ROWS') or 1000
-DEFAULT_EXCEL_SHEET = web.app.config.get('DEFAULT_EXCEL_SHEET') or 0
-CHUNK_SIZE = web.app.config.get('CHUNK_SIZE') or 16384
-DOWNLOAD_TIMEOUT = web.app.config.get('DOWNLOAD_TIMEOUT') or 30
-WRITE_ENGINE_URL = web.app.config.get(
-    'WRITE_ENGINE_URL') or 'postgresql://datapusher:thepassword@localhost/datastore_default'
-
-if not WRITE_ENGINE_URL:
-    raise util.JobError('WRITE_ENGINE_URL is required.')
-
-USE_PROXY = 'DOWNLOAD_PROXY' in web.app.config
+USE_PROXY = 'DOWNLOAD_PROXY' in config
 if USE_PROXY:
-    DOWNLOAD_PROXY = web.app.config.get('DOWNLOAD_PROXY')
+    DOWNLOAD_PROXY = config.get('DOWNLOAD_PROXY')
 
-if web.app.config.get('QSV_DEDUP') in ['False', 'FALSE', '0', False, 0]:
-    QSV_DEDUP = False
-else:
-    QSV_DEDUP = True
-
-if web.app.config.get('AUTO_ALIAS') in ['False', 'FALSE', '0', False, 0]:
-    AUTO_ALIAS = False
-else:
-    AUTO_ALIAS = True
-
-if web.app.config.get('SSL_VERIFY') in ['False', 'FALSE', '0', False, 0]:
-    SSL_VERIFY = False
-else:
-    SSL_VERIFY = True
-
-if not SSL_VERIFY:
+if not config.get('SSL_VERIFY'):
     requests.packages.urllib3.disable_warnings()
 
 POSTGRES_INT_MAX = 2147483647
 POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
-
-_TYPE_MAPPING = {
-    'String': 'text',
-    # smartint looks at the min/max values of qsv stats scan and
-    # chooses integer, bigint or numeric as appropriate
-    'Integer': 'smartint',
-    'Float': 'numeric',
-    'DateTime': 'timestamp',
-    'Date': 'date',
-    'NULL': 'text',
-}
-
-_TYPES = ['String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL']
-
-TYPE_MAPPING = web.app.config.get('TYPE_MAPPING', _TYPE_MAPPING)
-TYPES = web.app.config.get('TYPES', _TYPES)
 
 # if a field has any of these anywhere in their name, date inferencing
 # is turned on when scanning for data types, which is a relatively expensive op
@@ -218,7 +177,7 @@ def delete_datastore_resource(resource_id, api_key, ckan_url):
     try:
         delete_url = get_url('datastore_delete', ckan_url)
         response = requests.post(delete_url,
-                                 verify=SSL_VERIFY,
+                                 verify=config.get('SSL_VERIFY'),
                                  data=json.dumps({'id': resource_id,
                                                   'force': True}),
                                  headers={'Content-Type': 'application/json',
@@ -234,7 +193,7 @@ def datastore_resource_exists(resource_id, api_key, ckan_url):
     try:
         search_url = get_url('datastore_search', ckan_url)
         response = requests.post(search_url,
-                                 verify=SSL_VERIFY,
+                                 verify=config.get('SSL_VERIFY'),
                                  data=json.dumps({'id': resource_id,
                                                   'limit': 0}),
                                  headers={'Content-Type': 'application/json',
@@ -268,7 +227,7 @@ def send_resource_to_datastore(resource, headers, api_key, ckan_url,
 
     url = get_url('datastore_create', ckan_url)
     r = requests.post(url,
-                      verify=SSL_VERIFY,
+                      verify=config.get('SSL_VERIFY'),
                       data=json.dumps(request, cls=DatastoreEncoder),
                       headers={'Content-Type': 'application/json',
                                'Authorization': api_key}
@@ -286,7 +245,7 @@ def update_resource(resource, api_key, ckan_url):
     url = get_url('resource_update', ckan_url)
     r = requests.post(
         url,
-        verify=SSL_VERIFY,
+        verify=config.get('SSL_VERIFY'),
         data=json.dumps(resource),
         headers={'Content-Type': 'application/json',
                  'Authorization': api_key}
@@ -301,7 +260,7 @@ def get_resource(resource_id, ckan_url, api_key):
     """
     url = get_url('resource_show', ckan_url)
     r = requests.post(url,
-                      verify=SSL_VERIFY,
+                      verify=config.get('SSL_VERIFY'),
                       data=json.dumps({'id': resource_id}),
                       headers={'Content-Type': 'application/json',
                                'Authorization': api_key}
@@ -317,7 +276,7 @@ def get_package(package_id, ckan_url, api_key):
     """
     url = get_url('package_show', ckan_url)
     r = requests.post(url,
-                      verify=SSL_VERIFY,
+                      verify=config.get('SSL_VERIFY'),
                       data=json.dumps({'id': package_id}),
                       headers={'Content-Type': 'application/json',
                                'Authorization': api_key}
@@ -362,10 +321,10 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.setLevel(logging.DEBUG)
 
     # check if QSV_BIN exists
-    qsv_path = Path(QSV_BIN)
+    qsv_path = Path(config.get('QSV_BIN'))
     if not qsv_path.is_file():
         raise util.JobError(
-            '{} not found.'.format(QSV_BIN)
+            '{} not found.'.format(config.get('QSV_BIN'))
         )
 
     validate_input(input)
@@ -406,8 +365,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         # otherwise we won't get file from private resources
         headers['Authorization'] = api_key
     try:
-        kwargs = {'headers': headers, 'timeout': DOWNLOAD_TIMEOUT,
-                  'verify': SSL_VERIFY, 'stream': True}
+        kwargs = {'headers': headers, 'timeout': config.get('DOWNLOAD_TIMEOUT'),
+                  'verify': config.get('SSL_VERIFY'), 'stream': True}
         if USE_PROXY:
             kwargs['proxies'] = {
                 'http': DOWNLOAD_PROXY, 'https': DOWNLOAD_PROXY}
@@ -415,11 +374,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         response.raise_for_status()
 
         cl = response.headers.get('content-length')
+        max_content_length = int(config.get('MAX_CONTENT_LENGTH'))
+        preview_rows = config.get('PREVIEW_ROWS')
         try:
-            if cl and int(cl) > MAX_CONTENT_LENGTH and not PREVIEW_ROWS:
+            if cl and int(cl) > max_content_length and not preview_rows:
                 raise util.JobError(
                     'Resource too large to download: {cl} > max ({max_cl}).'
-                    .format(cl=cl, max_cl=MAX_CONTENT_LENGTH))
+                    .format(cl=cl, max_cl=max_content_length))
         except ValueError:
             pass
 
@@ -427,12 +388,12 @@ def push_to_datastore(task_id, input, dry_run=False):
             suffix='.' + resource.get('format').lower())
         length = 0
         m = hashlib.md5()
-        for chunk in response.iter_content(CHUNK_SIZE):
+        for chunk in response.iter_content(int(config.get('CHUNK_SIZE'))):
             length += len(chunk)
-            if length > MAX_CONTENT_LENGTH and not PREVIEW_ROWS:
+            if length > max_content_length and not preview_rows:
                 raise util.JobError(
                     'Resource too large to process: {cl} > max ({max_cl}).'
-                    .format(cl=length, max_cl=MAX_CONTENT_LENGTH))
+                    .format(cl=length, max_cl=max_content_length))
             tmp.write(chunk)
             m.update(chunk)
 
@@ -500,9 +461,10 @@ def push_to_datastore(task_id, input, dry_run=False):
         # run `qsv excel` and export it to a CSV
         # use --trim option to trim column names and the data
         qsv_excel_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+        default_excel_sheet = config.get('DEFAULT_EXCEL_SHEET')
         try:
             qsv_excel = subprocess.run(
-                [QSV_BIN, 'excel', qsv_spreadsheet.name, '--sheet', str(DEFAULT_EXCEL_SHEET),
+                [config.get('QSV_BIN'), 'excel', qsv_spreadsheet.name, '--sheet', str(default_excel_sheet),
                  '--trim', '--output', qsv_excel_csv.name],
                  check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
@@ -525,7 +487,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info('Validating/Transcoding {}...'.format(format))
         try:
             qsv_input = subprocess.run(
-                [QSV_BIN, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
+                [config.get('QSV_BIN'), 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             qsv_input_csv.close()
@@ -536,12 +498,12 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
-    if QSV_DEDUP:
+    if config.get('QSV_DEDUP'):
         qsv_dedup_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         logger.info('Checking for duplicate rows...')
         try:
             qsv_dedup = subprocess.run(
-                [QSV_BIN, 'dedup', tmp.name, '--output', qsv_dedup_csv.name], capture_output=True, text=True)
+                [config.get('QSV_BIN'), 'dedup', tmp.name, '--output', qsv_dedup_csv.name], capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             qsv_dedup_csv.close()
@@ -560,7 +522,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # are all accelerated/multithreaded when an index is present
     try:
         subprocess.run(
-            [QSV_BIN, 'index', tmp.name], check=True)
+            [config.get('QSV_BIN'), 'index', tmp.name], check=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles
         raise util.JobError(
@@ -570,7 +532,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # get record count
     try:
         qsv_count = subprocess.run(
-            [QSV_BIN, 'count', tmp.name], capture_output=True, check=True, text=True)
+            [config.get('QSV_BIN'), 'count', tmp.name], capture_output=True, check=True, text=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles()
         raise util.JobError(
@@ -578,7 +540,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     record_count = int(str(qsv_count.stdout).strip())
     unique_qualifier = ''
-    if QSV_DEDUP:
+    if config.get('QSV_DEDUP'):
         unique_qualifier = 'unique'
     logger.info('{:,} {} records detected...'.format(
         record_count, unique_qualifier))
@@ -594,7 +556,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if DATELIKE_FIELDNAMES:
         try:
             qsv_headers = subprocess.run(
-                [QSV_BIN, 'headers', '--just-names', tmp.name], capture_output=True, check=True, text=True)
+                [config.get('QSV_BIN'), 'headers', '--just-names', tmp.name], capture_output=True, check=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             raise util.JobError(
@@ -610,7 +572,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     headers_min = []
     headers_max = []
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
-    qsv_stats_cmd = [QSV_BIN, 'stats', tmp.name,
+    qsv_stats_cmd = [config.get('QSV_BIN'), 'stats', tmp.name,
                      '--output', qsv_stats_csv.name]
     if inferdates_flag:
         qsv_stats_cmd.append('--infer-dates')
@@ -661,7 +623,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         delete_datastore_resource(resource_id, api_key, ckan_url)
 
     # 1st pass of building headers_dict
-    temp_headers_dicts = [dict(id=field[0], type=TYPE_MAPPING[str(field[1])])
+    type_mapping = config.get('TYPE_MAPPING')
+    temp_headers_dicts = [dict(id=field[0], type=type_mapping[str(field[1])])
                           for field in zip(headers, types)]
 
     # 2nd pass header_dicts, checking for smartint types
@@ -685,7 +648,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 h['info'] = existing_info[h['id']]
                 # create columns with types user requested
                 type_override = existing_info[h['id']].get('type_override')
-                if type_override in list(_TYPE_MAPPING.values()):
+                if type_override in list(type_mapping.values()):
                     h['type'] = type_override
 
     logger.info('Determined headers and types: {headers}...'.format(
@@ -693,20 +656,20 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # if rowcount > PREVIEW_ROWS create a preview using qsv slice
     rows_to_copy = record_count
-    if PREVIEW_ROWS > 0 and record_count > PREVIEW_ROWS:
+    if preview_rows > 0 and record_count > preview_rows:
         logger.info(
-            'Preparing {:,}-row preview...'.format(PREVIEW_ROWS))
+            'Preparing {:,}-row preview...'.format(preview_rows))
         qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         try:
             qsv_slice = subprocess.run(
-                [QSV_BIN, 'slice', '--len', str(PREVIEW_ROWS), tmp.name, '--output', qsv_slice_csv.name], check=True)
+                [config.get('QSV_BIN'), 'slice', '--len', str(preview_rows), tmp.name, '--output', qsv_slice_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             qsv_slice_csv.close()
             raise util.JobError(
                 'Cannot create a preview slice: {}'.format(e)
             )
-        rows_to_copy = PREVIEW_ROWS
+        rows_to_copy = preview_rows
         tmp = qsv_slice_csv
 
     analysis_elapsed = time.perf_counter() - analysis_start
@@ -725,7 +688,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     copied_count = 0
     try:
-        raw_connection = psycopg2.connect(WRITE_ENGINE_URL)
+        raw_connection = psycopg2.connect(config.get('WRITE_ENGINE_URL'))
     except psycopg2.Error as e:
         cleanup_tempfiles()
         raise util.JobError(
@@ -776,12 +739,12 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource['datastore_active'] = True
     resource['total_record_count'] = record_count
-    if PREVIEW_ROWS < record_count:
+    if preview_rows < record_count:
         resource['preview'] = True
         resource['preview_rows'] = copied_count
     update_resource(resource, api_key, ckan_url)
 
-    if AUTO_ALIAS:
+    if config.get('AUTO_ALIAS'):
         # get package info, so we can construct the alias
         package = get_package(resource['package_id'], ckan_url, api_key)
 

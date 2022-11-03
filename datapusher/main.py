@@ -2,6 +2,7 @@ import os
 import ckanserviceprovider.web as web
 
 from datapusher import jobs
+from config import config
 
 # check whether jobs have been imported properly
 assert(jobs.push_to_datastore)
@@ -9,7 +10,8 @@ assert(jobs.push_to_datastore)
 
 def serve():
     web.init()
-    web.app.run(web.app.config.get('HOST'), web.app.config.get('PORT'))
+    web.app.config.update(config)
+    web.app.run(config.get('HOST'), config.get('PORT'))
 
 
 def serve_test():
@@ -48,7 +50,7 @@ def initdb():
     import ckanserviceprovider.db as servicedb
 
     web._configure_app(web.app)
-    servicedb.init(web.app.config['SQLALCHEMY_DATABASE_URI'])
+    servicedb.init(config.get('SQLALCHEMY_DATABASE_URI'))
 
 
 if __name__ == '__main__':
