@@ -107,3 +107,8 @@ class DataPusherPlusConfig(MutableMapping):
 
 # Expose config object for app to import
 config = DataPusherPlusConfig(os.environ)
+
+
+# Expose these two variables so ckanserviceprovider can use it
+SQLALCHEMY_DATABASE_URI = config.get('SQLALCHEMY_DATABASE_URI')
+WRITE_ENGINE_URL = config.get('WRITE_ENGINE_URL')
