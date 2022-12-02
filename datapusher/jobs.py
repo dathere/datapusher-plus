@@ -118,7 +118,7 @@ def get_url(action, ckan_url):
     Get url for ckan action
     """
     if not urlsplit(ckan_url).scheme:
-        ckan_url = 'http://' + ckan_url.lstrip('/')
+        ckan_url = 'http://' + ckan_url.lstrip('/') #DevSkim: ignore DS137138 
     ckan_url = ckan_url.rstrip('/')
     return '{ckan_url}/api/3/action/{action}'.format(
         ckan_url=ckan_url, action=action)
@@ -399,7 +399,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     except requests.HTTPError as e:
         raise HTTPError(
-            "DataPusher received a bad HTTP response when trying to download "
+            "DataPusher+ received a bad HTTP response when trying to download "
             "the data file", status_code=e.response.status_code,
             request_url=url, response=e.response.content)
     except requests.RequestException as e:
@@ -430,6 +430,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_input_csv.close()
         if 'qsv_dedup_csv' in globals():
             qsv_dedup_csv.close()
+        if 'qsv_safenames_csv' in globals():
+            qsv_safenames_csv.close()
 
     '''
     Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
@@ -467,7 +469,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                  check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
-            qsv_excel_csv.close()
             raise util.JobError(
                 'Cannot export spreadsheet to CSV: {}'.format(e)
             )
@@ -488,7 +489,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [config.get('QSV_BIN'), 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
-            qsv_input_csv.close()
             raise util.JobError(
                 'Invalid CSV file: {}'.format(e)
             )
@@ -504,7 +504,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [config.get('QSV_BIN'), 'dedup', tmp.name, '--output', qsv_dedup_csv.name], capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
-            qsv_dedup_csv.close()
             raise util.JobError(
                 'Check for duplicates error: {}'.format(e)
             )
@@ -515,6 +514,20 @@ def push_to_datastore(task_id, input, dry_run=False):
                 '{:,} duplicates found and removed...'.format(dupe_count))
         else:
             logger.info('No duplicates found...')
+
+    # ensure our column/header names identifiers are valid postgres identifiers
+    qsv_safenames_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+    logger.info('Checking for safe column names...')
+    try:
+        qsv_input = subprocess.run(
+            [config.get('QSV_BIN'), 'safenames', tmp.name, '--output', qsv_safenames_csv.name], check=True)
+    except subprocess.CalledProcessError as e:
+        cleanup_tempfiles()
+        raise util.JobError(
+            'Safenames CSV file: {}'.format(e)
+        )
+    tmp = qsv_safenames_csv
+
 
     # index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
@@ -663,7 +676,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [config.get('QSV_BIN'), 'slice', '--len', str(preview_rows), tmp.name, '--output', qsv_slice_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
-            qsv_slice_csv.close()
             raise util.JobError(
                 'Cannot create a preview slice: {}'.format(e)
             )
