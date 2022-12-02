@@ -30,3 +30,4 @@ pip-log.txt
 *.sqlite3
 
 .DS_Store
+datapusher/config_local.py
