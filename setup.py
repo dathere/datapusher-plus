@@ -60,6 +60,7 @@ setup(
     # requirements files see:
     # https://packaging.python.org/en/latest/discussions/install-requires-vs-requirements/
     install_requires=[
+        "python-dotenv",
         'wheel',
         'ckanserviceprovider >= 1.0',
         'requests',
