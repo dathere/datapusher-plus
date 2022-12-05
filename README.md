@@ -132,8 +132,8 @@ Install qsv:
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.67.0/qsv-0.67.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.67.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.75.0/qsv-0.75.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.75.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
 
 Alternatively, if you want to install qsv from source, follow
@@ -143,25 +143,25 @@ section to squeeze even more performance from qsv.
 
 
 > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
-`sudo qsv`/`sudo qsvlite` and it will check the repo for the latest version and update as required.
+`sudo qsv`/`sudo qsvlite`/`sudo qsvdp` and it will check the repo for the latest version and update as required.
 
 
-Copy `datapusher/settings.py` to a new file like `settings_local.py` and modify your configuration as required.
+Copy `datapusher/config.py` to a new file like `config_local.py` and modify your configuration as required.
 Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
-    cp datapusher/settings.py settings_local.py
-    nano settings_local.py
+    cd datapusher
+    cp config.py config_local.py
+    nano config_local.py
 
 Run DataPusher+:
 
-    export JOB_CONFIG=$(realpath settings_local.py)
-    python datapusher/main.py
+    python3 datapusher/main.py datapusher/config_local.py
 
 By default, DataPusher+ should be running at the following port:
 
     http://localhost:8800/
 
-## Production deployment
+## Production deployment (WIP)
 
 
 These instructions assume you already have CKAN installed on this server in the
@@ -180,27 +180,27 @@ to keep the process up.
     # Install requirements for DataPusher+
     sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
 
-    # Create a virtualenv for DataPusher+. DP+ requires python 3.7+.
-    # If you are on Ubuntu 18.04 LTS and installed python3.7 manually as noted below
-    sudo python3.7 -m venv /usr/lib/ckan/datapusher-plus
-    # If you already have Python 3.7+
-    sudo python3 -m venv /usr/lib/ckan/datapusher-plus
+    # Create a virtualenv for DataPusher+. DP+ requires at least python 3.7+.
+    # If you are on Ubuntu 18.04 LTS and installed python3.7 manually as noted above
+    sudo python3.7 -m venv /usr/lib/ckan/dplus_venv
+    # If you already have Python 3.7 and above
+    sudo python3 -m venv /usr/lib/ckan/dpplus_venv
 
     # Install qsvdp binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.67.0/qsv-0.67.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.67.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.76.3-x86_64-unknown-linux-gnu.zip
     sudo mv qsvdp /usr/local/bin
 
     # Install DataPusher-plus and uwsgi for production
-    sudo /usr/lib/ckan/datapusher-plus/bin/pip install datapusher-plus uwsgi
+    sudo /usr/lib/ckan/dpplus_venv/bin/pip install datapusher-plus uwsgi
 
     # generate a settings file and tune it, as well as a uwsgi ini file
-    sudo mkdir -p /etc/ckan/datapusher
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher/settings.py
+    sudo mkdir -p /etc/ckan/datapusher-plus
+    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/config.py -o /etc/ckan/datapusher-plus/config_local.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher/uwsgi.ini
 
     # Initialize the database. Be sure to edit settings.py first!
-    /usr/lib/ckan/datapusher-plus/bin/datapusher_initdb /etc/ckan/datapusher/settings.py
+    /usr/lib/ckan/dpplus_venv/bin/datapusher_initdb /etc/ckan/datapusher-plus/config_local.py
 
     # Create a user to run the web service (if necessary)
     sudo addgroup www-data
@@ -208,8 +208,8 @@ to keep the process up.
 
 At this point you can run DataPusher+ with the following command:
 
-    export JOB_CONFIG=/etc/ckan/datapusher/settings.py 
-    /usr/lib/ckan/datapusher-plus/bin/uwsgi --enable-threads -i /etc/ckan/datapusher/uwsgi.ini
+    export JOB_CONFIG=/etc/ckan/datapusher-plus/config_local.py 
+    /usr/lib/ckan/dpplus_venv/bin/uwsgi --enable-threads -i /etc/ckan/datapusher-plus/uwsgi.ini
 
 You might need to change the `uid` and `guid` settings when using a different user.
 
