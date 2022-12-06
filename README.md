@@ -95,20 +95,24 @@ about the "Multi-pass Datapusher" from May 2015 for additional context.
 
 Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same way.
 
-Create a virtual environment for Datapusher+ using at least python 3.7:
+Create a virtual environment for Datapusher+ using at least python 3.8:
 
-    python -m venv dpplus_venv
+    cd /usr/lib/ckan
+    sudo python3.8 -m venv dpplus_venv
+    sudo chown -R $(whoami) dpplus_venv
     . dpplus_venv/bin/activate
     cd dpplus_venv
 
-> ℹ️ **NOTE:** DP+ requires at least python 3.7. However, Ubuntu 18.04 LTS only comes with python 3.6. 
-> To install python 3.7 on Ubuntu 18.04 (or even a higher version, as DP+ works with python 3.7 and above),
-> follow the procedure below:
+> ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.8
+> to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
+> To install python 3.8 on Ubuntu, follow the procedure below:
 > 
 > ```
 > sudo add-apt-repository ppa:deadsnakes/ppa
-> # we use 3.7 here, but you can get a higher version by changing the version suffix of the packages below
-> sudo apt install python3.7 python3.7-venv python3.7-dev
+> # we use 3.8 here, but you can get a higher version by changing the version suffix of the packages below
+> sudo apt install python3.8 python3.8-venv python3.8-dev
+> # install additional dependencies
+> sudo apt install build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev
 > ```
 >
 > Note that DP+ still works with CKAN<=2.8, which uses older versions of python.
@@ -132,8 +136,8 @@ Install qsv:
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.75.0/qsv-0.75.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.75.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-musl.zip
+    unzip qsv-0.75.0-x86_64-unknown-linux-musl.zip
     sudo mv qsv* /usr/local/bin
 
 Alternatively, if you want to install qsv from source, follow
@@ -143,7 +147,7 @@ section to squeeze even more performance from qsv.
 
 
 > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
-`sudo qsv`/`sudo qsvlite`/`sudo qsvdp` and it will check the repo for the latest version and update as required.
+qsv with the `--update` option and it will check for the latest version and update as required.
 
 
 Copy `datapusher/config.py` to a new file like `config_local.py` and modify your configuration as required.
@@ -163,10 +167,9 @@ By default, DataPusher+ should be running at the following port:
 
 ## Production deployment (WIP)
 
-
+https://docs.rs/memmap2/latest/memmap2/
 These instructions assume you already have CKAN installed on this server in the
-default location described in the CKAN install documentation
-(`/usr/lib/ckan/default`).  If this is correct you should be able to run the
+default location described in the CKAN install dhttps://docs.rs/memmap2/latest/memmap2/ou should be able to run the
 following commands directly, if not you will need to adapt the previous path to
 your needs.
 
