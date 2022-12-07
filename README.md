@@ -139,7 +139,7 @@ it to the appropriate directory, e.g. for Linux:
     wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-musl.zip
     unzip qsv-0.76.3-x86_64-unknown-linux-musl.zip
     sudo mv qsv* /usr/local/bin
-    rm qsv-0.76.3-x86_64-unknown-linux-musl.zipx
+    rm qsv-0.76.3-x86_64-unknown-linux-musl.zip
 
 Alternatively, if you want to install qsv from source, follow
 the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
