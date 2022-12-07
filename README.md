@@ -137,7 +137,7 @@ Install qsv:
 it to the appropriate directory, e.g. for Linux:
 
     wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-musl.zip
-    unzip qsv-0.75.0-x86_64-unknown-linux-musl.zip
+    unzip qsv-0.76.3-x86_64-unknown-linux-musl.zip
     sudo mv qsv* /usr/local/bin
 
 Alternatively, if you want to install qsv from source, follow
@@ -154,10 +154,7 @@ Copy `datapusher/config.py` to a new file like `config_local.py` and modify your
 Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
     cd datapusher
-    cp config.py config_local.py
-    nano config_local.py
-
-Run DataPusher+:
+    cp config.py config_local.pyhttps://docs.rs/memmap2/latest/memmap2/
 
     python3 datapusher/main.py datapusher/config_local.py
 
@@ -167,7 +164,6 @@ By default, DataPusher+ should be running at the following port:
 
 ## Production deployment (WIP)
 
-https://docs.rs/memmap2/latest/memmap2/
 These instructions assume you already have CKAN installed on this server in the
 default location described in the CKAN install dhttps://docs.rs/memmap2/latest/memmap2/ou should be able to run the
 following commands directly, if not you will need to adapt the previous path to
