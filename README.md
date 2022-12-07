@@ -139,6 +139,7 @@ it to the appropriate directory, e.g. for Linux:
     wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-musl.zip
     unzip qsv-0.76.3-x86_64-unknown-linux-musl.zip
     sudo mv qsv* /usr/local/bin
+    rm qsv-0.76.3-x86_64-unknown-linux-musl.zipx
 
 Alternatively, if you want to install qsv from source, follow
 the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
@@ -154,7 +155,7 @@ Copy `datapusher/config.py` to a new file like `config_local.py` and modify your
 Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
     cd datapusher
-    cp config.py config_local.pyhttps://docs.rs/memmap2/latest/memmap2/
+    cp config.py config_local.py
 
     python3 datapusher/main.py datapusher/config_local.py
 
@@ -165,8 +166,8 @@ By default, DataPusher+ should be running at the following port:
 ## Production deployment (WIP)
 
 These instructions assume you already have CKAN installed on this server in the
-default location described in the CKAN install dhttps://docs.rs/memmap2/latest/memmap2/ou should be able to run the
-following commands directly, if not you will need to adapt the previous path to
+default location described in the CKAN install documentation (`/usr/lib/ckan/default`). If this is the case,
+you should be able to run the following commands directly, if not you will need to adapt the previous path to
 your needs.
 
 These instructions set up the DataPusher web service on
@@ -176,19 +177,19 @@ to set up Nginx as a reverse proxy in front of it and something like Supervisor
 to keep the process up.
 
 
-    # Install requirements for DataPusher+
+    # Install requirements for DataPusher+. Be sure to have at least Python 3.8
     sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
 
-    # Create a virtualenv for DataPusher+. DP+ requires at least python 3.7+.
-    # If you are on Ubuntu 18.04 LTS and installed python3.7 manually as noted above
-    sudo python3.7 -m venv /usr/lib/ckan/dplus_venv
-    # If you already have Python 3.7 and above
-    sudo python3 -m venv /usr/lib/ckan/dpplus_venv
+    cd /usr/lib/ckan
+
+    # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
+    sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
 
     # Install qsvdp binary, if required
     wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-gnu.zip
     unzip qsv-0.76.3-x86_64-unknown-linux-gnu.zip
-    sudo mv qsvdp /usr/local/bin
+    sudo mv qsv* /usr/local/bin
+    rm qsv-0.76.3-x86_64-unknown-linux-gnu.zip
 
     # Install DataPusher-plus and uwsgi for production
     sudo /usr/lib/ckan/dpplus_venv/bin/pip install datapusher-plus uwsgi
@@ -198,7 +199,7 @@ to keep the process up.
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/config.py -o /etc/ckan/datapusher-plus/config_local.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher/uwsgi.ini
 
-    # Initialize the database. Be sure to edit settings.py first!
+    # Initialize the database. Be sure to edit config_local.py first!
     /usr/lib/ckan/dpplus_venv/bin/datapusher_initdb /etc/ckan/datapusher-plus/config_local.py
 
     # Create a user to run the web service (if necessary)
