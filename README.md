@@ -225,7 +225,7 @@ To deploy it using supervisor:
 ### CKAN Configuration
 
 Add `datapusher` to the plugins in your CKAN configuration file
-(generally located at `/etc/ckan/default/production.ini` or `/etc/ckan/default/ckan.ini`):
+(generally located at `/etc/ckan/default/ckan.ini`):
 
     ckan.plugins = <other plugins> datapusher
 
@@ -253,7 +253,7 @@ integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/
 
 ### DataPusher+ Configuration
 
-The DataPusher+ instance is configured in the `deployment/datapusher_settings.py`
+The DataPusher+ instance is configured in the `config_local.py`
 file. The location of this file can be adjusted using the `JOB_CONFIG`
 environment variable which should provide an absolute path to a python-formatted
 config file.
