@@ -19,7 +19,7 @@ setup(
     # http://packaging.python.org/en/latest/tutorial.html#version
     version=__version__,
 
-    description="A standalone web service that parses the contents of a CKAN site's data files and pushes them into its DataStore. Accelerated by qsv.",
+    description="A standalone web service that parses the contents of a CKAN site's data files (CSV, TSV, Excel and ODS) and pushes them into its DataStore. Accelerated by qsv.",
     long_description=long_description,
     long_description_content_type='text/markdown',
 
@@ -75,7 +75,7 @@ setup(
 
     # Although 'package_data' is the preferred approach, in some case you may
     # need to place data files outside of your packages.
-    # see http://docs.python.org/3.4/distutils/setupscript.html#installing-additional-files
+    # see http://docs.python.org/3.8/distutils/setupscript.html#installing-additional-files
     # In this case, 'data_file' will be installed into '<sys.prefix>/my_data'
     data_files=[],
 
