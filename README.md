@@ -211,7 +211,7 @@ At this point you can run DataPusher+ with the following command:
     export JOB_CONFIG=/etc/ckan/datapusher-plus/config_local.py 
     /usr/lib/ckan/dpplus_venv/bin/uwsgi --enable-threads -i /etc/ckan/datapusher-plus/uwsgi.ini
 
-You might need to change the `uid` and `guid` settings when using a different user.
+You might need to change the `uid` and `guid` in the `uwsgi.ini` file when using a different user.
 
 To deploy it using supervisor:
 
