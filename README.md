@@ -162,10 +162,10 @@ to keep the process up.
     sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
 
     # Install qsvdp binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.76.3-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-musl.zip
+    unzip qsv-0.76.3-x86_64-unknown-linux-musl.zip
     sudo mv qsv* /usr/local/bin
-    rm qsv-0.76.3-x86_64-unknown-linux-gnu.zip
+    rm qsv-0.76.3-x86_64-unknown-linux-musl.zip
 
     # Install DataPusher-plus and uwsgi for production
     sudo /usr/lib/ckan/dpplus_venv/bin/pip install datapusher-plus uwsgi
