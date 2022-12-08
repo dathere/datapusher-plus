@@ -411,7 +411,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     tmp.seek(0)
 
     if (resource.get('hash') == file_hash and not data.get('ignore_hash')):
-        logger.info("The file hash hasn't changed: {hash}.".format(
+        logger.info("Upload skipped as the file hash hasn't changed: {hash}.".format(
             hash=file_hash))
         return
 
