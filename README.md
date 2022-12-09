@@ -50,11 +50,11 @@ It features:
 
 * **Extended preprocessing with qsv**
 
-  Apart from bullet-proof data type inferences, qsv is leveraged by Datapusher+ to convert XLS/ODS files;
+  Apart from bullet-proof data type inferences, qsv is leveraged by Datapusher+ to convert Excel & ODS files;
   count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180); sanitize header names so they are always valid Postgres column identifers;
   optionally create a preview subset and optionally deduplicate rows.
 
-  Future versions of Datapusher+ will further leverage qsv's 70+ commands to do additional
+  Future versions of Datapusher+ will further leverage qsv's 80+ commands to do additional
   preprocessing, data-wrangling and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/issues/5).
   Ideas, suggestions and your feedback are most welcome!
 
@@ -79,7 +79,7 @@ Create a virtual environment for Datapusher+ using at least python 3.8:
     . dpplus_venv/bin/activate
     cd dpplus_venv
 
-> ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.8
+> ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.7/3.8
 > to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
 > To install python 3.8 on Ubuntu, follow the procedure below:
 > 
@@ -139,7 +139,9 @@ By default, DataPusher+ should be running at the following port:
 
     http://localhost:8800/
 
-## Production deployment (WIP)
+## Production deployment
+
+### Manual installation
 
 These instructions assume you already have CKAN installed on this server in the
 default location described in the CKAN install documentation (`/usr/lib/ckan/default`). If this is the case,
@@ -179,8 +181,8 @@ to keep the process up.
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher-plus/settings.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
-    # Initialize the database. 
-    # Be sure to edit config_local.py first with the right connect strings!
+    # Initialize the database if required.
+    # Be sure to the config_local.py and settings.py have the right connect strings!
     /usr/lib/ckan/dpplus_venv/bin/datapusher_initdb /etc/ckan/datapusher-plus/config_local.py
 
     # Create a user to run the web service (if necessary)
@@ -198,6 +200,13 @@ To deploy it using supervisor:
 
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.conf -o /etc/supervisor/conf.d/datapusher-uwsgi.conf
     sudo service supervisor restart
+
+### Package deployment (WIP)
+As Datapusher+ is quite involved as evinced by the above procedure, a containerized package installation 
+will make it far easier not only to deploy DP+ to production, but also to experiment with.
+
+The upcoming DP+ package will also expose additional features and administrative interface to manage
+not only Datapusher+ jobs, but also to manage the CKAN Datastore.
 
 
 ## Configuring
@@ -262,9 +271,7 @@ Here's a summary of the options available.
 | WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to use the `datapusher` user |
 
 All of the configuration options above can be also provided as environment
-variables prepending the name with `DATAPUSHER_`, eg
-`DATAPUSHER_SQLALCHEMY_DATABASE_URI`, `DATAPUSHER_PORT`, etc. For variables with
-boolean values you must use `1` or `0`.
+variables, which can be set by setting key-value pairs in a `.env` file. For variables with boolean values you must use `1` or `0`.
 
 ### DataPusher+ Database Setup
 
