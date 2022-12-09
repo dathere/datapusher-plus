@@ -112,10 +112,10 @@ Install qsv:
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-musl.zip
-    unzip qsv-0.76.3-x86_64-unknown-linux-musl.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.77.0/qsv-0.77.0-x86_64-unknown-linux-musl.zip
+    unzip qsv-0.77.0-x86_64-unknown-linux-musl.zip
     sudo mv qsv* /usr/local/bin
-    rm qsv-0.76.3-x86_64-unknown-linux-musl.zip
+    rm qsv-0.77.0-x86_64-unknown-linux-musl.zip
 
 Alternatively, if you want to install qsv from source, follow
 the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
@@ -161,11 +161,16 @@ to keep the process up.
     # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
     sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
 
-    # Install qsvdp binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.76.3/qsv-0.76.3-x86_64-unknown-linux-musl.zip
-    unzip qsv-0.76.3-x86_64-unknown-linux-musl.zip
+    # Install qsv binary, if required
+    wget https://github.com/jqnatividad/qsv/releases/download/0.77.0/qsv-0.77.0-x86_64-unknown-linux-musl.zip
+    unzip qsv-0.77.0-x86_64-unknown-linux-musl.zip
     sudo mv qsv* /usr/local/bin
-    rm qsv-0.76.3-x86_64-unknown-linux-musl.zip
+    rm qsv-0.77.0-x86_64-unknown-linux-musl.zip
+
+    # if qsv is already installed, be sure to update it to the latest release
+    sudo qsvdp --update
+    sudo qsvlite --update
+    sudo qsv --update
 
     # Install DataPusher-plus and uwsgi for production
     sudo /usr/lib/ckan/dpplus_venv/bin/pip install datapusher-plus uwsgi
@@ -175,7 +180,8 @@ to keep the process up.
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/config.py -o /etc/ckan/datapusher-plus/config_local.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
-    # Initialize the database. Be sure to edit config_local.py first!
+    # Initialize the database. 
+    # Be sure to edit config_local.py first with the right connect strings!
     /usr/lib/ckan/dpplus_venv/bin/datapusher_initdb /etc/ckan/datapusher-plus/config_local.py
 
     # Create a user to run the web service (if necessary)
