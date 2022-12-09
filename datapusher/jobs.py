@@ -118,7 +118,7 @@ def get_url(action, ckan_url):
     Get url for ckan action
     """
     if not urlsplit(ckan_url).scheme:
-        ckan_url = 'http://' + ckan_url.lstrip('/') #DevSkim: ignore DS137138 
+        ckan_url = 'http://' + ckan_url.lstrip('/')  # DevSkim: ignore DS137138
     ckan_url = ckan_url.rstrip('/')
     return '{ckan_url}/api/3/action/{action}'.format(
         ckan_url=ckan_url, action=action)
@@ -439,8 +439,16 @@ def push_to_datastore(task_id, input, dry_run=False):
     addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
     '''
     fetch_elapsed = time.perf_counter() - timer_start
-    logger.info('Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...'.format(
-        DataSize(cl), fetch_elapsed))
+    try:
+        resource_size = DataSize(cl)
+    except:
+        resource_size = 0
+    if resource_size > 0:
+        logger.info('Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...'.format(
+            resource_size, fetch_elapsed))
+    else:
+        logger.info('Fetched file in {:,.2f} seconds. Analyzing with qsv...'.format(
+            fetch_elapsed))
     analysis_start = time.perf_counter()
 
     # check content type or file extension if its a spreadsheet
@@ -466,7 +474,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_excel = subprocess.run(
                 [config.get('QSV_BIN'), 'excel', qsv_spreadsheet.name, '--sheet', str(default_excel_sheet),
                  '--trim', '--output', qsv_excel_csv.name],
-                 check=True, capture_output=True, text=True)
+                check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             raise util.JobError(
@@ -478,9 +486,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_excel_csv
     else:
         '''
-        its a CSV/TSV? Check if its RFC4180 valid & transcode to UTF-8 at the same time
-        if its a TSV/TAB file, convert to CSV as well for standard handling downstream
-        note that we only change the working file, the resource file itself is unchanged
+        its a CSV/TSV, not a spreadsheet. Check if its RFC4180 valid & transcode to UTF-8
+        at the same time. If its a TSV/TAB file, convert to CSV as well for standard handling
+        downstream note that we only change the workfile, the resource file itself is unchanged
         '''
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         logger.info('Validating/Transcoding {}...'.format(format))
@@ -519,17 +527,25 @@ def push_to_datastore(task_id, input, dry_run=False):
     qsv_safenames_csv = tempfile.NamedTemporaryFile(suffix='.csv')
     logger.info('Checking for safe column names...')
     try:
-        qsv_input = subprocess.run(
-            [config.get('QSV_BIN'), 'safenames', tmp.name, '--output', qsv_safenames_csv.name], check=True)
+        qsv_safenames = subprocess.run(
+            [config.get('QSV_BIN'), 'safenames', tmp.name, '--mode', 'verify', '--output', qsv_safenames_csv.name], capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles()
         raise util.JobError(
-            'Safenames CSV file: {}'.format(e)
+            'Safenames error: {}'.format(e)
         )
+    unsafeheader_count = int(str(qsv_safenames.stderr).strip())
+    if unsafeheader_count > 0:
+        logger.info('Sanitizing header names...')
+        qsv_safenames = subprocess.run(
+            [config.get('QSV_BIN'), 'safenames', tmp.name, '--mode', 'conditional', '--output', qsv_safenames_csv.name], capture_output=True, text=True)
+    else:
+        logger.info('No unsafe header names found...')
     tmp = qsv_safenames_csv
 
+    # at this stage, we have a "clean" CSV ready for pushing into the datastore
 
-    # index csv for speed - count, stats and slice
+    # first, index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
     try:
         subprocess.run(
