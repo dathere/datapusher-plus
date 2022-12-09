@@ -25,7 +25,7 @@ from datasize import DataSize
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
 from ckanserviceprovider import web
-from config import config
+from datapusher.config import config
 
 
 if locale.getdefaultlocale()[0]:
