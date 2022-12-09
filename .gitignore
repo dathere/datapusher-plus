@@ -31,3 +31,5 @@ pip-log.txt
 
 .DS_Store
 datapusher/config_local.py
+*.whl
+*.gz
