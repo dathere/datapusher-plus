@@ -48,14 +48,14 @@ It features:
   Datapusher+ messages are designed to be more verbose and actionable, so the data publisher's
   user experience is far better and makes it possible to have a resource-first upload workflow.
 
-* **Extended data-wrangling with qsv**
+* **Extended preprocessing with qsv**
 
   Apart from bullet-proof data type inferences, qsv is leveraged by Datapusher+ to convert XLS/ODS files;
-  count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180);
-  optionally create a preview subset and optionally deduplicate rows in this initial version.
+  count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180); sanitize header names so they are always valid Postgres column identifers;
+  optionally create a preview subset and optionally deduplicate rows.
 
   Future versions of Datapusher+ will further leverage qsv's 70+ commands to do additional
-  data wrangling, preprocessing and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/issues/5).
+  preprocessing, data-wrangling and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/issues/5).
   Ideas, suggestions and your feedback are most welcome!
 
 [^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
@@ -169,8 +169,6 @@ to keep the process up.
 
     # if qsv is already installed, be sure to update it to the latest release
     sudo qsvdp --update
-    sudo qsvlite --update
-    sudo qsv --update
 
     # Install DataPusher-plus and uwsgi for production
     sudo /usr/lib/ckan/dpplus_venv/bin/pip install datapusher-plus uwsgi
@@ -178,6 +176,7 @@ to keep the process up.
     # generate a settings file and tune it, as well as a uwsgi ini file
     sudo mkdir -p /etc/ckan/datapusher-plus
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/config.py -o /etc/ckan/datapusher-plus/config_local.py
+    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher-plus/settings.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
     # Initialize the database. 
