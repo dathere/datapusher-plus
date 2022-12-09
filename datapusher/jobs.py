@@ -439,16 +439,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
     '''
     fetch_elapsed = time.perf_counter() - timer_start
-    try:
-        resource_size = DataSize(cl)
-    except:
-        resource_size = 0
-    if resource_size > 0:
-        logger.info('Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...'.format(
-            resource_size, fetch_elapsed))
-    else:
-        logger.info('Fetched file in {:,.2f} seconds. Analyzing with qsv...'.format(
-            fetch_elapsed))
+    logger.info('Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...'.format(
+        DataSize(length), fetch_elapsed))
     analysis_start = time.perf_counter()
 
     # check content type or file extension if its a spreadsheet
