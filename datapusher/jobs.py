@@ -531,11 +531,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info('Sanitizing header names...')
         qsv_safenames = subprocess.run(
             [config.get('QSV_BIN'), 'safenames', tmp.name, '--mode', 'conditional', '--output', qsv_safenames_csv.name], capture_output=True, text=True)
+        tmp = qsv_safenames
     else:
         logger.info('No unsafe header names found...')
-    tmp = qsv_safenames_csv
 
-    # at this stage, we have a "clean" CSV ready for pushing into the datastore
+    # at this stage, we have a "clean" CSV ready for type inferencing
 
     # first, index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
@@ -693,6 +693,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     analysis_elapsed = time.perf_counter() - analysis_start
     logger.info(
         'Analyzed and prepped in {:,.2f} seconds.'.format(analysis_elapsed))
+
+    # at this stage, the resource is ready for COPYing to the Datastore
 
     if dry_run:
         return headers_dicts
