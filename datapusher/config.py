@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
-_WRITE_ENGINE_URL = 'postgresql://datapusher:THEPASSWORD@localhost/datastore_default'
+_WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_default'
 _TYPES = 'String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL'
 _TYPE_MAPPING = {
     'String': 'text', 'Integer': 'numeric', 
@@ -41,7 +41,7 @@ class DataPusherPlusConfig(MutableMapping):
     SSL_VERIFY: bool = False
     TYPES: tuple = _TYPES
     TYPE_MAPPING: dict = _TYPE_MAPPING
-    LOG_FILE: str = '/tmp/ckan_service.log'
+    LOG_FILE: str = '/etc/ckan/datapusher-plus/ckan_service.log'
     STDERR: bool = True
     QSV_BIN: str = '/usr/local/bin/qsvdp'
     PREVIEW_ROWS: int = 1000
