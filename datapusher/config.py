@@ -5,7 +5,9 @@ from collections import MutableMapping
 from typing import get_type_hints, Union
 from dotenv import load_dotenv
 
-load_dotenv()
+
+env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(env_file)
 
 _DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
 _WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_default'
@@ -107,7 +109,6 @@ class DataPusherPlusConfig(MutableMapping):
 
 # Expose config object for app to import
 config = DataPusherPlusConfig(os.environ)
-
 
 # Expose these two variables so ckanserviceprovider can use it
 SQLALCHEMY_DATABASE_URI = config.get('SQLALCHEMY_DATABASE_URI')
