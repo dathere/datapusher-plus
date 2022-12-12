@@ -420,6 +420,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_input_csv.close()
         if 'qsv_dedup_csv' in globals():
             qsv_dedup_csv.close()
+        if 'qsv_headers' in globals():
+            qsv_headers.close()
         if 'qsv_safenames_csv' in globals():
             qsv_safenames_csv.close()
 
@@ -507,8 +509,23 @@ def push_to_datastore(task_id, input, dry_run=False):
                 '{:,} duplicates found and removed...'.format(dupe_count))
         else:
             logger.info('No duplicates found...')
+            
+    # get existing header names, so we can use them for data dictionary labels
+    # should we need to change the column name to make it "db-safe"
+    try:
+        qsv_headers = subprocess.run(
+            [qsv_bin, 'headers', '--just-names', tmp.name], 
+            capture_output=True, check=True, text=True)
+    except subprocess.CalledProcessError as e:
+        cleanup_tempfiles()
+        raise util.JobError(
+            'Cannot scan CSV headers: {}'.format(e)
+        )
+    original_headers = str(qsv_headers.stdout).strip()
+    original_header_dict = {idx: ele for idx, ele in 
+                            enumerate(original_headers.splitlines())}
 
-    # ensure our column/header names identifiers are valid postgres identifiers
+    # now, ensure our column/header names identifiers are valid postgres identifiers
     qsv_safenames_csv = tempfile.NamedTemporaryFile(suffix='.csv')
     logger.info('Checking for safe column names...')
     try:
@@ -615,6 +632,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                           for field in zip(headers, types)]
 
     # 2nd pass header_dicts, checking for smartint types
+    # and set labels to original column names in case we made the names "db-safe"
     headers_dicts = []
     for idx, header in enumerate(temp_headers_dicts):
         if header['type'] == 'smartint':
@@ -626,7 +644,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                 header_type = 'numeric'
         else:
             header_type = header['type']
-        headers_dicts.append(dict(id=header['id'], type=header_type))
+        info_dict = dict(label=original_header_dict[idx])
+        headers_dicts.append(dict(id=header['id'], type=header_type, info=info_dict))
 
     # Maintain data dictionaries from matching column names
     if existing_info:
