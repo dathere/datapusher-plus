@@ -443,6 +443,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         DataSize(length), fetch_elapsed))
     analysis_start = time.perf_counter()
 
+    qsv_bin = config.get('QSV_BIN')
+
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ['XLS', 'XLSX', 'ODS', 'XLSM', 'XLSB']
     format = resource.get('format').upper()
@@ -464,7 +466,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         default_excel_sheet = config.get('DEFAULT_EXCEL_SHEET')
         try:
             qsv_excel = subprocess.run(
-                [config.get('QSV_BIN'), 'excel', qsv_spreadsheet.name, '--sheet', str(default_excel_sheet),
+                [qsv_bin, 'excel', qsv_spreadsheet.name, '--sheet', str(default_excel_sheet),
                  '--trim', '--output', qsv_excel_csv.name],
                 check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
@@ -486,7 +488,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info('Validating/Transcoding {}...'.format(format))
         try:
             qsv_input = subprocess.run(
-                [config.get('QSV_BIN'), 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
+                [qsv_bin, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             raise util.JobError(
@@ -501,7 +503,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info('Checking for duplicate rows...')
         try:
             qsv_dedup = subprocess.run(
-                [config.get('QSV_BIN'), 'dedup', tmp.name, '--output', qsv_dedup_csv.name], capture_output=True, text=True)
+                [qsv_bin, 'dedup', tmp.name, '--output', qsv_dedup_csv.name], capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             raise util.JobError(
@@ -520,7 +522,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Checking for safe column names...')
     try:
         qsv_safenames = subprocess.run(
-            [config.get('QSV_BIN'), 'safenames', tmp.name, '--mode', 'verify', '--output', qsv_safenames_csv.name], capture_output=True, text=True)
+            [qsv_bin, 'safenames', tmp.name, '--mode', 'verify', '--output', qsv_safenames_csv.name], capture_output=True, text=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles()
         raise util.JobError(
@@ -530,7 +532,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if unsafeheader_count > 0:
         logger.info('Sanitizing header names...')
         qsv_safenames = subprocess.run(
-            [config.get('QSV_BIN'), 'safenames', tmp.name, '--mode', 'conditional', '--output', qsv_safenames_csv.name], capture_output=True, text=True)
+            [qsv_bin, 'safenames', tmp.name, '--mode', 'conditional', '--output', qsv_safenames_csv.name], capture_output=True, text=True)
         tmp = qsv_safenames
     else:
         logger.info('No unsafe header names found...')
@@ -541,7 +543,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # are all accelerated/multithreaded when an index is present
     try:
         subprocess.run(
-            [config.get('QSV_BIN'), 'index', tmp.name], check=True)
+            [qsv_bin, 'index', tmp.name], check=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles
         raise util.JobError(
@@ -551,7 +553,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # get record count
     try:
         qsv_count = subprocess.run(
-            [config.get('QSV_BIN'), 'count', tmp.name], capture_output=True, check=True, text=True)
+            [qsv_bin, 'count', tmp.name], capture_output=True, check=True, text=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles()
         raise util.JobError(
@@ -575,7 +577,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if DATELIKE_FIELDNAMES:
         try:
             qsv_headers = subprocess.run(
-                [config.get('QSV_BIN'), 'headers', '--just-names', tmp.name], capture_output=True, check=True, text=True)
+                [qsv_bin, 'headers', '--just-names', tmp.name], capture_output=True, check=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             raise util.JobError(
@@ -591,8 +593,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     headers_min = []
     headers_max = []
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
-    qsv_stats_cmd = [config.get('QSV_BIN'), 'stats', tmp.name,
-                     '--output', qsv_stats_csv.name]
+    qsv_stats_cmd = [qsv_bin, 'stats', tmp.name, '--output', qsv_stats_csv.name]
     if inferdates_flag:
         qsv_stats_cmd.append('--infer-dates')
         # only show the log message when smart date inferencing is on
@@ -681,7 +682,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         try:
             qsv_slice = subprocess.run(
-                [config.get('QSV_BIN'), 'slice', '--len', str(preview_rows), tmp.name, '--output', qsv_slice_csv.name], check=True)
+                [qsv_bin, 'slice', '--len', str(preview_rows), tmp.name, '--output', qsv_slice_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             raise util.JobError(
