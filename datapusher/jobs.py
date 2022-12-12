@@ -46,16 +46,6 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-# if a field has any of these anywhere in their name, date inferencing
-# is turned on when scanning for data types, which is a relatively expensive op
-# if DATELIKE_FIELDNAMES is empty, date inferencing will always be on
-_DATELIKE_FIELDNAMES = ['date', 'time', 'open', 'close', 'due']
-
-DATELIKE_FIELDNAMES = web.app.config.get(
-    'DATELIKE_FIELDNAMES', _DATELIKE_FIELDNAMES)
-
-DATELIKE_FIELDNAMES = [field.lower() for field in DATELIKE_FIELDNAMES]
-
 DATASTORE_URLS = {
     'datastore_delete': '{ckan_url}/api/action/datastore_delete',
     'resource_update': '{ckan_url}/api/action/resource_update'
@@ -566,41 +556,13 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('{:,} {} records detected...'.format(
         record_count, unique_qualifier))
 
-    '''
-    if DATELIKE_FIELDNAMES is not empty, scan CSV headers for date-like field,
-    otherwise, always --infer-dates when scanning for types
-    we do this since date type inference is a very expensive op
-    as qsv needs to check if a string is a date using 15 date formats and permutations thereof
-    exponentially slowing down qsv, even if its using SIMD-accelerated, multithreaded regex parsing
-    '''
-    inferdates_flag = True
-    if DATELIKE_FIELDNAMES:
-        try:
-            qsv_headers = subprocess.run(
-                [qsv_bin, 'headers', '--just-names', tmp.name], capture_output=True, check=True, text=True)
-        except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
-            raise util.JobError(
-                'Cannot scan CSV headers: {}'.format(e)
-            )
-        header_fields = str(qsv_headers.stdout).strip().lower()
-        if not any(datelike_fieldname in header_fields for datelike_fieldname in DATELIKE_FIELDNAMES):
-            inferdates_flag = False
-
     # run qsv stats to get data types and descriptive statistics
     headers = []
     types = []
     headers_min = []
     headers_max = []
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
-    qsv_stats_cmd = [qsv_bin, 'stats', tmp.name, '--output', qsv_stats_csv.name]
-    if inferdates_flag:
-        qsv_stats_cmd.append('--infer-dates')
-        # only show the log message when smart date inferencing is on
-        # when smart date inferencing is off, we always infer dates
-        if DATELIKE_FIELDNAMES:
-            logger.info(
-                'Date-like fields detected. Date inferencing enabled...')
+    qsv_stats_cmd = [qsv_bin, 'stats', tmp.name, '--infer-dates', '--output', qsv_stats_csv.name]
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
