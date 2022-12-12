@@ -112,15 +112,22 @@ Install qsv:
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.77.0/qsv-0.77.0-x86_64-unknown-linux-musl.zip
-    unzip qsv-0.77.0-x86_64-unknown-linux-musl.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.78.0/qsv-0.78.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.78.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
-    rm qsv-0.77.0-x86_64-unknown-linux-musl.zip
+    rm qsv-0.78.0-x86_64-unknown-linux-gnu.zip
 
 Alternatively, if you want to install qsv from source, follow
 the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
 you may want to look into the [Performance Tuning](https://github.com/jqnatividad/qsv#performance-tuning)
 section to squeeze even more performance from qsv.
+
+Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library.
+In that case, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+
+If you already have qsv, update it to the latest release by using the --update option.
+
+    qsvdp --update
 
 
 > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
@@ -164,10 +171,10 @@ to keep the process up.
     sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
 
     # Install qsv binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.77.0/qsv-0.77.0-x86_64-unknown-linux-musl.zip
-    unzip qsv-0.77.0-x86_64-unknown-linux-musl.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.78.0/qsv-0.78.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.78.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
-    rm qsv-0.77.0-x86_64-unknown-linux-musl.zip
+    rm qsv-0.78.0-x86_64-unknown-linux-gnu.zip
 
     # if qsv is already installed, be sure to update it to the latest release
     sudo qsvdp --update
@@ -282,7 +289,7 @@ To create the `datapusher` user and give it the required privileges to the `data
 ```
 su - postgres
 psql -d datastore_default
-CREATE ROLE datapusher LOGIN PASSWORD 'thepassword';
+CREATE ROLE datapusher LOGIN PASSWORD 'YOURPASSWORD';
 GRANT CREATE, CONNECT, TEMPORARY ON DATABASE datastore_default TO datapusher;
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public TO datapusher;
 \q
