@@ -544,7 +544,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             [qsv_bin, 'safenames', tmp.name, '--mode', 'conditional', 
              '--output', qsv_safenames_csv.name], 
             capture_output=True, text=True)
-        tmp = qsv_safenames
+        tmp = qsv_safenames_csv
     else:
         logger.info('No unsafe header names found...')
 
