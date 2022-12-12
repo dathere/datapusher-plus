@@ -561,7 +561,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             'Cannot index CSV: {}'.format(e)
         )
 
-    # get record count
+    # get record count, this is instantaneous with an index
     try:
         qsv_count = subprocess.run(
             [qsv_bin, 'count', tmp.name], capture_output=True, check=True, text=True)
@@ -617,9 +617,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             for t, h in zip(types, headers)]
 
     '''
-    Delete existing datastore resource before proceeding. Otherwise
-    'datastore_create' will append to the existing datastore. And if
-    the fields have significantly changed, it may also fail.
+    Delete existing datastore resource before proceeding.
     '''
     if existing:
         logger.info('Deleting "{res_id}" from datastore.'.format(
@@ -633,6 +631,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # 2nd pass header_dicts, checking for smartint types
     # and set labels to original column names in case we made the names "db-safe"
+    # as the labels are used by DataTables_view to label columns
     headers_dicts = []
     for idx, header in enumerate(temp_headers_dicts):
         if header['type'] == 'smartint':
@@ -752,6 +751,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         resource['preview_rows'] = copied_count
     update_resource(resource, api_key, ckan_url)
 
+    # aliases are human-readable, and make it easier to use than resource id hash
+    # in using the Datastore API and in SQL queries
     if config.get('AUTO_ALIAS'):
         # get package info, so we can construct the alias
         package = get_package(resource['package_id'], ckan_url, api_key)
@@ -763,6 +764,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         if owner_org:
             owner_org_name = owner_org.get('name')
         if resource_name and package_name and owner_org_name:
+            # we limit it to 59, so we still have space for sequence suffix
+            # postgres max identifier length is 63
             alias = f"{resource_name}-{package_name}-{owner_org_name}"[:59]
             # check if the alias already exist, if it does
             # add a sequence suffix so the new alias can be created
