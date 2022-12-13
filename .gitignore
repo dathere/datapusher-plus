@@ -33,3 +33,5 @@ pip-log.txt
 datapusher/config_local.py
 *.whl
 *.gz
+*.log
+*.pybak*
