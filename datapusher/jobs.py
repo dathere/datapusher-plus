@@ -691,7 +691,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info('Formatting dates \"{}\" to ISO 8601/RFC 3339 format...'.format(datecols))
         try:
             qsv_applydp = subprocess.run(
-                [qsv_bin, 'applydp', 'datefmt', tmp.name, datecols, '--output', 
+                [qsv_bin, 'applydp', 'datefmt', datecols, tmp.name, '--output', 
                 qsv_applydp_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
