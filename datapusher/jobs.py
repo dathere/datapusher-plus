@@ -424,6 +424,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_headers.close()
         if 'qsv_safenames_csv' in globals():
             qsv_safenames_csv.close()
+        if 'qsv_applydp_csv' in globals():
+            qsv_applydp_csv.close()
 
     '''
     Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
@@ -632,6 +634,9 @@ def push_to_datastore(task_id, input, dry_run=False):
     # 2nd pass header_dicts, checking for smartint types
     # and set labels to original column names in case we made the names "db-safe"
     # as the labels are used by DataTables_view to label columns
+    # we also take note of datetime/timestamp fields, so we can normalize them
+    # to RFC3339 format
+    datetimecols_list = []
     headers_dicts = []
     for idx, header in enumerate(temp_headers_dicts):
         if header['type'] == 'smartint':
@@ -643,6 +648,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                 header_type = 'numeric'
         else:
             header_type = header['type']
+        if header_type == 'timestamp':
+            datetimecols_list.append(header['id'])
         info_dict = dict(label=original_header_dict[idx])
         headers_dicts.append(dict(id=header['id'], type=header_type, info=info_dict))
 
@@ -676,6 +683,22 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
         rows_to_copy = preview_rows
         tmp = qsv_slice_csv
+        
+    # if there are any datetime fields, normalize them to RFC3339 format
+    if datetimecols_list:
+        qsv_applydp_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+        datecols = ','.join(datetimecols_list)
+        logger.info('Formatting dates \"{}\" to ISO 8601/RFC 3339 format...'.format(datecols))
+        try:
+            qsv_applydp = subprocess.run(
+                [qsv_bin, 'applydp', 'datefmt', tmp.name, datecols, '--output', 
+                qsv_applydp_csv.name], check=True)
+        except subprocess.CalledProcessError as e:
+            cleanup_tempfiles()
+            raise util.JobError(
+                'Applydp error: {}'.format(e)
+            )
+        tmp = qsv_applydp_csv
 
     analysis_elapsed = time.perf_counter() - analysis_start
     logger.info(
