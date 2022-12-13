@@ -114,8 +114,8 @@ it to the appropriate directory, e.g. for Linux:
 
     wget https://github.com/jqnatividad/qsv/releases/download/0.78.2/qsv-0.78.2-x86_64-unknown-linux-gnu.zip
     unzip qsv-0.78.2-x86_64-unknown-linux-gnu.zip
-    sudo mv qsv* /usr/local/bin
     rm qsv-0.78.2-x86_64-unknown-linux-gnu.zip
+    sudo mv qsv* /usr/local/bin
 
 Alternatively, if you want to install qsv from source, follow
 the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
@@ -135,10 +135,12 @@ qsv with the `--update` option and it will check for the latest version and upda
 
 
 Copy `datapusher/config.py` to a new file like `config_local.py` and modify your configuration as required.
-Make sure to create the `datapusher` PostgreSQL user (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
+Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
     cd datapusher
     cp config.py config_local.py
+    # configure your installation as required
+    nano config_local.py
 
     python3 datapusher/main.py datapusher/config_local.py
 
