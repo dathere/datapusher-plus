@@ -190,9 +190,8 @@ to keep the process up.
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher-plus/settings.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
-    # Initialize the database if required.
-    # Be sure to the config_local.py and settings.py have the right connect strings!
-    /usr/lib/ckan/dpplus_venv/bin/datapusher_initdb /etc/ckan/datapusher-plus/config_local.py
+    # Be sure to initialize the database if required. (See Database Setup section below)
+    # Be sure to the .env and settings.py files have the right connect strings!
 
     # Create a user to run the web service (if necessary)
     sudo addgroup www-data
