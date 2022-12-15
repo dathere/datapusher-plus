@@ -186,7 +186,7 @@ to keep the process up.
 
     # generate a settings file and tune it, as well as a uwsgi ini file
     sudo mkdir -p /etc/ckan/datapusher-plus
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/config.py -o /etc/ckan/datapusher-plus/config_local.py
+    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/.env -o /etc/ckan/datapusher-plus/.env
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher-plus/settings.py
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
@@ -200,7 +200,6 @@ to keep the process up.
 
 At this point you can run DataPusher+ with the following command:
 
-    export JOB_CONFIG=/etc/ckan/datapusher-plus/config_local.py 
     /usr/lib/ckan/dpplus_venv/bin/uwsgi --enable-threads -i /etc/ckan/datapusher-plus/uwsgi.ini
 
 You might need to change the `uid` and `guid` in the `uwsgi.ini` file when using a different user.
