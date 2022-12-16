@@ -465,9 +465,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                 check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
-            raise util.JobError(
-                'Cannot export spreadsheet to CSV: {}'.format(e)
-            )
+            logger.error('Upload aborted. Cannot export spreadsheet to CSV: {}'.format(e))
+            return
         qsv_spreadsheet.close()
         excel_export_msg = qsv_excel.stderr
         logger.info("{}...".format(excel_export_msg))
@@ -485,9 +484,9 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [qsv_bin, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
-            raise util.JobError(
-                'Invalid CSV file: {}'.format(e)
-            )
+            # return as we can't push an invalid CSV file
+            logger.error("Upload aborted as the file is invalid: {}.".format(e))
+            return
         tmp = qsv_input_csv
 
     # do we need to dedup?
