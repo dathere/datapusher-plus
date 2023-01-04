@@ -473,22 +473,17 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_excel_csv
     else:
         '''
-        its a CSV/TSV, not a spreadsheet. Check if its RFC4180 valid & transcode to UTF-8
-        at the same time. If its a TSV/TAB file, convert to CSV as well for standard handling
-        downstream note that we only change the workfile, the resource file itself is unchanged
-        '''
+        its a CSV/TSV/TAB file, not a spreadsheet. Do two-stage validation: 
         
-        # validation phase
-        logger.info('Validating {}...'.format(format))
-        try:
-            qsv_validate = subprocess.run(
-                [qsv_bin, 'validate', tmp.name, '--output'], check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as e:
-            # return as we can't push an invalid CSV file
-            validate_error_msg = qsv_validate.stderr
-            logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
-            return
-        logger.info('Valid file...')
+        1) Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as it could be
+        a CSV/TSV/TAB dialect with differing delimiters, quoting, etc. 
+        Using qsv input's --output option also auto-transcodes to UTF-8.
+        
+        2) Run an RFC4180 check with `qsv validate` against the normalized, UTF-8 encoded CSV file.
+        If it passes validation, we can now handle it with confidence downstream as a "normal" CSV.
+        
+        Note that we only change the workfile, the resource file itself is unchanged.
+        '''
         
         # normalize to CSV, and transcode to UTF-8 if required
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix='.csv')
@@ -502,6 +497,18 @@ def push_to_datastore(task_id, input, dry_run=False):
             logger.error("Upload aborted as the file cannot be normalized/transcoded: {}.".format(e))
             return
         tmp = qsv_input_csv
+        
+        # validation phase
+        logger.info('Validating {}...'.format(format))
+        try:
+            qsv_validate = subprocess.run(
+                [qsv_bin, 'validate', tmp.name], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            # return as we can't push an invalid CSV file
+            validate_error_msg = qsv_validate.stderr
+            logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
+            return
+        logger.info('Valid file...')
 
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
