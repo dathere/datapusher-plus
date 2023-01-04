@@ -50,6 +50,7 @@ class DataPusherPlusConfig(MutableMapping):
     QSV_DEDUP: bool = True
     DEFAULT_EXCEL_SHEET: int = 0
     AUTO_ALIAS: bool = True
+    AUTO_ALIAS_UNIQUE: bool = False
     WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
     DOWNLOAD_PROXY: str = ''
 
