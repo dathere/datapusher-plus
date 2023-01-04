@@ -492,11 +492,12 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_input = subprocess.run(
                 [qsv_bin, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
             # return as we can't push an invalid CSV file
-            logger.error("Upload aborted as the file cannot be normalized/transcoded: {}.".format(e))
+            cleanup_tempfiles()
+            logger.error("Job aborted as the file cannot be normalized/transcoded: {}.".format(e))
             return
         tmp = qsv_input_csv
+        logger.info('Normalized & transcoded...')
         
         # validation phase
         logger.info('Validating {}...'.format(format))
@@ -505,6 +506,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [qsv_bin, 'validate', tmp.name], check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
             # return as we can't push an invalid CSV file
+            cleanup_tempfiles()
             validate_error_msg = qsv_validate.stderr
             logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
             return
