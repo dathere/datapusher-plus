@@ -477,15 +477,29 @@ def push_to_datastore(task_id, input, dry_run=False):
         at the same time. If its a TSV/TAB file, convert to CSV as well for standard handling
         downstream note that we only change the workfile, the resource file itself is unchanged
         '''
+        
+        # validation phase
+        logger.info('Validating {}...'.format(format))
+        try:
+            qsv_validate = subprocess.run(
+                [qsv_bin, 'validate', tmp.name, '--output'], check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as e:
+            # return as we can't push an invalid CSV file
+            validate_error_msg = qsv_validate.stderr
+            logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
+            return
+        logger.info('Valid file...')
+        
+        # normalize to CSV, and transcode to UTF-8 if required
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix='.csv')
-        logger.info('Validating/Transcoding {}...'.format(format))
+        logger.info('Normalizing/Transcoding {}...'.format(format))
         try:
             qsv_input = subprocess.run(
                 [qsv_bin, 'input', tmp.name, '--output', qsv_input_csv.name], check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             # return as we can't push an invalid CSV file
-            logger.error("Upload aborted as the file is invalid: {}.".format(e))
+            logger.error("Upload aborted as the file cannot be normalized/transcoded: {}.".format(e))
             return
         tmp = qsv_input_csv
 
