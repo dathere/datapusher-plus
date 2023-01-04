@@ -401,7 +401,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     tmp.seek(0)
 
     if (resource.get('hash') == file_hash and not data.get('ignore_hash')):
-        logger.info("Upload skipped as the file hash hasn't changed: {hash}.".format(
+        logger.warning("Upload skipped as the file hash hasn't changed: {hash}.".format(
             hash=file_hash))
         return
 
@@ -595,6 +595,12 @@ def push_to_datastore(task_id, input, dry_run=False):
             'Cannot count records in CSV: {}'.format(e)
         )
     record_count = int(str(qsv_count.stdout).strip())
+    
+    if record_count == 0:
+        cleanup_tempfiles()
+        logger.warning('Upload skipped as there are zero records.')
+        return
+    
     unique_qualifier = ''
     if config.get('QSV_DEDUP'):
         unique_qualifier = 'unique'
