@@ -775,6 +775,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # aliases are human-readable, and make it easier to use than resource id hash
     # in using the Datastore API and in SQL queries
+    alias_unique_flag = config.get('AUTO_ALIAS_UNIQUE')
     if config.get('AUTO_ALIAS'):
         # get package info, so we can construct the alias
         package = get_package(resource['package_id'], ckan_url, api_key)
@@ -789,23 +790,24 @@ def push_to_datastore(task_id, input, dry_run=False):
             # we limit it to 59, so we still have space for sequence suffix
             # postgres max identifier length is 63
             alias = f"{resource_name}-{package_name}-{owner_org_name}"[:59]
-            # check if the alias already exist, if it does
+            # if AUTO_ALIAS_UNIQUE is true, check if the alias already exist, if it does
             # add a sequence suffix so the new alias can be created
-            cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
-                alias))
-            alias_count = cur.fetchone()[0]
-            if alias_count:
-                alias_sequence = alias_count + 1
-                while True:
-                    # we do this, so we're certain the new alias does not exist
-                    # just in case they deleted an older alias with a lower sequence #
-                    alias = f'{alias}-{alias_sequence:03}'
-                    cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
-                        alias))
-                    alias_exists = cur.fetchone()[0]
-                    if not alias_exists:
-                        break
-                    alias_sequence += 1
+            if alias_unique_flag:
+                cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
+                    alias))
+                alias_count = cur.fetchone()[0]
+                if alias_count:
+                    alias_sequence = alias_count + 1
+                    while True:
+                        # we do this, so we're certain the new alias does not exist
+                        # just in case they deleted an older alias with a lower sequence #
+                        alias = f'{alias}-{alias_sequence:03}'
+                        cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(
+                            alias))
+                        alias_exists = cur.fetchone()[0]
+                        if not alias_exists:
+                            break
+                        alias_sequence += 1
         else:
             logger.info(
                 'Cannot create alias: {}-{}-{}'.format(resource_name, package_name, owner_org))
