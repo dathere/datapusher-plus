@@ -549,7 +549,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     original_header_dict = {idx: ele for idx, ele in 
                             enumerate(original_headers.splitlines())}
 
-    # now, ensure our column/header names identifiers are valid postgres identifiers
+    # now, ensure our column/header names identifiers are "safe names"
+    # i.e. valid postgres identifiers
     qsv_safenames_csv = tempfile.NamedTemporaryFile(suffix='.csv')
     logger.info('Checking for safe column names...')
     try:
@@ -596,11 +597,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     record_count = int(str(qsv_count.stdout).strip())
     
+    # its empty, nothing to do
     if record_count == 0:
         cleanup_tempfiles()
         logger.warning('Upload skipped as there are zero records.')
         return
     
+    # log how many records we detected
     unique_qualifier = ''
     if config.get('QSV_DEDUP'):
         unique_qualifier = 'unique'
@@ -646,9 +649,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         }.get(existing_info.get(h, {}).get('type_override'), t)
             for t, h in zip(types, headers)]
 
-    '''
-    Delete existing datastore resource before proceeding.
-    '''
+    # Delete existing datastore resource before proceeding.
     if existing:
         logger.info('Deleting "{res_id}" from datastore.'.format(
             res_id=resource_id))
@@ -713,6 +714,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_slice_csv
         
     # if there are any datetime fields, normalize them to RFC3339 format
+    # so we can readily insert them as timestamps into postgresql with COPY
     if datetimecols_list:
         qsv_applydp_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         datecols = ','.join(datetimecols_list)
@@ -846,6 +848,11 @@ def push_to_datastore(task_id, input, dry_run=False):
     # tell CKAN to calculate_record_count and set alias if set
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
                                records=None, aliases=alias, calculate_record_count=True)
+    
+    # TODO: Create indices automatically based on statistics
+    # e.g. columns with Cardinality = rowcount has all unique values and a unique index can be created
+    # and if CREATE_INDEX setting is set
+    
     if alias:
         logger.info('Created alias: {}'.format(alias))
 
