@@ -464,8 +464,19 @@ def push_to_datastore(task_id, input, dry_run=False):
                  '--trim', '--output', qsv_excel_csv.name],
                 check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as e:
+            logger.error('Upload aborted. Cannot export spreadsheet(?) to CSV: {}'.format(e))
+
+            file_bin = config.get('FILE_BIN')
+            # get some file info by running file
+            # just in case the file is not actually a spreadsheet or is encrypted
+            file_format = subprocess.run(
+                [file_bin, qsv_spreadsheet.name],
+                check=True, capture_output=True, text=True)
+
+            logger.warning('Is the file encrypted or is not a spreadsheet?\nFILE ATTRIBUTES: {}'
+                           .format(file_format.stdout))
+            
             cleanup_tempfiles()
-            logger.error('Upload aborted. Cannot export spreadsheet to CSV: {}'.format(e))
             return
         qsv_spreadsheet.close()
         excel_export_msg = qsv_excel.stderr
