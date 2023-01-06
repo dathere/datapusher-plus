@@ -654,7 +654,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             headers_min.append(row['min'])
             headers_max.append(row['max'])
             if auto_index_threshold:
-                headers_cardinality.append(row['cardinality'])
+                headers_cardinality.append(int(row['cardinality']))
 
     existing = datastore_resource_exists(resource_id, api_key, ckan_url)
     existing_info = None
