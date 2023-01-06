@@ -473,15 +473,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_excel_csv
     else:
         '''
-        its a CSV/TSV/TAB file, not a spreadsheet. Do two-stage validation: 
-        
-        1) Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as it could be
+        its a CSV/TSV/TAB file, not a spreadsheet.        
+        Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as it could be
         a CSV/TSV/TAB dialect with differing delimiters, quoting, etc. 
         Using qsv input's --output option also auto-transcodes to UTF-8.
-        
-        2) Run an RFC4180 check with `qsv validate` against the normalized, UTF-8 encoded CSV file.
-        If it passes validation, we can now handle it with confidence downstream as a "normal" CSV.
-        
+                
         Note that we only change the workfile, the resource file itself is unchanged.
         '''
         
@@ -499,18 +495,22 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_input_csv
         logger.info('Normalized & transcoded...')
         
-        # validation phase
-        logger.info('Validating {}...'.format(format))
-        try:
-            qsv_validate = subprocess.run(
-                [qsv_bin, 'validate', tmp.name], check=True, capture_output=True, text=True)
-        except subprocess.CalledProcessError as e:
-            # return as we can't push an invalid CSV file
-            cleanup_tempfiles()
-            validate_error_msg = qsv_validate.stderr
-            logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
-            return
-        logger.info('Valid file...')
+    # validation phase
+    # Run an RFC4180 check with `qsv validate` against the normalized, UTF-8 encoded CSV file.
+    # Even excel exported CSVs can be potentially invalid, as it allows the export of "flexible"
+    # CSVs - i.e. rows may have different column counts.
+    # If it passes validation, we can now handle it with confidence downstream as a "normal" CSV.
+    logger.info('Validating {}...'.format(format))
+    try:
+        qsv_validate = subprocess.run(
+            [qsv_bin, 'validate', tmp.name], check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as e:
+        # return as we can't push an invalid CSV file
+        cleanup_tempfiles()
+        validate_error_msg = qsv_validate.stderr
+        logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
+        return
+    logger.info('Valid file...')
 
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
@@ -610,7 +610,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('{:,} {} records detected...'.format(
         record_count, unique_qualifier))
 
-    # run qsv stats to get data types and descriptive statistics
+    # run qsv stats to get data types and summary statistics
     headers = []
     types = []
     headers_min = []
@@ -640,7 +640,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         existing_info = dict((f['id'], f['info'])
                              for f in existing.get('fields', []) if 'info' in f)
 
-    # override with types user requested
+    # if this is an existing resource
+    # override with types user requested in Data Dictionary
     if existing_info:
         types = [{
             'text': 'String',
@@ -695,23 +696,42 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Determined headers and types: {headers}...'.format(
         headers=headers_dicts))
 
-    # if rowcount > PREVIEW_ROWS create a preview using qsv slice
+    # if PREVIEW_ROWS is not zero, create a preview using qsv slice
     rows_to_copy = record_count
-    if preview_rows > 0 and record_count > preview_rows:
-        logger.info(
-            'Preparing {:,}-row preview...'.format(preview_rows))
-        qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
-        try:
-            qsv_slice = subprocess.run(
-                [qsv_bin, 'slice', '--len', str(preview_rows), tmp.name, 
-                 '--output', qsv_slice_csv.name], check=True)
-        except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
-            raise util.JobError(
-                'Cannot create a preview slice: {}'.format(e)
-            )
-        rows_to_copy = preview_rows
-        tmp = qsv_slice_csv
+    if preview_rows and record_count > preview_rows:
+        if preview_rows > 0:
+            # PREVIEW_ROWS is positive, slice from the beginning
+            logger.info(
+                'Preparing {:,}-row preview...'.format(preview_rows))
+            qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+            try:
+                qsv_slice = subprocess.run(
+                    [qsv_bin, 'slice', '--len', str(preview_rows), tmp.name, 
+                    '--output', qsv_slice_csv.name], check=True)
+            except subprocess.CalledProcessError as e:
+                cleanup_tempfiles()
+                raise util.JobError(
+                    'Cannot create a preview slice: {}'.format(e)
+                )
+            rows_to_copy = preview_rows
+            tmp = qsv_slice_csv
+        else:
+            # PREVIEW_ROWS is negative, slice from the end
+            slice_len = abs(preview_rows)
+            logger.info(
+                'Preparing {:,}-row preview from the end...'.format(slice_len))
+            qsv_slice_csv = tempfile.NamedTemporaryFile(suffix='.csv')
+            try:
+                qsv_slice = subprocess.run(
+                    [qsv_bin, 'slice', '--start', '-1','--len', str(slice_len), tmp.name, 
+                    '--output', qsv_slice_csv.name], check=True)
+            except subprocess.CalledProcessError as e:
+                cleanup_tempfiles()
+                raise util.JobError(
+                    'Cannot create a preview slice from the end: {}'.format(e)
+                )
+            rows_to_copy = slice_len
+            tmp = qsv_slice_csv
         
     # if there are any datetime fields, normalize them to RFC3339 format
     # so we can readily insert them as timestamps into postgresql with COPY
