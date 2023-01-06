@@ -1070,7 +1070,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if auto_index_threshold or (auto_index_dates and datetimecols_list):
         index_start = time.perf_counter()
         logger.info(
-            "Creating indices. Auto-index threshold: {} unique value/s. Auto-index dates: {} ...".format(
+            "Creating indices. Auto-index threshold: {:,} unique value/s. Auto-index dates: {} ...".format(
                 auto_index_threshold, auto_index_dates
             )
         )
@@ -1098,7 +1098,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                         # all the values are unique for this column, create a unique index
                         unique_value_count = min(preview_rows, cardinality)
                         logger.info(
-                            'Creating UNIQUE index on "{}" for {} unique values...'.format(
+                            'Creating UNIQUE index on "{}" for {:,} unique values...'.format(
                                 curr_col, unique_value_count
                             )
                         )
@@ -1122,13 +1122,13 @@ def push_to_datastore(task_id, input, dry_run=False):
                         # create an index
                         if curr_col in datetimecols_list:
                             logger.info(
-                                'Creating index on "{}" date column for {} unique value/s...'.format(
+                                'Creating index on "{}" date column for {:,} unique value/s...'.format(
                                     curr_col, cardinality
                                 )
                             )
                         else:
                             logger.info(
-                                'Creating index on "{}" for {} unique value/s...'.format(
+                                'Creating index on "{}" for {:,} unique value/s...'.format(
                                     curr_col, cardinality
                                 )
                             )
