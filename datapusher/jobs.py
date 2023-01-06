@@ -467,7 +467,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             logger.error('Upload aborted. Cannot export spreadsheet(?) to CSV: {}'.format(e))
 
             file_bin = config.get('FILE_BIN')
-            # get some file info by running file
+            # get some file info and log it by running `file`
             # just in case the file is not actually a spreadsheet or is encrypted
             file_format = subprocess.run(
                 [file_bin, qsv_spreadsheet.name],
@@ -629,6 +629,9 @@ def push_to_datastore(task_id, input, dry_run=False):
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
     qsv_stats_cmd = [qsv_bin, 'stats', tmp.name, '--infer-dates', '--dates-whitelist', 
                      'all', '--output', qsv_stats_csv.name]
+    prefer_dmy = config.get('PREFER_DMY')
+    if prefer_dmy:
+        qsv_stats_cmd.append('--prefer_dmy')
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
@@ -749,11 +752,15 @@ def push_to_datastore(task_id, input, dry_run=False):
     if datetimecols_list:
         qsv_applydp_csv = tempfile.NamedTemporaryFile(suffix='.csv')
         datecols = ','.join(datetimecols_list)
-        logger.info('Formatting dates \"{}\" to ISO 8601/RFC 3339 format...'.format(datecols))
+        
+        qsv_applydp_cmd = [qsv_bin, 'applydp', 'datefmt', datecols, tmp.name, '--output', 
+                qsv_applydp_csv.name]
+        if prefer_dmy:
+            qsv_applydp_cmd.append('--prefer_dmy')
+        logger.info('Formatting dates \"{}\" to ISO 8601/RFC 3339 format with preferdmy: {}...'
+                    .format(datecols, prefer_dmy))
         try:
-            qsv_applydp = subprocess.run(
-                [qsv_bin, 'applydp', 'datefmt', datecols, tmp.name, '--output', 
-                qsv_applydp_csv.name], check=True)
+            qsv_applydp = subprocess.run(qsv_applydp_cmd, check=True)
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
             raise util.JobError(
