@@ -884,6 +884,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                         break
                     alias_sequence += 1
             elif alias_count <= 1:
+                logger.warning("Dropping existing alias \"{}\"...".format(alias))
                 try:
                    cur.execute('DROP VIEW IF EXISTS \"{}\";'.format(alias))
                 except psycopg2.Error as e:
@@ -935,7 +936,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                         # all the values are unique for this column, create a unique index
                         logger.info('Creating UNIQUE index on {}...'.format(curr_col))
                         try:
-                            cur.execute('CREATE UNIQUE INDEX ON \"{resource_id}\" ({col_name});'.format(
+                            cur.execute('CREATE UNIQUE INDEX ON \"{resource_id}\" (\"{col_name}\");'.format(
                                 resource_id=resource_id, col_name=curr_col))
                         except psycopg2.Error as e:
                             logger.warning("Could not CREATE UNIQUE INDEX on {}: {}".format(curr_col, e))
@@ -945,7 +946,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                         # create an index
                         logger.info('Creating index on {}...'.format(curr_col))
                         try:
-                            cur.execute('CREATE INDEX ON \"{resource_id}\" ({col_name});'.format(
+                            cur.execute('CREATE INDEX ON \"{resource_id}\" (\"{col_name}\");'.format(
                                 resource_id=resource_id, col_name=curr_col))
                         except psycopg2.Error as e:
                             logger.warning("Could not CREATE INDEX on {}: {}".format(curr_col, e))
