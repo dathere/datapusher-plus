@@ -38,7 +38,6 @@ class DataPusherPlusConfig(MutableMapping):
     SQLALCHEMY_DATABASE_URI: str = _DATABASE_URI
     MAX_CONTENT_LENGTH: str = '1024000'
     CHUNK_SIZE: str = '16384'
-    CHUNK_INSERT_ROWS: str = '250'
     DOWNLOAD_TIMEOUT: int = 30
     SSL_VERIFY: bool = False
     TYPES: tuple = _TYPES
