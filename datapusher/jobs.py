@@ -900,7 +900,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                                records=None, aliases=alias, calculate_record_count=True)
     
     if alias:
-        logger.info('Created alias: {}'.format(alias))
+        logger.info('Created alias \"{}\" for \"{}\"...'.format(alias, resource_id))
     
     # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
     # create indices automatically based on summary statistics
@@ -934,22 +934,24 @@ def push_to_datastore(task_id, input, dry_run=False):
                 if auto_index_threshold > 0 or auto_index_dates:
                     if cardinality == record_count:
                         # all the values are unique for this column, create a unique index
-                        logger.info('Creating UNIQUE index on {}...'.format(curr_col))
+                        logger.info('Creating UNIQUE index on \"{}\" for {} unique values...'
+                                    .format(curr_col, cardinality))
                         try:
                             cur.execute('CREATE UNIQUE INDEX ON \"{resource_id}\" (\"{col_name}\");'.format(
                                 resource_id=resource_id, col_name=curr_col))
                         except psycopg2.Error as e:
-                            logger.warning("Could not CREATE UNIQUE INDEX on {}: {}".format(curr_col, e))
+                            logger.warning("Could not CREATE UNIQUE INDEX on \"{}\": {}".format(curr_col, e))
                         index_count += 1
                     elif cardinality <= auto_index_threshold or (auto_index_dates and curr_col in datetimecols_list):
                         # cardinality <= auto_index_threshold or its a date and auto_index_date is true
                         # create an index
-                        logger.info('Creating index on {}...'.format(curr_col))
+                        logger.info('Creating index on \"{}\" for {} unique values...'.
+                                    format(curr_col, cardinality))
                         try:
                             cur.execute('CREATE INDEX ON \"{resource_id}\" (\"{col_name}\");'.format(
                                 resource_id=resource_id, col_name=curr_col))
                         except psycopg2.Error as e:
-                            logger.warning("Could not CREATE INDEX on {}: {}".format(curr_col, e))
+                            logger.warning("Could not CREATE INDEX on \"{}\": {}".format(curr_col, e))
                         index_count += 1
 
             logger.info('Vacuum Analyzing table to optimize indices...')
