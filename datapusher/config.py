@@ -45,9 +45,11 @@ class DataPusherPlusConfig(MutableMapping):
     LOG_FILE: str = '/etc/ckan/datapusher-plus/ckan_service.log'
     STDERR: bool = True
     QSV_BIN: str = '/usr/local/bin/qsvdp'
-    PREFER_DMY: bool = False
     FILE_BIN: str = '/usr/bin/file'
+    PREFER_DMY: bool = False
     PREVIEW_ROWS: int = 1000
+    AUTO_INDEX_THRESHOLD: int = 1
+    AUTO_INDEX_DATES: bool = True
     QSV_DEDUP: bool = True
     DEFAULT_EXCEL_SHEET: int = 0
     AUTO_ALIAS: bool = True
