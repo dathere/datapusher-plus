@@ -573,7 +573,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # Even excel exported CSVs can be potentially invalid, as it allows the export of "flexible"
     # CSVs - i.e. rows may have different column counts.
     # If it passes validation, we can now handle it with confidence downstream as a "normal" CSV.
-    logger.info("Validating {}...".format(format))
+    logger.info("Validating CSV...")
     try:
         qsv_validate = subprocess.run(
             [qsv_bin, "validate", tmp.name], check=True, capture_output=True, text=True
@@ -584,7 +584,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         validate_error_msg = qsv_validate.stderr
         logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
         return
-    logger.info("Valid file...")
+    logger.info("Valid CSV file...")
 
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
@@ -1112,15 +1112,22 @@ def push_to_datastore(task_id, input, dry_run=False):
                             )
                         index_count += 1
                     elif cardinality <= auto_index_threshold or (
-                        auto_index_dates and curr_col in datetimecols_list
+                        auto_index_dates and (curr_col in datetimecols_list)
                     ):
                         # cardinality <= auto_index_threshold or its a date and auto_index_date is true
                         # create an index
-                        logger.info(
-                            'Creating index on "{}" for {} unique values...'.format(
-                                curr_col, cardinality
+                        if curr_col in datetimecols_list:
+                            logger.info(
+                                'Creating index on "{}" date column for {} unique value/s...'.format(
+                                    curr_col, cardinality
+                                )
                             )
-                        )
+                        else:
+                            logger.info(
+                                'Creating index on "{}" for {} unique value/s...'.format(
+                                    curr_col, cardinality
+                                )
+                            )
                         try:
                             cur.execute(
                                 'CREATE INDEX ON "{resource_id}" ("{col_name}");'.format(
