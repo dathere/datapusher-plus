@@ -626,12 +626,17 @@ def push_to_datastore(task_id, input, dry_run=False):
     types = []
     headers_min = []
     headers_max = []
+    headers_cardinality = []
     qsv_stats_csv = tempfile.NamedTemporaryFile(suffix='.csv')
     qsv_stats_cmd = [qsv_bin, 'stats', tmp.name, '--infer-dates', '--dates-whitelist', 
                      'all', '--output', qsv_stats_csv.name]
     prefer_dmy = config.get('PREFER_DMY')
     if prefer_dmy:
         qsv_stats_cmd.append('--prefer_dmy')
+    auto_index_threshold = config.get('AUTO_INDEX_THRESHOLD')
+    if auto_index_threshold:
+        qsv_stats_cmd.append('--cardinality')
+
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
@@ -640,6 +645,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         raise util.JobError(
             'Cannot infer data types and compile statistics: {}'.format(e)
         )
+
     with open(qsv_stats_csv.name, mode='r') as inp:
         reader = csv.DictReader(inp)
         for row in reader:
@@ -647,6 +653,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             types.append(row['type'])
             headers_min.append(row['min'])
             headers_max.append(row['max'])
+            if auto_index_threshold:
+                headers_cardinality.append(row['cardinality'])
 
     existing = datastore_resource_exists(resource_id, api_key, ckan_url)
     existing_info = None
@@ -878,7 +886,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                             break
                         alias_sequence += 1
         else:
-            logger.info(
+            logger.warning(
                 'Cannot create alias: {}-{}-{}'.format(resource_name, package_name, owner_org))
             alias = None
     raw_connection.close()
@@ -887,12 +895,73 @@ def push_to_datastore(task_id, input, dry_run=False):
     send_resource_to_datastore(resource, headers_dicts, api_key, ckan_url,
                                records=None, aliases=alias, calculate_record_count=True)
     
-    # TODO: Create indices automatically based on statistics
-    # e.g. columns with Cardinality = rowcount has all unique values and a unique index can be created
-    # and if CREATE_INDEX setting is set
-    
     if alias:
         logger.info('Created alias: {}'.format(alias))
+    
+    # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
+    # create indices automatically based on summary statistics
+    # For columns w/ cardinality = record_count, it's all unique values, create a unique index
+    # If AUTO_INDEX_DATES is true, index all date columns
+    # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
+    auto_index_dates = config.get('AUTO_INDEX_DATES')
+    if auto_index_threshold or (auto_index_dates and datetimecols_list):
+        index_start = time.perf_counter()
+        logger.info('Creating indices. Auto-index threshold: {}  Auto-index dates: {} ...'
+                    .format(auto_index_threshold, auto_index_dates))
+        try:
+            raw_connection = psycopg2.connect(config.get('WRITE_ENGINE_URL'))
+        except psycopg2.Error as e:
+            cleanup_tempfiles()
+            raise util.JobError(
+                'Could not connect to the Datastore to create indices: {}'.format(e)
+            )
+        else:
+            cur = raw_connection.cursor()
+
+            # if auto_index_threshold == -1
+            # we index all the columns
+            if auto_index_threshold == -1:
+                auto_index_threshold = record_count
+            
+            index_count = 0    
+            for idx, cardinality in enumerate(headers_cardinality):
+                
+                curr_col = headers[idx]
+                if auto_index_threshold > 0 or auto_index_dates:
+                    if cardinality == record_count:
+                        # all the values are unique for this column, create a unique index
+                        logger.info('Creating UNIQUE index on {}...'.format(curr_col))
+                        try:
+                            cur.execute('CREATE UNIQUE INDEX ON \"{resource_id}\" ({col_name});'.format(
+                                resource_id=resource_id, col_name=curr_col))
+                        except psycopg2.Error as e:
+                            logger.warning("Could not CREATE UNIQUE INDEX on {}: {}".format(curr_col, e))
+                        index_count += 1
+                    elif cardinality <= auto_index_threshold or (auto_index_dates and curr_col in datetimecols_list):
+                        # cardinality <= auto_index_threshold or its a date and auto_index_date is true
+                        # create an index
+                        logger.info('Creating index on {}...'.format(curr_col))
+                        try:
+                            cur.execute('CREATE INDEX ON \"{resource_id}\" ({col_name});'.format(
+                                resource_id=resource_id, col_name=curr_col))
+                        except psycopg2.Error as e:
+                            logger.warning("Could not CREATE INDEX on {}: {}".format(curr_col, e))
+                        index_count += 1
+
+            logger.info('Vacuum Analyzing table to optimize indices...')
+            raw_connection.commit()
+            # this is needed to issue a VACUUM ANALYZE
+            raw_connection.set_isolation_level(
+                psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT)
+            cur = raw_connection.cursor()
+            cur.execute('VACUUM ANALYZE \"{resource_id}\";'.format(
+                resource_id=resource_id))            
+
+            index_elapsed = time.perf_counter() - index_start
+            logger.info('...indexing/vacuum analysis done. Indexed {n} columns in "{res_id}" in {index_elapsed} seconds.'.format(
+                n='{:,}'.format(index_count), res_id=resource_id, index_elapsed='{:,.2f}'.format(index_elapsed)))
+                                
+        raw_connection.close()
 
     cleanup_tempfiles()
 
