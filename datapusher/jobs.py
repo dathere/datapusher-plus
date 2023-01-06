@@ -553,7 +553,10 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         # normalize to CSV, and transcode to UTF-8 if required
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix=".csv")
-        logger.info("Normalizing/Transcoding {}...".format(format))
+        if format.upper() == "CSV":
+            logger.info("Normalizing/UTF-8 transcoding {}...".format(format))
+        else:
+            logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(format))
         try:
             qsv_input = subprocess.run(
                 [qsv_bin, "input", tmp.name, "--output", qsv_input_csv.name], check=True
