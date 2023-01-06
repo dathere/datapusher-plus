@@ -869,8 +869,15 @@ def push_to_datastore(task_id, input, dry_run=False):
             alias = f"{resource_name}-{package_name}-{owner_org_name}"[:59]
             # if AUTO_ALIAS_UNIQUE is true, check if the alias already exist, if it does
             # add a sequence suffix so the new alias can be created
-            cur.execute('SELECT COUNT(*) FROM _table_metadata where name like \'{}%\';'.format(alias))
-            alias_count = cur.fetchone()[0]
+            cur.execute('SELECT COUNT(*), alias_of FROM _table_metadata where name like \'{}%\' group by alias_of;'
+                        .format(alias))
+            alias_query_result = cur.fetchone()
+            if alias_query_result:
+                alias_count = alias_query_result[0]
+                existing_alias_of = alias_query_result[1]
+            else:
+                alias_count = 0
+                existing_alias_of = ''
             if auto_alias_unique and alias_count > 1:
                 alias_sequence = alias_count + 1
                 while True:
@@ -883,8 +890,9 @@ def push_to_datastore(task_id, input, dry_run=False):
                     if not alias_exists:
                         break
                     alias_sequence += 1
-            elif alias_count <= 1:
-                logger.warning("Dropping existing alias \"{}\"...".format(alias))
+            elif alias_count == 1:
+                logger.warning("Dropping existing alias \"{}\" for resource \"{}\"..."
+                               .format(alias, existing_alias_of))
                 try:
                    cur.execute('DROP VIEW IF EXISTS \"{}\";'.format(alias))
                 except psycopg2.Error as e:
