@@ -1,7 +1,7 @@
 import os
 import uuid
 
-from collections import MutableMapping
+from collections.abc import MutableMapping
 from typing import get_type_hints, Union
 from dotenv import load_dotenv
 
