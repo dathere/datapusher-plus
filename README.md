@@ -189,6 +189,7 @@ to keep the process up.
     # generate a settings file and tune it, as well as a uwsgi ini file
     sudo mkdir -p /etc/ckan/datapusher-plus
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher-plus/settings.py
+    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/.env -o /etc/ckan/datapusher-plus/.env
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
     # Be sure to initialize the database if required. (See Database Setup section below)
