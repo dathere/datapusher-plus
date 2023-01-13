@@ -182,9 +182,9 @@ to keep the process up.
     sudo qsvdp --update
 
     # ensure datapusher-plus and uwsgi are installed in the virtual environment
-    cd /usr/lib/ckan/dpplus_venv/datapusher-plus
-    pip install -e .
-    pip install uwsgi
+    . /usr/lib/ckan/dpplus_venv/bin/activate
+    pip3 install datapusher-plus
+    pip3 install uwsgi
 
     # generate a settings file and tune it, as well as a uwsgi ini file
     sudo mkdir -p /etc/ckan/datapusher-plus
