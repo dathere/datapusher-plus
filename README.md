@@ -292,7 +292,7 @@ To create the `datapusher` user and give it the required privileges to the `data
 su - postgres
 psql -d datastore_default
 CREATE ROLE datapusher LOGIN PASSWORD 'YOURPASSWORD';
-GRANT CREATE, CONNECT, TEMPORARY ON DATABASE datastore_default TO datapusher;
+GRANT CREATE, CONNECT, TEMPORARY, SUPERUSER ON DATABASE datastore_default TO datapusher;
 GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public TO datapusher;
 \q
 ```
