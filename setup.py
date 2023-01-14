@@ -62,6 +62,7 @@ setup(
         'requests',
         "psycopg2-binary",
         'datasize',
+        'uwsgi',
     ],
 
     # If there are data files included in your packages that need to be
