@@ -373,6 +373,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     # fetch the resource data
     logger.info("Fetching from: {0}...".format(url))
     headers = {}
+    preview_rows = int(config.get("PREVIEW_ROWS"))
+    download_preview_only = config.get("DOWNLOAD_PREVIEW_ONLY")
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
@@ -391,9 +393,12 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         cl = response.headers.get("content-length")
         max_content_length = int(config.get("MAX_CONTENT_LENGTH"))
-        preview_rows = config.get("PREVIEW_ROWS")
         try:
-            if cl and int(cl) > max_content_length and not preview_rows:
+            if (
+                cl
+                and int(cl) > max_content_length
+                and (preview_rows > 0 and not download_preview_only)
+            ):
                 raise util.JobError(
                     "Resource too large to download: {cl} > max ({max_cl}).".format(
                         cl=cl, max_cl=max_content_length
@@ -405,19 +410,36 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = tempfile.NamedTemporaryFile(suffix="." + resource.get("format").lower())
         length = 0
         m = hashlib.md5()
-        for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
-            length += len(chunk)
-            if length > max_content_length and not preview_rows:
-                raise util.JobError(
-                    "Resource too large to process: {cl} > max ({max_cl}).".format(
-                        cl=length, max_cl=max_content_length
+
+        if download_preview_only and preview_rows > 0:
+            # we're downloading the preview rows only, not the whole file
+            logger.info("Downloading {:,}-row preview...".format(preview_rows))
+
+            curr_line = 0
+            for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
+                curr_line += 1
+                length += len(line)
+
+                tmp.write(line)
+                m.update(line)
+                if curr_line > preview_rows:
+                    break
+        else:
+            # download the entire file
+            logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+
+            for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
+                length += len(chunk)
+                if length > max_content_length and not preview_rows:
+                    raise util.JobError(
+                        "Resource too large to process: {cl} > max ({max_cl}).".format(
+                            cl=length, max_cl=max_content_length
+                        )
                     )
-                )
-            tmp.write(chunk)
-            m.update(chunk)
+                tmp.write(chunk)
+                m.update(chunk)
 
         ct = response.headers.get("content-type", "").split(";", 1)[0]
-
     except requests.HTTPError as e:
         raise HTTPError(
             "DataPusher+ received a bad HTTP response when trying to download "
@@ -977,9 +999,10 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
-    if preview_rows < record_count:
+    if preview_rows < record_count or (preview_rows > 0 and download_preview_only):
         resource["preview"] = True
         resource["preview_rows"] = copied_count
+        resource["partial_download"] = download_preview_only
     update_resource(resource, api_key, ckan_url)
 
     # aliases are human-readable, and make it easier to use than resource id hash
