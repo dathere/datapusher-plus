@@ -414,8 +414,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                 and (preview_rows > 0 and not download_preview_only)
             ):
                 raise util.JobError(
-                    "Resource too large to download: {cl} > max ({max_cl}).".format(
-                        cl=cl, max_cl=max_content_length
+                    "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
+                        cl=DataSize(int(cl)), max_cl=DataSize(int(max_content_length))
                     )
                 )
         except ValueError:
@@ -1121,6 +1121,10 @@ def push_to_datastore(task_id, input, dry_run=False):
         stats_aliases = [stats_resource_id]
         if alias:
             stats_aliases.append(alias + "-stats")
+            try:
+                cur.execute('DROP VIEW IF EXISTS "{}";'.format(alias + "-stats"))
+            except psycopg2.Error as e:
+                logger.warning("Could not drop stats alias/view: {}".format(e))
 
         stats_resource = {"package_id": resource["package_id"]}
 
@@ -1134,6 +1138,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             aliases=stats_aliases,
             calculate_record_count=False,
         )
+
+        logger.info('DEBUG: stats_response: {}'.format(stats_response))
 
         actual_stats_resource_id = stats_response["resource_id"]
 
