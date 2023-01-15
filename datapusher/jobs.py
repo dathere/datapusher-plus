@@ -338,7 +338,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.setLevel(logging.DEBUG)
 
     # check if QSV_BIN exists
-    qsv_path = Path(config.get("QSV_BIN"))
+    qsv_bin = config.get("QSV_BIN")
+    qsv_path = Path(qsv_bin)
     if not qsv_path.is_file():
         raise util.JobError("{} not found.".format(config.get("QSV_BIN")))
 
@@ -498,8 +499,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     )
     analysis_start = time.perf_counter()
-
-    qsv_bin = config.get("QSV_BIN")
 
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
