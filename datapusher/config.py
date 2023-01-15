@@ -6,23 +6,28 @@ from typing import get_type_hints, Union
 from dotenv import load_dotenv
 
 
-env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(env_file)
 
-_DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
-_WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_default'
-_TYPES = 'String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL'
+_DATABASE_URI = "postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs"
+_WRITE_ENGINE_URL = "postgresql://datapusher:YOURPASSWORD@localhost/datastore_default"
+_TYPES = "String", "Float", "Integer", "DateTime", "Date", "NULL"
 _TYPE_MAPPING = {
-    'String': 'text', 'Integer': 'numeric', 
-    'Float': 'numeric', 'DateTime': 'timestamp', 
-    'Date': 'timestamp', 'NULL': 'text'
+    "String": "text",
+    "Integer": "numeric",
+    "Float": "numeric",
+    "DateTime": "timestamp",
+    "Date": "timestamp",
+    "NULL": "text",
 }
+
 
 class DataPusherPlusError(Exception):
     pass
 
-def _parse_bool(val: Union[str, bool]) -> bool:  # pylint: disable=E1136 
-    return val if type(val) == bool else val.lower() in ['true', 'yes', '1']
+
+def _parse_bool(val: Union[str, bool]) -> bool:  # pylint: disable=E1136
+    return val if type(val) == bool else val.lower() in ["true", "yes", "1"]
 
 
 # DataPusherPlusConfig class with required fields, default values, type checking, and typecasting for int and bool values
@@ -32,20 +37,20 @@ class DataPusherPlusConfig(MutableMapping):
     SECRET_KEY: str = str(uuid.uuid4())
     USERNAME: str = str(uuid.uuid4())
     PASSWORD: str = str(uuid.uuid4())
-    NAME: str = 'datapusher'
-    HOST: str = '0.0.0.0'
+    NAME: str = "datapusher"
+    HOST: str = "0.0.0.0"
     PORT: int = 8800
     SQLALCHEMY_DATABASE_URI: str = _DATABASE_URI
-    MAX_CONTENT_LENGTH: str = '1024000'
-    CHUNK_SIZE: str = '16384'
+    MAX_CONTENT_LENGTH: str = "1024000"
+    CHUNK_SIZE: str = "16384"
     DOWNLOAD_TIMEOUT: int = 30
     SSL_VERIFY: bool = False
     TYPES: tuple = _TYPES
     TYPE_MAPPING: dict = _TYPE_MAPPING
-    LOG_FILE: str = '/etc/ckan/datapusher-plus/ckan_service.log'
+    LOG_FILE: str = "/etc/ckan/datapusher-plus/ckan_service.log"
     STDERR: bool = True
-    QSV_BIN: str = '/usr/local/bin/qsvdp'
-    FILE_BIN: str = '/usr/bin/file'
+    QSV_BIN: str = "/usr/local/bin/qsvdp"
+    FILE_BIN: str = "/usr/bin/file"
     PREFER_DMY: bool = False
     PREVIEW_ROWS: int = 1000
     DOWNLOAD_PREVIEW_ONLY: bool = False
@@ -56,7 +61,7 @@ class DataPusherPlusConfig(MutableMapping):
     AUTO_ALIAS: bool = True
     AUTO_ALIAS_UNIQUE: bool = False
     WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
-    DOWNLOAD_PROXY: str = ''
+    DOWNLOAD_PROXY: str = ""
 
     """
     Map environment variables to class fields according to these rules:
@@ -64,6 +69,7 @@ class DataPusherPlusConfig(MutableMapping):
       - Field will be skipped if not in all caps
       - Class field and environment variable name are the same
     """
+
     def __init__(self, env):
         for field in self.__annotations__:
             if not field.isupper():
@@ -72,7 +78,7 @@ class DataPusherPlusConfig(MutableMapping):
             # Raise DataPusherPlusError if required field not supplied
             default_value = getattr(self, field, None)
             if default_value is None and env.get(field) is None:
-                raise DataPusherPlusError('The {} field is required'.format(field))
+                raise DataPusherPlusError("The {} field is required".format(field))
 
             # Cast env var value to expected type and raise DataPusherPlusError on failure
             try:
@@ -84,12 +90,11 @@ class DataPusherPlusConfig(MutableMapping):
 
                 self.__setattr__(field, value)
             except ValueError:
-                raise DataPusherPlusError('Unable to cast value of "{}" to type "{}" for "{}" field'.format(
-                    env[field],
-                    var_type,
-                    field
+                raise DataPusherPlusError(
+                    'Unable to cast value of "{}" to type "{}" for "{}" field'.format(
+                        env[field], var_type, field
+                    )
                 )
-            )
 
     def __repr__(self):
         return str(self.__dict__)
@@ -112,9 +117,10 @@ class DataPusherPlusConfig(MutableMapping):
     def __delitem__(self, key):
         del self.__dict__[key]
 
+
 # Expose config object for app to import
 config = DataPusherPlusConfig(os.environ)
 
 # Expose these two variables so ckanserviceprovider can use it
-SQLALCHEMY_DATABASE_URI = config.get('SQLALCHEMY_DATABASE_URI')
-WRITE_ENGINE_URL = config.get('WRITE_ENGINE_URL')
+SQLALCHEMY_DATABASE_URI = config.get("SQLALCHEMY_DATABASE_URI")
+WRITE_ENGINE_URL = config.get("WRITE_ENGINE_URL")
