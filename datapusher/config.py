@@ -56,7 +56,7 @@ class DataPusherPlusConfig(MutableMapping):
     DOWNLOAD_PREVIEW_ONLY: bool = False
     AUTO_INDEX_THRESHOLD: int = 3
     AUTO_INDEX_DATES: bool = True
-    QSV_DEDUP: bool = True
+    DEDUP: bool = False
     DEFAULT_EXCEL_SHEET: int = 0
     AUTO_ALIAS: bool = True
     AUTO_ALIAS_UNIQUE: bool = False

@@ -620,7 +620,8 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
-    if config.get("QSV_DEDUP"):
+    dedup = config.get("DEDUP")
+    if dedup:
         qsv_dedup_csv = tempfile.NamedTemporaryFile(suffix=".csv")
         logger.info("Checking for duplicate rows...")
         try:
@@ -725,7 +726,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # log how many records we detected
     unique_qualifier = ""
-    if config.get("QSV_DEDUP"):
+    if dedup:
         unique_qualifier = "unique"
     logger.info("{:,} {} records detected...".format(record_count, unique_qualifier))
 
