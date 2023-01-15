@@ -580,7 +580,15 @@ def push_to_datastore(task_id, input, dry_run=False):
             logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(format))
         try:
             qsv_input = subprocess.run(
-                [qsv_bin, "input", tmp.name, "--output", qsv_input_csv.name], check=True
+                [
+                    qsv_bin,
+                    "input",
+                    tmp.name,
+                    "--trim-headers",
+                    "--output",
+                    qsv_input_csv.name,
+                ],
+                check=True,
             )
         except subprocess.CalledProcessError as e:
             # return as we can't push an invalid CSV file
