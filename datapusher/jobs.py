@@ -226,6 +226,7 @@ def datastore_resource_exists(resource_id, api_key, ckan_url):
 
 def send_resource_to_datastore(
     resource,
+    resource_id,
     headers,
     api_key,
     ckan_url,
@@ -236,14 +237,25 @@ def send_resource_to_datastore(
     """
     Stores records in CKAN datastore
     """
-    request = {
-        "resource_id": resource["id"],
-        "fields": headers,
-        "force": True,
-        "records": records,
-        "aliases": aliases,
-        "calculate_record_count": calculate_record_count,
-    }
+
+    if resource_id:
+        # used to create the "main" resource
+        request = {
+            "resource_id": resource_id,
+            "fields": headers,
+            "force": True,
+            "records": records,
+            "aliases": aliases,
+            "calculate_record_count": calculate_record_count,
+        }
+    else:
+        # used to create the "stats" resource
+        request = {
+            "resource": resource,
+            "force": True,
+            "aliases": aliases,
+            "calculate_record_count": calculate_record_count,
+        }
 
     url = get_url("datastore_create", ckan_url)
     r = requests.post(
@@ -253,6 +265,7 @@ def send_resource_to_datastore(
         headers={"Content-Type": "application/json", "Authorization": api_key},
     )
     check_response(r, url, "CKAN DataStore")
+    return r
 
 
 def update_resource(resource, api_key, ckan_url):
@@ -941,10 +954,11 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # first, let's create an empty datastore table w/ guessed types
     send_resource_to_datastore(
-        resource,
-        headers_dicts,
-        api_key,
-        ckan_url,
+        resource=None,
+        resource_id=resource["id"],
+        headers=headers_dicts,
+        api_key=api_key,
+        ckan_url=ckan_url,
         records=None,
         aliases=None,
         calculate_record_count=False,
@@ -1027,9 +1041,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         if owner_org:
             owner_org_name = owner_org.get("name")
         if resource_name and package_name and owner_org_name:
-            # we limit it to 59, so we still have space for sequence suffix
+            # we limit it to 55, so we still have space for sequence & stats suffix
             # postgres max identifier length is 63
-            alias = f"{resource_name}-{package_name}-{owner_org_name}"[:59]
+            alias = f"{resource_name}-{package_name}-{owner_org_name}"[:55]
             # if AUTO_ALIAS_UNIQUE is true, check if the alias already exist, if it does
             # add a sequence suffix so the new alias can be created
             cur.execute(
@@ -1076,14 +1090,14 @@ def push_to_datastore(task_id, input, dry_run=False):
                 )
             )
             alias = None
-    raw_connection.close()
 
     # tell CKAN to calculate_record_count and set alias if set
     send_resource_to_datastore(
-        resource,
-        headers_dicts,
-        api_key,
-        ckan_url,
+        resource=None,
+        resource_id=resource["id"],
+        headers=headers_dicts,
+        api_key=api_key,
+        ckan_url=ckan_url,
         records=None,
         aliases=alias,
         calculate_record_count=True,
@@ -1091,6 +1105,80 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     if alias:
         logger.info('Created alias "{}" for "{}"...'.format(alias, resource_id))
+
+    if config.get("ADD_SUMMARY_STATS_RESOURCE"):
+        # check if the stats already exist
+        stats_resource_id = resource_id + "-stats"
+        existing_stats = datastore_resource_exists(stats_resource_id, api_key, ckan_url)
+
+        # Delete existing datastore resource-stats before proceeding.
+        if existing_stats:
+            logger.info(
+                'Deleting "{res_id}" from datastore.'.format(res_id=stats_resource_id)
+            )
+            delete_datastore_resource(stats_resource_id, api_key, ckan_url)
+
+        stats_aliases = [stats_resource_id]
+        if alias:
+            stats_aliases.append(alias + "-stats")
+
+        stats_resource = {"package_id": resource["package_id"]}
+
+        stats_response = send_resource_to_datastore(
+            stats_resource,
+            resource_id=None,
+            headers=None,
+            api_key=api_key,
+            ckan_url=ckan_url,
+            records=None,
+            aliases=stats_aliases,
+            calculate_record_count=False,
+        )
+
+        actual_stats_resource_id = stats_response["resource_id"]
+
+        # get stats header names
+        try:
+            qsv_stats_headers = subprocess.run(
+                [qsv_bin, "headers", "--just-names", qsv_stats_csv.name],
+                capture_output=True,
+                check=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            cleanup_tempfiles()
+            raise util.JobError("Cannot scan stats CSV headers: {}".format(e))
+        stats_headers = str(qsv_stats_headers.stdout).strip()
+        stats_header_dict = {
+            idx: ele for idx, ele in enumerate(stats_headers.splitlines())
+        }
+
+        # now COPY the stats to the datastore
+        cur = raw_connection.cursor()
+
+        copy_sql = (
+            'COPY "{resource_id}" ({column_names}) FROM STDIN '
+            "WITH (FORMAT CSV, FREEZE 1, "
+            "HEADER 1, ENCODING 'UTF8');"
+        ).format(
+            resource_id=actual_stats_resource_id,
+            column_names=", ".join(
+                ['"{}"'.format(h["id"]) for h in stats_headers_dicts]
+            ),
+        )
+        logger.info(copy_sql)
+        with open(qsv_stats_csv.name, "rb") as f:
+            try:
+                cur.copy_expert(copy_sql, f)
+            except psycopg2.Error as e:
+                cleanup_tempfiles()
+                raise util.JobError("Postgres COPY failed: {}".format(e))
+            else:
+                copied_count = cur.rowcount
+
+        raw_connection.commit()
+
+    raw_connection.close()
 
     # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
     # create indices automatically based on summary statistics

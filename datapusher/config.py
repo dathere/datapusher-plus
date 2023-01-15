@@ -58,6 +58,7 @@ class DataPusherPlusConfig(MutableMapping):
     AUTO_INDEX_DATES: bool = True
     DEDUP: bool = False
     DEFAULT_EXCEL_SHEET: int = 0
+    ADD_SUMMARY_STATS_RESOURCE: bool = True
     AUTO_ALIAS: bool = True
     AUTO_ALIAS_UNIQUE: bool = False
     WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
