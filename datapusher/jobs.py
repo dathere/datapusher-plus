@@ -200,6 +200,26 @@ def delete_datastore_resource(resource_id, api_key, ckan_url):
         raise util.JobError("Deleting existing datastore failed.")
 
 
+def delete_resource(resource_id, api_key, ckan_url):
+    try:
+        delete_url = get_url("resource_delete", ckan_url)
+        response = requests.post(
+            delete_url,
+            verify=config.get("SSL_VERIFY"),
+            data=json.dumps({"id": resource_id, "force": True}),
+            headers={"Content-Type": "application/json", "Authorization": api_key},
+        )
+        check_response(
+            response,
+            delete_url,
+            "CKAN",
+            good_status=(201, 200, 404),
+            ignore_no_success=True,
+        )
+    except requests.exceptions.RequestException:
+        raise util.JobError("Deleting existing resource failed.")
+
+
 def datastore_resource_exists(resource_id, api_key, ckan_url):
     try:
         search_url = get_url("datastore_search", ckan_url)
@@ -252,6 +272,7 @@ def send_resource_to_datastore(
         # used to create the "stats" resource
         request = {
             "resource": resource,
+            "fields": headers,
             "force": True,
             "aliases": aliases,
             "calculate_record_count": calculate_record_count,
@@ -265,7 +286,7 @@ def send_resource_to_datastore(
         headers={"Content-Type": "application/json", "Authorization": api_key},
     )
     check_response(r, url, "CKAN DataStore")
-    return r
+    return r.json()
 
 
 def update_resource(resource, api_key, ckan_url):
@@ -470,7 +491,11 @@ def push_to_datastore(task_id, input, dry_run=False):
     file_hash = m.hexdigest()
     tmp.seek(0)
 
-    if resource.get("hash") == file_hash and not data.get("ignore_hash"):
+    if (
+        resource.get("hash") == file_hash
+        and not data.get("ignore_hash")
+        and not config.get("IGNORE_FILE_HASH")
+    ):
         logger.warning(
             "Upload skipped as the file hash hasn't changed: {hash}.".format(
                 hash=file_hash
@@ -499,6 +524,14 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_safenames_csv.close()
         if "qsv_applydp_csv" in globals():
             qsv_applydp_csv.close()
+        if "qsv_stats_csv" in globals():
+            cleanup_idxfile(qsv_stats_csv)
+            qsv_stats_csv.close()
+
+    def cleanup_idxfile(tmpfile):
+        idx_fname = tmpfile.name + ".idx"
+        if os.path.exists(idx_fname):
+            os.remove(idx_fname)
 
     """
     Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
@@ -507,11 +540,12 @@ def push_to_datastore(task_id, input, dry_run=False):
     """
     fetch_elapsed = time.perf_counter() - timer_start
     logger.info(
-        "Fetched {:.2MB} file in {:,.2f} seconds. Analyzing with qsv...".format(
+        "Fetched {:.2MB} file in {:,.2f} seconds.".format(
             DataSize(length), fetch_elapsed
         )
     )
     analysis_start = time.perf_counter()
+    logger.info("ANALYZING WITH QSV..")
 
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
@@ -629,7 +663,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         validate_error_msg = qsv_validate.stderr
         logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
         return
-    logger.info("Valid CSV file...")
+    logger.info("Well-formed, valid CSV file confirmed...")
 
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
@@ -673,27 +707,26 @@ def push_to_datastore(task_id, input, dry_run=False):
     # now, ensure our column/header names identifiers are "safe names"
     # i.e. valid postgres identifiers
     qsv_safenames_csv = tempfile.NamedTemporaryFile(suffix=".csv")
-    logger.info("Checking for safe column names...")
+    logger.info('Checking for "database-safe" header names...')
     try:
         qsv_safenames = subprocess.run(
-            [
-                qsv_bin,
-                "safenames",
-                tmp.name,
-                "--mode",
-                "verify",
-                "--output",
-                qsv_safenames_csv.name,
-            ],
+            [qsv_bin, "safenames", tmp.name, "--mode", "json",],
             capture_output=True,
             text=True,
         )
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles()
         raise util.JobError("Safenames error: {}".format(e))
-    unsafeheader_count = int(str(qsv_safenames.stderr).strip())
-    if unsafeheader_count > 0:
-        logger.info("Sanitizing header names...")
+
+    unsafe_json = json.loads(str(qsv_safenames.stdout))
+    unsafe_headers = unsafe_json["unsafe_headers"]
+
+    if unsafe_headers:
+        logger.info(
+            '"{} unsafe" header names found ({}). Sanitizing..."'.format(
+                len(unsafe_headers), unsafe_headers
+            )
+        )
         qsv_safenames = subprocess.run(
             [
                 qsv_bin,
@@ -744,6 +777,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info("{:,} {} records detected...".format(record_count, unique_qualifier))
 
     # run qsv stats to get data types and summary statistics
+    logger.info("Inferring data types and compiling statistics...")
     headers = []
     types = []
     headers_min = []
@@ -771,7 +805,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles()
-        qsv_stats_csv.close()
         raise util.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
@@ -797,27 +830,32 @@ def push_to_datastore(task_id, input, dry_run=False):
     # override with types user requested in Data Dictionary
     if existing_info:
         types = [
-            {
-                "text": "String",
-                "numeric": "Float",
-                "timestamp": "DateTime",
-            }.get(existing_info.get(h, {}).get("type_override"), t)
+            {"text": "String", "numeric": "Float", "timestamp": "DateTime",}.get(
+                existing_info.get(h, {}).get("type_override"), t
+            )
             for t, h in zip(types, headers)
         ]
 
     # Delete existing datastore resource before proceeding.
     if existing:
-        logger.info('Deleting "{res_id}" from datastore.'.format(res_id=resource_id))
+        logger.info(
+            'Deleting existing resource "{res_id}" from datastore.'.format(
+                res_id=resource_id
+            )
+        )
         delete_datastore_resource(resource_id, api_key, ckan_url)
 
     # 1st pass of building headers_dict
+    # here we map inferred types to postgresql data types
     type_mapping = config.get("TYPE_MAPPING")
     temp_headers_dicts = [
         dict(id=field[0], type=type_mapping[str(field[1])])
         for field in zip(headers, types)
     ]
 
-    # 2nd pass header_dicts, checking for smartint types
+    # 2nd pass header_dicts, checking for smartint types.
+    # "smartint" will automatically select the best integer data type based on the
+    # min/max values of the column we got from qsv stats
     # and set labels to original column names in case we made the names "db-safe"
     # as the labels are used by DataTables_view to label columns
     # we also take note of datetime/timestamp fields, so we can normalize them
@@ -930,7 +968,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         if prefer_dmy:
             qsv_applydp_cmd.append("--prefer_dmy")
         logger.info(
-            'Formatting dates "{}" to ISO 8601/RFC 3339 format with preferdmy: {}...'.format(
+            'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
                 datecols, prefer_dmy
             )
         )
@@ -942,14 +980,18 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_applydp_csv
 
     analysis_elapsed = time.perf_counter() - analysis_start
-    logger.info("Analyzed and prepped in {:,.2f} seconds.".format(analysis_elapsed))
+    logger.info(
+        "ANALYSIS DONE! Analyzed and prepped in {:,.2f} seconds.".format(
+            analysis_elapsed
+        )
+    )
 
     # at this stage, the resource is ready for COPYing to the Datastore
 
     if dry_run:
         return headers_dicts
 
-    logger.info("Copying {:,} rows to database...".format(rows_to_copy))
+    logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
     copy_start = time.perf_counter()
 
     # first, let's create an empty datastore table w/ guessed types
@@ -1007,8 +1049,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         raw_connection.set_isolation_level(
             psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT
         )
-        cur = raw_connection.cursor()
-        cur.execute('VACUUM ANALYZE "{resource_id}";'.format(resource_id=resource_id))
+        analyze_cur = raw_connection.cursor()
+        analyze_cur.execute(
+            'VACUUM ANALYZE "{resource_id}";'.format(resource_id=resource_id)
+        )
+        analyze_cur.close()
 
     copy_elapsed = time.perf_counter() - copy_start
     logger.info(
@@ -1029,8 +1074,12 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # aliases are human-readable, and make it easier to use than resource id hash
     # in using the Datastore API and in SQL queries
+    auto_alias = config.get("AUTO_ALIAS")
     auto_alias_unique = config.get("AUTO_ALIAS_UNIQUE")
-    if config.get("AUTO_ALIAS"):
+    if auto_alias:
+        logger.info(
+            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(auto_alias_unique)
+        )
         # get package info, so we can construct the alias
         package = get_package(resource["package_id"], ckan_url, api_key)
 
@@ -1106,82 +1155,114 @@ def push_to_datastore(task_id, input, dry_run=False):
     if alias:
         logger.info('Created alias "{}" for "{}"...'.format(alias, resource_id))
 
+    cur.close()
+    raw_connection.commit()
+
+    #  should we ADD_SUMMARY_STATS_RESOURCE?
     if config.get("ADD_SUMMARY_STATS_RESOURCE"):
+
         # check if the stats already exist
-        stats_resource_id = resource_id + "-stats"
+        if auto_alias:
+            stats_resource_id = alias + "-stats"
+        else:
+            stats_resource_id = resource_id + "-stats"
         existing_stats = datastore_resource_exists(stats_resource_id, api_key, ckan_url)
+
+        stats_cur = raw_connection.cursor()
 
         # Delete existing datastore resource-stats before proceeding.
         if existing_stats:
             logger.info(
-                'Deleting "{res_id}" from datastore.'.format(res_id=stats_resource_id)
+                'Deleting existing summary stats "{res_id}".'.format(
+                    res_id=stats_resource_id
+                )
             )
-            delete_datastore_resource(stats_resource_id, api_key, ckan_url)
 
-        stats_aliases = [stats_resource_id]
-        if alias:
-            stats_aliases.append(alias + "-stats")
+            stats_cur.execute(
+                "SELECT alias_of FROM _table_metadata where name like '{}%' group by alias_of;".format(
+                    stats_resource_id
+                )
+            )
+            stats_alias_result = stats_cur.fetchone()
+            if stats_alias_result:
+                existing_stats_alias_of = stats_alias_result[0]
+
+                delete_datastore_resource(existing_stats_alias_of, api_key, ckan_url)
+                delete_resource(existing_stats_alias_of, api_key, ckan_url)
+
+        stats_alias = None
+        stats_alias_name = alias + "-stats"
+        if auto_alias:
+            stats_alias = [stats_alias_name]
             try:
-                cur.execute('DROP VIEW IF EXISTS "{}";'.format(alias + "-stats"))
+                stats_cur.execute('DROP VIEW IF EXISTS "{}";'.format(stats_alias))
             except psycopg2.Error as e:
                 logger.warning("Could not drop stats alias/view: {}".format(e))
 
-        stats_resource = {"package_id": resource["package_id"]}
-
-        stats_response = send_resource_to_datastore(
-            stats_resource,
-            resource_id=None,
-            headers=None,
-            api_key=api_key,
-            ckan_url=ckan_url,
-            records=None,
-            aliases=stats_aliases,
-            calculate_record_count=False,
-        )
-
-        logger.info('DEBUG: stats_response: {}'.format(stats_response))
-
-        actual_stats_resource_id = stats_response["resource_id"]
-
-        # get stats header names
+        # run stats on stats CSV to get header names and infer data types
         try:
-            qsv_stats_headers = subprocess.run(
-                [qsv_bin, "headers", "--just-names", qsv_stats_csv.name],
+            qsv_stats_stats = subprocess.run(
+                [qsv_bin, "stats", "--typesonly", qsv_stats_csv.name,],
                 capture_output=True,
                 check=True,
                 text=True,
             )
         except subprocess.CalledProcessError as e:
             cleanup_tempfiles()
-            raise util.JobError("Cannot scan stats CSV headers: {}".format(e))
-        stats_headers = str(qsv_stats_headers.stdout).strip()
-        stats_header_dict = {
-            idx: ele for idx, ele in enumerate(stats_headers.splitlines())
+            raise util.JobError("Cannot run stats on CSV stats: {}".format(e))
+
+        stats_stats = str(qsv_stats_stats.stdout).strip()
+        stats_stats_dict = [
+            dict(id=ele.split(",")[0], type=type_mapping[ele.split(",")[1]])
+            for idx, ele in enumerate(stats_stats.splitlines()[1:], 1)
+        ]
+
+        # logger.info("DEBUG: stats_stats_dict: {}".format(stats_stats_dict))
+
+        stats_resource = {
+            "package_id": resource["package_id"],
+            "name": resource_name + " - Summary Statistics",
+            "format": "CSV",
+            "mimetype": "text/csv",
         }
+        stats_response = send_resource_to_datastore(
+            stats_resource,
+            resource_id=None,
+            headers=stats_stats_dict,
+            api_key=api_key,
+            ckan_url=ckan_url,
+            records=None,
+            aliases=stats_alias,
+            calculate_record_count=False,
+        )
+
+        stats_resource_id = stats_response["result"]["resource_id"]
+
+        logger.info(
+            'ADDING SUMMARY STATISTICS "{}" for "{}"...'.format(
+                stats_alias_name, stats_resource_id
+            )
+        )
 
         # now COPY the stats to the datastore
-        cur = raw_connection.cursor()
-
         copy_sql = (
             'COPY "{resource_id}" ({column_names}) FROM STDIN '
-            "WITH (FORMAT CSV, FREEZE 1, "
+            "WITH (FORMAT CSV, "
             "HEADER 1, ENCODING 'UTF8');"
         ).format(
-            resource_id=actual_stats_resource_id,
-            column_names=", ".join(
-                ['"{}"'.format(h["id"]) for h in stats_headers_dicts]
-            ),
+            resource_id=stats_resource_id,
+            column_names=", ".join(['"{}"'.format(h["id"]) for h in stats_stats_dict]),
         )
+
         logger.info(copy_sql)
         with open(qsv_stats_csv.name, "rb") as f:
             try:
-                cur.copy_expert(copy_sql, f)
+                stats_cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
                 cleanup_tempfiles()
                 raise util.JobError("Postgres COPY failed: {}".format(e))
-            else:
-                copied_count = cur.rowcount
 
+        stats_cur.close()
         raw_connection.commit()
 
     raw_connection.close()
@@ -1195,7 +1276,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     if auto_index_threshold or (auto_index_dates and datetimecols_list):
         index_start = time.perf_counter()
         logger.info(
-            "Creating indices. Auto-index threshold: {:,} unique value/s. Auto-index dates: {} ...".format(
+            "AUTO-INDEXING. Auto-index threshold: {:,} unique value/s. Auto-index dates: {} ...".format(
                 auto_index_threshold, auto_index_dates
             )
         )
@@ -1207,7 +1288,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 "Could not connect to the Datastore to create indices: {}".format(e)
             )
         else:
-            cur = raw_connection.cursor()
+            index_cur = raw_connection.cursor()
 
             # if auto_index_threshold == -1
             # we index all the columns
@@ -1228,7 +1309,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                             )
                         )
                         try:
-                            cur.execute(
+                            index_cur.execute(
                                 'CREATE UNIQUE INDEX ON "{resource_id}" ("{col_name}");'.format(
                                     resource_id=resource_id, col_name=curr_col
                                 )
@@ -1258,7 +1339,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                                 )
                             )
                         try:
-                            cur.execute(
+                            index_cur.execute(
                                 'CREATE INDEX ON "{resource_id}" ("{col_name}");'.format(
                                     resource_id=resource_id, col_name=curr_col
                                 )
@@ -1269,16 +1350,20 @@ def push_to_datastore(task_id, input, dry_run=False):
                             )
                         index_count += 1
 
-            logger.info("Vacuum Analyzing table to optimize indices...")
+            index_cur.close()
             raw_connection.commit()
+
+            logger.info("Vacuum Analyzing table to optimize indices...")
+
             # this is needed to issue a VACUUM ANALYZE
             raw_connection.set_isolation_level(
                 psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT
             )
-            cur = raw_connection.cursor()
-            cur.execute(
+            analyze_cur = raw_connection.cursor()
+            analyze_cur.execute(
                 'VACUUM ANALYZE "{resource_id}";'.format(resource_id=resource_id)
             )
+            analyze_cur.close()
 
             index_elapsed = time.perf_counter() - index_start
             logger.info(
@@ -1295,7 +1380,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     total_elapsed = time.perf_counter() - timer_start
     logger.info(
-        "Datapusher+ job done. Total elapsed time: {:,.2f} seconds.".format(
+        "DATAPUSHER+ JOB DONE! Total elapsed time: {:,.2f} seconds.".format(
             total_elapsed
         )
     )

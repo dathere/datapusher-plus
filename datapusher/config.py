@@ -42,6 +42,7 @@ class DataPusherPlusConfig(MutableMapping):
     PORT: int = 8800
     SQLALCHEMY_DATABASE_URI: str = _DATABASE_URI
     MAX_CONTENT_LENGTH: str = "25600000"
+    IGNORE_FILE_HASH: bool = True
     CHUNK_SIZE: str = "16384"
     DOWNLOAD_TIMEOUT: int = 30
     SSL_VERIFY: bool = False
