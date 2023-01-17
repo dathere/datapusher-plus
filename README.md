@@ -166,7 +166,7 @@ to keep the process up.
 
     # Install requirements for DataPusher+. Be sure to have at least Python 3.8
     sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
-
+     
     cd /usr/lib/ckan
 
     # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
@@ -177,6 +177,11 @@ to keep the process up.
     unzip qsv-0.84.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
     rm qsv-0.84.0-x86_64-unknown-linux-gnu.zip
+    
+    # Set Locales 
+    export LC_ALL="en_US.UTF-8"
+    export LC_CTYPE="en_US.UTF-8"
+    sudo dpkg-reconfigure locales
 
     # if qsv is already installed, be sure to update it to the latest release
     sudo qsvdp --update
