@@ -1,0 +1,11 @@
+# To specify Datapusher+ settings, modify and copy this file to ".env"
+# and put it in working directory from where DP+ is started.
+# e.g. in development mode, in the datapusher-plus/datapusher directory
+# in production mode, in the /etc/ckan/datapusher-plus directory
+#
+# Note that DP+ parameters can also be passed using environment variables
+# See http://bit.ly/3CVd8zQ for details
+WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_default'
+SQLALCHEMY_DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
+
+QSV_BIN = '/usr/local/bin/qsvdp'
