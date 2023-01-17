@@ -800,6 +800,9 @@ def push_to_datastore(task_id, input, dry_run=False):
     auto_index_threshold = config.get("AUTO_INDEX_THRESHOLD")
     if auto_index_threshold:
         qsv_stats_cmd.append("--cardinality")
+    summary_stats_options = config.get("SUMMARY_STATS_OPTIONS")
+    if summary_stats_options:
+        qsv_stats_cmd.append(summary_stats_options)
 
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
