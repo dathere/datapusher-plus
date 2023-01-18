@@ -22,6 +22,7 @@ import os
 import psycopg2
 from pathlib import Path
 from datasize import DataSize
+from psycopg2 import sql
 
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
@@ -1024,8 +1025,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         """
         try:
             cur.execute(
-                'TRUNCATE TABLE "{resource_id}";'.format(resource_id=resource_id)
+                sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(resource_id))
             )
+
         except psycopg2.Error as e:
             logger.warning("Could not TRUNCATE: {}".format(e))
 
@@ -1054,7 +1056,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
         analyze_cur = raw_connection.cursor()
         analyze_cur.execute(
-            'VACUUM ANALYZE "{resource_id}";'.format(resource_id=resource_id)
+            sql.SQL("VACUUM ANALYZE {}").format(sql.Identifier(resource_id))
         )
         analyze_cur.close()
 
@@ -1099,9 +1101,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             # if AUTO_ALIAS_UNIQUE is true, check if the alias already exist, if it does
             # add a sequence suffix so the new alias can be created
             cur.execute(
-                "SELECT COUNT(*), alias_of FROM _table_metadata where name like '{}%' group by alias_of;".format(
-                    alias
-                )
+                "SELECT COUNT(*), alias_of FROM _table_metadata where name like %s group by alias_of",
+                (alias + "%",),
             )
             alias_query_result = cur.fetchone()
             if alias_query_result:
@@ -1117,9 +1118,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                     # just in case they deleted an older alias with a lower sequence #
                     alias = f"{alias}-{alias_sequence:03}"
                     cur.execute(
-                        "SELECT COUNT(*) FROM _table_metadata where name like '{}%';".format(
-                            alias
-                        )
+                        "SELECT COUNT(*), alias_of FROM _table_metadata where name like %s group by alias_of;",
+                        (alias + "%",),
                     )
                     alias_exists = cur.fetchone()[0]
                     if not alias_exists:
@@ -1132,7 +1132,9 @@ def push_to_datastore(task_id, input, dry_run=False):
                     )
                 )
                 try:
-                    cur.execute('DROP VIEW IF EXISTS "{}";'.format(alias))
+                    cur.execute(
+                        sql.SQL("DROP VIEW IF EXISTS {}").format(sql.Identifier(alias))
+                    )
                 except psycopg2.Error as e:
                     logger.warning("Could not drop alias/view: {}".format(e))
         else:
@@ -1182,9 +1184,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
 
             stats_cur.execute(
-                "SELECT alias_of FROM _table_metadata where name like '{}%' group by alias_of;".format(
-                    stats_resource_id
-                )
+                "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
+                (stats_resource_id + "%",),
             )
             stats_alias_result = stats_cur.fetchone()
             if stats_alias_result:
@@ -1198,7 +1199,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         if auto_alias:
             stats_alias = [stats_alias_name]
             try:
-                stats_cur.execute('DROP VIEW IF EXISTS "{}";'.format(stats_alias))
+                stats_cur.execute(
+                    sql.SQL("DROP VIEW IF EXISTS {}").format(
+                        sql.Identifier(stats_alias_name)
+                    )
+                )
             except psycopg2.Error as e:
                 logger.warning("Could not drop stats alias/view: {}".format(e))
 
@@ -1364,7 +1369,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
             analyze_cur = raw_connection.cursor()
             analyze_cur.execute(
-                'VACUUM ANALYZE "{resource_id}";'.format(resource_id=resource_id)
+                sql.SQL("VACUUM ANALYZE {}").format(sql.Identifier(resource_id))
             )
             analyze_cur.close()
 
