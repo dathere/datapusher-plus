@@ -1000,6 +1000,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # at this stage, the resource is ready for COPYing to the Datastore
 
     if dry_run:
+        logger.warning("Dry run only. Returning without copying to the Datastore...")
         return headers_dicts
 
     logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
