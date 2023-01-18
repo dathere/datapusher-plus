@@ -526,13 +526,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         if "qsv_applydp_csv" in globals():
             qsv_applydp_csv.close()
         if "qsv_stats_csv" in globals():
-            cleanup_idxfile(qsv_stats_csv)
+            if "qsv_index_file" in globals():
+                cleanup_idxfile(qsv_index_file)
             qsv_stats_csv.close()
 
-    def cleanup_idxfile(tmpfile):
-        idx_fname = tmpfile.name + ".idx"
-        if os.path.exists(idx_fname):
-            os.remove(idx_fname)
+    def cleanup_idxfile(idxfile):
+        if os.path.exists(idxfile):
+            os.remove(idxfile)
 
     """
     Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
@@ -750,6 +750,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # first, index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
     try:
+        qsv_index_file = tmp.name + ".idx"
         subprocess.run([qsv_bin, "index", tmp.name], check=True)
     except subprocess.CalledProcessError as e:
         cleanup_tempfiles
