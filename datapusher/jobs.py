@@ -1281,6 +1281,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         stats_cur.close()
         raw_connection.commit()
 
+        stats_resource["id"] = stats_resource_id
+        stats_resource["summary_statistics"] = True
+        stats_resource["summary_of_resource"] = resource_id
+        update_resource(stats_resource, api_key, ckan_url)
+
     raw_connection.close()
 
     # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
