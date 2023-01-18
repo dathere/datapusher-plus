@@ -3,9 +3,29 @@
 # e.g. in development mode, in the datapusher-plus/datapusher directory
 # in production mode, in the /etc/ckan/datapusher-plus directory
 #
-# Note that DP+ parameters can also be passed using environment variables
+# Note that DP+ settings can also be passed using environment variables
 # See http://bit.ly/3CVd8zQ for details
 WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_default'
 SQLALCHEMY_DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
 
+MAX_CONTENT_LENGTH = 25600000
+IGNORE_FILE_HASH = True
+CHUNK_SIZE = 16384
+DOWNLOAD_TIMEOUT = 30
+SSL_VERIFY = False
+LOG_FILE = '/etc/ckan/datapusher-plus/ckan_service.log'
+STDERR = True
 QSV_BIN = '/usr/local/bin/qsvdp'
+FILE_BIN = '/usr/bin/file'
+PREFER_DMY = False
+PREVIEW_ROWS = 1000
+DOWNLOAD_PREVIEW_ONLY = False
+AUTO_INDEX_THRESHOLD = 3
+AUTO_INDEX_DATES = True
+DEDUP = False
+DEFAULT_EXCEL_SHEET = 0
+ADD_SUMMARY_STATS_RESOURCE = True
+SUMMARY_STATS_OPTIONS = '--everything'
+AUTO_ALIAS = True
+AUTO_ALIAS_UNIQUE = False
+DOWNLOAD_PROXY = ''
