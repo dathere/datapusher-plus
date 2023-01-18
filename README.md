@@ -136,7 +136,7 @@ If you already have qsv, update it to the latest release by using the --update o
 qsv with the `--update` option and it will check for the latest version and update as required.
 
 
-Copy `datapusher/config.py` to a new file like `config_local.py` and modify your configuration as required.
+Copy the `datapusher/dot-env.template` to file `datapusher/.env` and modify your configuration as required.
 Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
     cd datapusher
@@ -144,7 +144,7 @@ Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` d
     # configure your installation as required
     nano config_local.py
 
-    python3 datapusher/main.py datapusher/config_local.py
+    python3 datapusher/main.py datapusher/config.py
 
 By default, DataPusher+ should be running at the following port:
 
@@ -180,7 +180,7 @@ to keep the process up.
     sudo mv qsv* /usr/local/bin
     rm qsv-0.84.0-x86_64-unknown-linux-gnu.zip
     
-    # Set Locales 
+    # Set Locales
     export LC_ALL="en_US.UTF-8"
     export LC_CTYPE="en_US.UTF-8"
     sudo dpkg-reconfigure locales
@@ -188,18 +188,17 @@ to keep the process up.
     # if qsv is already installed, be sure to update it to the latest release
     sudo qsvdp --update
 
-    # ensure datapusher-plus and uwsgi are installed in the virtual environment
+    # install datapusher-plus in the virtual environment
     . /usr/lib/ckan/dpplus_venv/bin/activate
     pip3 install datapusher-plus
 
-    # generate a settings file and tune it, as well as a uwsgi ini file
+    # create an .env file and tune DP+ settings. Tune the uwsgi.ini file as well
     sudo mkdir -p /etc/ckan/datapusher-plus
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/settings.py -o /etc/ckan/datapusher-plus/settings.py
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/.env -o /etc/ckan/datapusher-plus/.env
+    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/dot-env.template -o /etc/ckan/datapusher-plus/.env
     sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
     # Be sure to initialize the database if required. (See Database Setup section below)
-    # Be sure to the .env and settings.py files have the right connect strings!
+    # Be sure to the .env file have the right connect strings!
 
     # Create a user to run the web service (if necessary)
     sudo addgroup www-data
