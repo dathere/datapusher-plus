@@ -448,12 +448,15 @@ def push_to_datastore(task_id, input, dry_run=False):
         m = hashlib.md5()
 
         if download_preview_only and preview_rows > 0:
+            # if download_preview_only and preview_rows is greater than zero
             # we're downloading the preview rows only, not the whole file
             logger.info("Downloading {:,}-row preview...".format(preview_rows))
 
             curr_line = 0
             for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
                 curr_line += 1
+                # add back the linefeed as iter_lines removes it
+                line = line + "\n".encode("ascii")
                 length += len(line)
 
                 tmp.write(line)
@@ -461,7 +464,10 @@ def push_to_datastore(task_id, input, dry_run=False):
                 if curr_line > preview_rows:
                     break
         else:
-            # download the entire file
+            # download the entire file otherwise
+            # TODO: handle when preview_rows is negative (get the preview from the
+            # end of the file) so we use http range request to get the preview from
+            # the end without downloading the entire file
             logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
 
             for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
