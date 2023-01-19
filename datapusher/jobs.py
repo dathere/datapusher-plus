@@ -475,7 +475,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         else:
             # download the entire file otherwise
             # TODO: handle when preview_rows is negative (get the preview from the
-            # end of the file) so we use http range request to get the preview from
+            # end of the file) so we can use http range request to get the preview from
             # the end without downloading the entire file
             logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
 
@@ -546,17 +546,17 @@ def push_to_datastore(task_id, input, dry_run=False):
                     os.remove(qsv_index_file)
             qsv_stats_csv.close()
 
-    """
-    Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
-    not guesses as it scans the entire file, 2) its super-fast, and 3) it has
-    addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
-    """
     fetch_elapsed = time.perf_counter() - timer_start
     logger.info(
         "Fetched {:.2MB} file in {:,.2f} seconds.".format(
             DataSize(length), fetch_elapsed
         )
     )
+    """
+    Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
+    not guesses as it scans the entire file, 2) its super-fast, and 3) it has
+    addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
+    """
     analysis_start = time.perf_counter()
     logger.info("ANALYZING WITH QSV..")
 
@@ -675,7 +675,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         # return as we can't push an invalid CSV file
         cleanup_tempfiles()
         validate_error_msg = qsv_validate.stderr
-        logger.error("Invalid file! Job aborted: {}.".format(validate_error_msg))
+        logger.error("Invalid CSV! Job aborted: {}.".format(validate_error_msg))
         return
     logger.info("Well-formed, valid CSV file confirmed...")
 
@@ -881,11 +881,11 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # 2nd pass header_dicts, checking for smartint types.
     # "smartint" will automatically select the best integer data type based on the
-    # min/max values of the column we got from qsv stats
-    # and set labels to original column names in case we made the names "db-safe"
-    # as the labels are used by DataTables_view to label columns
+    # min/max values of the column we got from qsv stats.
+    # We also set the Data Dictionary Label to original column names in case we made
+    # the names "db-safe" as the labels are used by DataTables_view to label columns
     # we also take note of datetime/timestamp fields, so we can normalize them
-    # to RFC3339 format
+    # to RFC3339 format, which is Postgres COPY ready
     datetimecols_list = []
     headers_dicts = []
     for idx, header in enumerate(temp_headers_dicts):
@@ -910,6 +910,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         headers_dicts.append(dict(id=header["id"], type=header_type, info=info_dict))
 
     # Maintain data dictionaries from matching column names
+    # if data dictionary already exists for this resource as
+    # we want to preserve the user's data dictionary curations
     if existing_info:
         for h in headers_dicts:
             if h["id"] in existing_info:
