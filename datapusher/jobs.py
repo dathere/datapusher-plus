@@ -538,12 +538,9 @@ def push_to_datastore(task_id, input, dry_run=False):
             qsv_applydp_csv.close()
         if "qsv_stats_csv" in globals():
             if "qsv_index_file" in globals():
-                cleanup_idxfile(qsv_index_file)
+                if os.path.exists(qsv_index_file):
+                    os.remove(qsv_index_file)
             qsv_stats_csv.close()
-
-    def cleanup_idxfile(idxfile):
-        if os.path.exists(idxfile):
-            os.remove(idxfile)
 
     """
     Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
