@@ -455,7 +455,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         if download_preview_only and preview_rows > 0:
             # if download_preview_only and preview_rows is greater than zero
             # we're downloading the preview rows only, not the whole file
-            logger.info("Downloading {:,}-row preview...".format(preview_rows))
+            logger.info(
+                "Downloading only first {:,} row preview from {:.2MB} file...".format(
+                    preview_rows, DataSize(int(cl))
+                )
+            )
 
             curr_line = 0
             for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
