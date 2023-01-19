@@ -952,6 +952,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             tmp = qsv_slice_csv
         else:
             # PREVIEW_ROWS is negative, slice from the end
+            # TODO: do http range request so we don't have to download the whole file
+            # to slice from the end
             slice_len = abs(preview_rows)
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
             qsv_slice_csv = tempfile.NamedTemporaryFile(suffix=".csv")
@@ -1276,23 +1278,24 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         stats_resource_id = stats_response["result"]["resource_id"]
 
+        # now COPY the stats to the datastore
+        column_names = ", ".join(['"{}"'.format(h["id"]) for h in stats_stats_dict])
         logger.info(
-            'ADDING SUMMARY STATISTICS "{}" for "{}"...'.format(
-                stats_alias_name, stats_resource_id
+            'ADDING SUMMARY STATISTICS () for "{}"("{}")...'.format(
+                column_names,
+                stats_resource_id,
+                stats_alias_name,
             )
         )
-
-        # now COPY the stats to the datastore
         copy_sql = (
-            'COPY "{resource_id}" ({column_names}) FROM STDIN '
+            'COPY "{}" ({}) FROM STDIN '
             "WITH (FORMAT CSV, "
             "HEADER 1, ENCODING 'UTF8');"
         ).format(
-            resource_id=stats_resource_id,
-            column_names=", ".join(['"{}"'.format(h["id"]) for h in stats_stats_dict]),
+            stats_resource_id,
+            column_names,
         )
 
-        logger.info(copy_sql)
         with open(qsv_stats_csv.name, "rb") as f:
             try:
                 stats_cur.copy_expert(copy_sql, f)
