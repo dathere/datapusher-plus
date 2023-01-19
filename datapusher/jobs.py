@@ -1356,8 +1356,9 @@ def push_to_datastore(task_id, input, dry_run=False):
                         )
                         try:
                             index_cur.execute(
-                                'CREATE UNIQUE INDEX ON "{resource_id}" ("{col_name}");'.format(
-                                    resource_id=resource_id, col_name=curr_col
+                                sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
+                                    sql.Identifier(resource_id),
+                                    sql.Identifier(curr_col),
                                 )
                             )
                         except psycopg2.Error as e:
@@ -1386,8 +1387,9 @@ def push_to_datastore(task_id, input, dry_run=False):
                             )
                         try:
                             index_cur.execute(
-                                'CREATE INDEX ON "{resource_id}" ("{col_name}");'.format(
-                                    resource_id=resource_id, col_name=curr_col
+                                sql.SQL("CREATE INDEX ON {} ({})").format(
+                                    sql.Identifier(resource_id),
+                                    sql.Identifier(curr_col),
                                 )
                             )
                         except psycopg2.Error as e:
