@@ -1022,7 +1022,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.warning("Dry run only. Returning without copying to the Datastore...")
         return headers_dicts
 
-    logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
+    if preview_rows:
+        logger.info("COPYING {:,}-row preview to Datastore...".format(rows_to_copy))
+    else:
+        logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
+
     copy_start = time.perf_counter()
 
     # first, let's create an empty datastore table w/ guessed types
