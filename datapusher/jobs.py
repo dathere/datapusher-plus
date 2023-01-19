@@ -560,8 +560,11 @@ def push_to_datastore(task_id, input, dry_run=False):
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
     format = resource.get("format").upper()
     if format in spreadsheet_extensions:
-        # if so, export it as a csv file
-        logger.info("Converting {} to CSV...".format(format))
+        # if so, export spreadsheet as a CSV file
+        default_excel_sheet = config.get("DEFAULT_EXCEL_SHEET")
+        logger.info(
+            "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
+        )
         """
         first, we need a temporary spreadsheet filename with the right file extension
         we only need the filename though, that's why we remove it
@@ -574,7 +577,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         # run `qsv excel` and export it to a CSV
         # use --trim option to trim column names and the data
         qsv_excel_csv = tempfile.NamedTemporaryFile(suffix=".csv")
-        default_excel_sheet = config.get("DEFAULT_EXCEL_SHEET")
         try:
             qsv_excel = subprocess.run(
                 [
