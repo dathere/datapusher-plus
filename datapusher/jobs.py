@@ -372,11 +372,16 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
 
-    # check if QSV_BIN exists
+    # check if QSV_BIN and FILE_BIN exists
     qsv_bin = config.get("QSV_BIN")
     qsv_path = Path(qsv_bin)
     if not qsv_path.is_file():
-        raise util.JobError("{} not found.".format(config.get("QSV_BIN")))
+        raise util.JobError("{} not found.".format(qsv_bin))
+    file_bin = config.get("FILE_BIN")
+
+    file_path = Path(file_bin)
+    if not file_path.is_file():
+        raise util.JobError("{} not found.".format(file_bin))
 
     validate_input(input)
 
@@ -594,7 +599,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                 "Upload aborted. Cannot export spreadsheet(?) to CSV: {}".format(e)
             )
 
-            file_bin = config.get("FILE_BIN")
             # get some file info and log it by running `file`
             # just in case the file is not actually a spreadsheet or is encrypted
             file_format = subprocess.run(
@@ -717,7 +721,13 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Checking for "database-safe" header names...')
     try:
         qsv_safenames = subprocess.run(
-            [qsv_bin, "safenames", tmp.name, "--mode", "json",],
+            [
+                qsv_bin,
+                "safenames",
+                tmp.name,
+                "--mode",
+                "json",
+            ],
             capture_output=True,
             text=True,
         )
@@ -841,9 +851,11 @@ def push_to_datastore(task_id, input, dry_run=False):
     # override with types user requested in Data Dictionary
     if existing_info:
         types = [
-            {"text": "String", "numeric": "Float", "timestamp": "DateTime",}.get(
-                existing_info.get(h, {}).get("type_override"), t
-            )
+            {
+                "text": "String",
+                "numeric": "Float",
+                "timestamp": "DateTime",
+            }.get(existing_info.get(h, {}).get("type_override"), t)
             for t, h in zip(types, headers)
         ]
 
@@ -1218,7 +1230,12 @@ def push_to_datastore(task_id, input, dry_run=False):
         # run stats on stats CSV to get header names and infer data types
         try:
             qsv_stats_stats = subprocess.run(
-                [qsv_bin, "stats", "--typesonly", qsv_stats_csv.name,],
+                [
+                    qsv_bin,
+                    "stats",
+                    "--typesonly",
+                    qsv_stats_csv.name,
+                ],
                 capture_output=True,
                 check=True,
                 text=True,
