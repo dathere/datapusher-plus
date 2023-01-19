@@ -1281,7 +1281,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         # now COPY the stats to the datastore
         column_names = ", ".join(['"{}"'.format(h["id"]) for h in stats_stats_dict])
         logger.info(
-            'ADDING SUMMARY STATISTICS () for "{}"("{}")...'.format(
+            'ADDING SUMMARY STATISTICS ({}) for "{}"("{}")...'.format(
                 column_names,
                 stats_resource_id,
                 stats_alias_name,
