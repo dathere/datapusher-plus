@@ -286,11 +286,19 @@ def send_resource_to_datastore(
 
 
 def update_resource(resource, api_key, ckan_url):
-    """
-    Update webstore_url and webstore_last_updated in CKAN
-    """
-
     url = get_url("resource_update", ckan_url)
+    r = requests.post(
+        url,
+        verify=config.get("SSL_VERIFY"),
+        data=json.dumps(resource),
+        headers={"Content-Type": "application/json", "Authorization": api_key},
+    )
+
+    check_response(r, url, "CKAN")
+
+
+def patch_resource(resource, api_key, ckan_url):
+    url = get_url("resource_patch", ckan_url)
     r = requests.post(
         url,
         verify=config.get("SSL_VERIFY"),
@@ -1214,13 +1222,11 @@ def push_to_datastore(task_id, input, dry_run=False):
                 except psycopg2.Error as e:
                     logger.warning("Could not drop alias/view: {}".format(e))
 
-                resource_with_existing_alias = get_resource(
-                    existing_alias_of, ckan_url, api_key
-                )
+                resource_with_existing_alias = []
                 resource_with_existing_alias["id"] = existing_alias_of
                 resource_with_existing_alias["has_summary_statistics"] = False
                 resource_with_existing_alias["summary_statistics_resource_id"] = ""
-                update_resource(resource_with_existing_alias, api_key, ckan_url)
+                patch_resource(resource_with_existing_alias, api_key, ckan_url)
         else:
             logger.warning(
                 "Cannot create alias: {}-{}-{}".format(
