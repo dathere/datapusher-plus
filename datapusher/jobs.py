@@ -1143,6 +1143,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     )
 
+    metadata_start = time.perf_counter()
+    logger.info("UPDATING RESOURCE METADATA...")
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
     if preview_rows < record_count or (preview_rows > 0 and download_preview_only):
@@ -1366,6 +1368,14 @@ def push_to_datastore(task_id, input, dry_run=False):
         stats_resource["summary_of_resource"] = resource_id
         update_resource(stats_resource, api_key, ckan_url)
 
+    cleanup_tempfiles()
+    metadata_elapsed = time.perf_counter() - metadata_start
+    logger.info(
+        "METADATA UPDATES DONE! Resource metadata updated in {:.2f} seconds.".format(
+            metadata_elapsed
+        )
+    )
+
     # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
     # create indices automatically based on summary statistics
     # For columns w/ cardinality = record_count, it's all unique values, create a unique index
@@ -1468,14 +1478,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
 
     raw_connection.close()
-    cleanup_tempfiles()
-
     total_elapsed = time.perf_counter() - timer_start
     logger.info(
-        "DATAPUSHER+ JOB DONE!\n Download: {:,.2f}; Analysis: {:,.2f}; COPYing: {:,.2f}, Indexing: {:,.2f}. Total elapsed time: {:,.2f} seconds.".format(
+        "DATAPUSHER+ JOB DONE!\n Download: {:,.2f}; Analysis: {:,.2f}; COPYing: {:,.2f}, Metadata updates: {:,.2f}, Indexing: {:,.2f}.\nTOTAL ELAPSED TIME: {:,.2f} seconds.".format(
             fetch_elapsed,
             analysis_elapsed,
             copy_elapsed,
+            metadata_elapsed,
             index_elapsed,
             total_elapsed,
         )
