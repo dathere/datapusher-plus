@@ -702,11 +702,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         record_count = int(sortcheck_json["record_count"])
         unsorted_breaks = int(sortcheck_json["unsorted_breaks"])
         dupe_count = int(sortcheck_json["dupe_count"])
-        logger.info(
-            "Sorted: {}; Unsorted breaks: {:,}; Duplicate count: {:,}...".format(
-                is_sorted, unsorted_breaks, dupe_count
-            )
+        sortcheck_msg = "Sorted: {}; Unsorted breaks: {:,}".format(
+            is_sorted, unsorted_breaks
         )
+        # dupe count is only relevant if the file is sorted
+        if is_sorted and dupe_count > 0:
+            sortcheck_msg = sortcheck_msg + " Duplicates: {:,}".format(dupe_count)
+        logger.info(sortcheck_msg)
 
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
@@ -1336,7 +1338,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         # now COPY the stats to the datastore
         col_names_list = [h["id"] for h in stats_stats_dict]
         logger.info(
-            'ADDING SUMMARY STATISTICS ({}) in "{}"("{}")...'.format(
+            'ADDING SUMMARY STATISTICS {} in "{}"("{}")...'.format(
                 col_names_list,
                 stats_resource_id,
                 stats_alias_name,
