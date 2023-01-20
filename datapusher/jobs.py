@@ -816,6 +816,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         raise util.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
+    # so we can skip qsv count.
     if not sort_and_dupe_check:
         # get record count, this is instantaneous with an index
         try:
@@ -1106,13 +1107,14 @@ def push_to_datastore(task_id, input, dry_run=False):
         except psycopg2.Error as e:
             logger.warning("Could not TRUNCATE: {}".format(e))
 
-        copy_sql = (
-            'COPY "{resource_id}" ({column_names}) FROM STDIN '
+        column_names = ", ".join(['"{}"'.format(h["id"]) for h in headers_dicts])
+        copy_sql = sql.SQL(
+            "COPY {} (%s) FROM STDIN "
             "WITH (FORMAT CSV, FREEZE 1, "
             "HEADER 1, ENCODING 'UTF8');"
         ).format(
-            resource_id=resource_id,
-            column_names=", ".join(['"{}"'.format(h["id"]) for h in headers_dicts]),
+            sql.Identifier(resource_id),
+            column_names,
         )
         logger.info(copy_sql)
         with open(tmp.name, "rb") as f:
@@ -1287,6 +1289,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 logger.warning("Could not drop stats alias/view: {}".format(e))
 
         # run stats on stats CSV to get header names and infer data types
+        # we don't need summary statistics, so use the --typesonly option
         try:
             qsv_stats_stats = subprocess.run(
                 [
@@ -1339,12 +1342,12 @@ def push_to_datastore(task_id, input, dry_run=False):
                 stats_alias_name,
             )
         )
-        copy_sql = (
-            'COPY "{}" ({}) FROM STDIN '
+        copy_sql = sql.SQL(
+            "COPY {} (%s) FROM STDIN "
             "WITH (FORMAT CSV, "
             "HEADER 1, ENCODING 'UTF8');"
         ).format(
-            stats_resource_id,
+            sql.Identifier(stats_resource_id),
             column_names,
         )
 
