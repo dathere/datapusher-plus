@@ -1213,6 +1213,13 @@ def push_to_datastore(task_id, input, dry_run=False):
                     )
                 except psycopg2.Error as e:
                     logger.warning("Could not drop alias/view: {}".format(e))
+
+                resource_with_existing_alias = get_resource(
+                    existing_alias_of, ckan_url, api_key
+                )
+                resource_with_existing_alias["has_summary_statistics"] = False
+                resource_with_existing_alias["summary_statistics_resource_id"] = ""
+                update_resource(resource_with_existing_alias, api_key, ckan_url)
         else:
             logger.warning(
                 "Cannot create alias: {}-{}-{}".format(
