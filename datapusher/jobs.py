@@ -3,12 +3,7 @@
 import json
 import requests
 
-try:
-    from urllib.parse import urlsplit
-except ImportError:
-    from urlparse import urlsplit
-
-import itertools
+from urllib.parse import urlsplit
 import datetime
 import locale
 import logging
