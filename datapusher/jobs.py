@@ -1194,8 +1194,12 @@ def push_to_datastore(task_id, input, dry_run=False):
     cur.close()
     raw_connection.commit()
 
-    #  should we ADD_SUMMARY_STATS_RESOURCE?
-    if config.get("ADD_SUMMARY_STATS_RESOURCE"):
+    # should we ADD_SUMMARY_STATS_RESOURCE?
+    # by default, we only add summary stats if we're not doing a partial download
+    # unless SUMMARY_STATS_WITH_PREVIEW is set to true
+    if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
+        download_preview_only and config.get("SUMMARY_STATS_WITH_PREVIEW")
+    ):
 
         # check if the stats already exist
         if auto_alias:
@@ -1285,7 +1289,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         # now COPY the stats to the datastore
         column_names = ", ".join(['"{}"'.format(h["id"]) for h in stats_stats_dict])
         logger.info(
-            'ADDING SUMMARY STATISTICS ({}) for "{}"("{}")...'.format(
+            'ADDING SUMMARY STATISTICS ({}) in "{}"("{}")...'.format(
                 column_names,
                 stats_resource_id,
                 stats_alias_name,
@@ -1419,7 +1423,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
             index_elapsed = time.perf_counter() - index_start
             logger.info(
-                '...indexing/vacuum analysis done. Indexed {n} columns in "{res_id}" in {index_elapsed} seconds.'.format(
+                '...indexing/vacuum analysis done. Indexed {n} column/s in "{res_id}" in {index_elapsed} seconds.'.format(
                     n="{:,}".format(index_count),
                     res_id=resource_id,
                     index_elapsed="{:,.2f}".format(index_elapsed),
