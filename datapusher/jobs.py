@@ -680,15 +680,50 @@ def push_to_datastore(task_id, input, dry_run=False):
         return
     logger.info("Well-formed, valid CSV file confirmed...")
 
+    # if SORT_AND_DUPE_CHECK is True or DEDUP is True
+    # check if the file is sorted and if it has duplicates
+    # get the record count, unsorted breaks and duplicate count as well
+    sort_and_dupe_check = config.get("SORT_AND_DUPE_CHECK")
+    dedup = config.get("DEDUP")
+
+    if sort_and_dupe_check or dedup:
+        logger.info("Checking for duplicates and if the CSV is sorted...")
+        try:
+            qsv_sortcheck = subprocess.run(
+                [qsv_bin, "sortcheck", tmp.name, "--json"],
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            cleanup_tempfiles()
+            raise util.JobError("Sortcheck error: {}".format(e))
+        sortcheck_json = json.loads(str(qsv_sortcheck.stdout))
+        is_sorted = sortcheck_json["sorted"]
+        record_count = int(sortcheck_json["record_count"])
+        unsorted_breaks = int(sortcheck_json["unsorted_breaks"])
+        dupe_count = int(sortcheck_json["dupe_count"])
+        logger.info(
+            "Sorted: {}; Unsorted breaks: {:,}; Duplicate count: {:,}...".format(
+                is_sorted, unsorted_breaks, dupe_count
+            )
+        )
+
     # do we need to dedup?
     # note that deduping also ends up creating a sorted CSV
-    dedup = config.get("DEDUP")
-    if dedup:
+    if dedup and dupe_count > 0:
         qsv_dedup_csv = tempfile.NamedTemporaryFile(suffix=".csv")
-        logger.info("Checking for duplicate rows...")
+        logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
+        qsv_dedup_cmd = [qsv_bin, "dedup", tmp.name, "--output", qsv_dedup_csv.name]
+
+        # if the file is already sorted,
+        # we can save a lot of time by passing the --sorted flag
+        # we also get to "stream" the file and not load it into memory,
+        # as we don't need to sort it first
+        if is_sorted:
+            qsv_dedup_cmd.append("--sorted")
         try:
             qsv_dedup = subprocess.run(
-                [qsv_bin, "dedup", tmp.name, "--output", qsv_dedup_csv.name],
+                qsv_dedup_cmd,
                 capture_output=True,
                 text=True,
             )
@@ -698,9 +733,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         dupe_count = int(str(qsv_dedup.stderr).strip())
         if dupe_count > 0:
             tmp = qsv_dedup_csv
-            logger.warning("{:,} duplicates found and removed...".format(dupe_count))
-        else:
-            logger.info("No duplicates found...")
+            logger.warning(
+                "{:,} duplicates found and removed. Note that deduping results in a sorted CSV.".format(
+                    dupe_count
+                )
+            )
+    elif dupe_count > 0:
+        logger.warning("{:,} duplicates found but not deduping...".format(dupe_count))
 
     # get existing header names, so we can use them for data dictionary labels
     # should we need to change the column name to make it "db-safe"
@@ -720,7 +759,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     }
 
     # now, ensure our column/header names identifiers are "safe names"
-    # i.e. valid postgres identifiers
+    # i.e. valid postgres/CKAN Datastore identifiers
     qsv_safenames_csv = tempfile.NamedTemporaryFile(suffix=".csv")
     logger.info('Checking for "database-safe" header names...')
     try:
@@ -776,15 +815,17 @@ def push_to_datastore(task_id, input, dry_run=False):
         cleanup_tempfiles
         raise util.JobError("Cannot index CSV: {}".format(e))
 
-    # get record count, this is instantaneous with an index
-    try:
-        qsv_count = subprocess.run(
-            [qsv_bin, "count", tmp.name], capture_output=True, check=True, text=True
-        )
-    except subprocess.CalledProcessError as e:
-        cleanup_tempfiles()
-        raise util.JobError("Cannot count records in CSV: {}".format(e))
-    record_count = int(str(qsv_count.stdout).strip())
+    # if SORT_AND_DUPE_CHECK = True, we already know the record count
+    if not sort_and_dupe_check:
+        # get record count, this is instantaneous with an index
+        try:
+            qsv_count = subprocess.run(
+                [qsv_bin, "count", tmp.name], capture_output=True, check=True, text=True
+            )
+        except subprocess.CalledProcessError as e:
+            cleanup_tempfiles()
+            raise util.JobError("Cannot count records in CSV: {}".format(e))
+        record_count = int(str(qsv_count.stdout).strip())
 
     # its empty, nothing to do
     if record_count == 0:
