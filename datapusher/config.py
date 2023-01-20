@@ -57,6 +57,7 @@ class DataPusherPlusConfig(MutableMapping):
     DOWNLOAD_PREVIEW_ONLY: bool = False
     AUTO_INDEX_THRESHOLD: int = 3
     AUTO_INDEX_DATES: bool = True
+    SORT_AND_DUPE_CHECK: bool = False
     DEDUP: bool = False
     DEFAULT_EXCEL_SHEET: int = 0
     ADD_SUMMARY_STATS_RESOURCE: bool = True
