@@ -1321,8 +1321,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         stats_resource["summary_of_resource"] = resource_id
         update_resource(stats_resource, api_key, ckan_url)
 
-    raw_connection.close()
-
     # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
     # create indices automatically based on summary statistics
     # For columns w/ cardinality = record_count, it's all unique values, create a unique index
@@ -1336,104 +1334,95 @@ def push_to_datastore(task_id, input, dry_run=False):
                 auto_index_threshold, auto_index_dates
             )
         )
-        try:
-            raw_connection = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
-        except psycopg2.Error as e:
-            cleanup_tempfiles()
-            raise util.JobError(
-                "Could not connect to the Datastore to create indices: {}".format(e)
-            )
-        else:
-            index_cur = raw_connection.cursor()
+        index_cur = raw_connection.cursor()
 
-            # if auto_index_threshold == -1
-            # we index all the columns
-            if auto_index_threshold == -1:
-                auto_index_threshold = record_count
+        # if auto_index_threshold == -1
+        # we index all the columns
+        if auto_index_threshold == -1:
+            auto_index_threshold = record_count
 
-            index_count = 0
-            for idx, cardinality in enumerate(headers_cardinality):
+        index_count = 0
+        for idx, cardinality in enumerate(headers_cardinality):
 
-                curr_col = headers[idx]
-                if auto_index_threshold > 0 or auto_index_dates:
-                    if cardinality == record_count:
-                        # all the values are unique for this column, create a unique index
-                        unique_value_count = min(preview_rows, cardinality)
-                        logger.info(
-                            'Creating UNIQUE index on "{}" for {:,} unique values...'.format(
-                                curr_col, unique_value_count
+            curr_col = headers[idx]
+            if auto_index_threshold > 0 or auto_index_dates:
+                if cardinality == record_count:
+                    # all the values are unique for this column, create a unique index
+                    unique_value_count = min(preview_rows, cardinality)
+                    logger.info(
+                        'Creating UNIQUE index on "{}" for {:,} unique values...'.format(
+                            curr_col, unique_value_count
+                        )
+                    )
+                    try:
+                        index_cur.execute(
+                            sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
+                                sql.Identifier(resource_id),
+                                sql.Identifier(curr_col),
                             )
                         )
-                        try:
-                            index_cur.execute(
-                                sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
-                                    sql.Identifier(resource_id),
-                                    sql.Identifier(curr_col),
-                                )
+                    except psycopg2.Error as e:
+                        logger.warning(
+                            'Could not CREATE UNIQUE INDEX on "{}": {}'.format(
+                                curr_col, e
                             )
-                        except psycopg2.Error as e:
-                            logger.warning(
-                                'Could not CREATE UNIQUE INDEX on "{}": {}'.format(
-                                    curr_col, e
-                                )
+                        )
+                    index_count += 1
+                elif cardinality <= auto_index_threshold or (
+                    auto_index_dates and (curr_col in datetimecols_list)
+                ):
+                    # cardinality <= auto_index_threshold or its a date and auto_index_date is true
+                    # create an index
+                    if curr_col in datetimecols_list:
+                        logger.info(
+                            'Creating index on "{}" date column for {:,} unique value/s...'.format(
+                                curr_col, cardinality
                             )
-                        index_count += 1
-                    elif cardinality <= auto_index_threshold or (
-                        auto_index_dates and (curr_col in datetimecols_list)
-                    ):
-                        # cardinality <= auto_index_threshold or its a date and auto_index_date is true
-                        # create an index
-                        if curr_col in datetimecols_list:
-                            logger.info(
-                                'Creating index on "{}" date column for {:,} unique value/s...'.format(
-                                    curr_col, cardinality
-                                )
+                        )
+                    else:
+                        logger.info(
+                            'Creating index on "{}" for {:,} unique value/s...'.format(
+                                curr_col, cardinality
                             )
-                        else:
-                            logger.info(
-                                'Creating index on "{}" for {:,} unique value/s...'.format(
-                                    curr_col, cardinality
-                                )
+                        )
+                    try:
+                        index_cur.execute(
+                            sql.SQL("CREATE INDEX ON {} ({})").format(
+                                sql.Identifier(resource_id),
+                                sql.Identifier(curr_col),
                             )
-                        try:
-                            index_cur.execute(
-                                sql.SQL("CREATE INDEX ON {} ({})").format(
-                                    sql.Identifier(resource_id),
-                                    sql.Identifier(curr_col),
-                                )
-                            )
-                        except psycopg2.Error as e:
-                            logger.warning(
-                                'Could not CREATE INDEX on "{}": {}'.format(curr_col, e)
-                            )
-                        index_count += 1
+                        )
+                    except psycopg2.Error as e:
+                        logger.warning(
+                            'Could not CREATE INDEX on "{}": {}'.format(curr_col, e)
+                        )
+                    index_count += 1
 
-            index_cur.close()
-            raw_connection.commit()
+        index_cur.close()
+        raw_connection.commit()
 
-            logger.info("Vacuum Analyzing table to optimize indices...")
+        logger.info("Vacuum Analyzing table to optimize indices...")
 
-            # this is needed to issue a VACUUM ANALYZE
-            raw_connection.set_isolation_level(
-                psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT
+        # this is needed to issue a VACUUM ANALYZE
+        raw_connection.set_isolation_level(
+            psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT
+        )
+        analyze_cur = raw_connection.cursor()
+        analyze_cur.execute(
+            sql.SQL("VACUUM ANALYZE {}").format(sql.Identifier(resource_id))
+        )
+        analyze_cur.close()
+
+        index_elapsed = time.perf_counter() - index_start
+        logger.info(
+            '...indexing/vacuum analysis done. Indexed {n} column/s in "{res_id}" in {index_elapsed} seconds.'.format(
+                n="{:,}".format(index_count),
+                res_id=resource_id,
+                index_elapsed="{:,.2f}".format(index_elapsed),
             )
-            analyze_cur = raw_connection.cursor()
-            analyze_cur.execute(
-                sql.SQL("VACUUM ANALYZE {}").format(sql.Identifier(resource_id))
-            )
-            analyze_cur.close()
+        )
 
-            index_elapsed = time.perf_counter() - index_start
-            logger.info(
-                '...indexing/vacuum analysis done. Indexed {n} column/s in "{res_id}" in {index_elapsed} seconds.'.format(
-                    n="{:,}".format(index_count),
-                    res_id=resource_id,
-                    index_elapsed="{:,.2f}".format(index_elapsed),
-                )
-            )
-
-        raw_connection.close()
-
+    raw_connection.close()
     cleanup_tempfiles()
 
     total_elapsed = time.perf_counter() - timer_start
