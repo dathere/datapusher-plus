@@ -60,6 +60,7 @@ class DataPusherPlusConfig(MutableMapping):
     DEDUP: bool = False
     DEFAULT_EXCEL_SHEET: int = 0
     ADD_SUMMARY_STATS_RESOURCE: bool = True
+    SUMMARY_STATS_WITH_PREVIEW: bool = False
     SUMMARY_STATS_OPTIONS: str = "--everything"
     AUTO_ALIAS: bool = True
     AUTO_ALIAS_UNIQUE: bool = False
