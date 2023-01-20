@@ -1107,16 +1107,16 @@ def push_to_datastore(task_id, input, dry_run=False):
         except psycopg2.Error as e:
             logger.warning("Could not TRUNCATE: {}".format(e))
 
-        column_names = ", ".join(['"{}"'.format(h["id"]) for h in headers_dicts])
+        col_names_list = [h["id"] for h in headers_dicts]
+        column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
         copy_sql = sql.SQL(
-            "COPY {} (%s) FROM STDIN "
+            "COPY {} ({}) FROM STDIN "
             "WITH (FORMAT CSV, FREEZE 1, "
             "HEADER 1, ENCODING 'UTF8');"
         ).format(
             sql.Identifier(resource_id),
             column_names,
         )
-        logger.info(copy_sql)
         with open(tmp.name, "rb") as f:
             try:
                 cur.copy_expert(copy_sql, f)
@@ -1334,16 +1334,19 @@ def push_to_datastore(task_id, input, dry_run=False):
         stats_resource_id = stats_response["result"]["resource_id"]
 
         # now COPY the stats to the datastore
-        column_names = ", ".join(['"{}"'.format(h["id"]) for h in stats_stats_dict])
+        col_names_list = [h["id"] for h in stats_stats_dict]
         logger.info(
             'ADDING SUMMARY STATISTICS ({}) in "{}"("{}")...'.format(
-                column_names,
+                col_names_list,
                 stats_resource_id,
                 stats_alias_name,
             )
         )
+
+        column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
+
         copy_sql = sql.SQL(
-            "COPY {} (%s) FROM STDIN "
+            "COPY {} ({}) FROM STDIN "
             "WITH (FORMAT CSV, "
             "HEADER 1, ENCODING 'UTF8');"
         ).format(
