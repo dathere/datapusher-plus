@@ -1217,6 +1217,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 resource_with_existing_alias = get_resource(
                     existing_alias_of, ckan_url, api_key
                 )
+                resource_with_existing_alias["id"] = existing_alias_of
                 resource_with_existing_alias["has_summary_statistics"] = False
                 resource_with_existing_alias["summary_statistics_resource_id"] = ""
                 update_resource(resource_with_existing_alias, api_key, ckan_url)
