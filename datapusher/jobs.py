@@ -1472,7 +1472,11 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     total_elapsed = time.perf_counter() - timer_start
     logger.info(
-        "DATAPUSHER+ JOB DONE! Total elapsed time: {:,.2f} seconds.".format(
-            total_elapsed
+        "DATAPUSHER+ JOB DONE!\n Download: {:,.2f}; Analysis: {:,.2f}; COPYing: {:,.2f}, Indexing: {:,.2f}. Total elapsed time: {:,.2f} seconds.".format(
+            fetch_elapsed,
+            analysis_elapsed,
+            copy_elapsed,
+            index_elapsed,
+            total_elapsed,
         )
     )
