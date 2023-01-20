@@ -523,9 +523,10 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     def cleanup_tempfiles():
         # cleanup temporary files
-        if os.path.exists(tmp.name + ".idx"):
-            os.remove(tmp.name + ".idx")
         tmp.close()
+        if "qsv_index_file" in globals():
+            if os.path.exists(qsv_index_file):
+                os.remove(qsv_index_file)
         if "qsv_slice_csv" in globals():
             qsv_slice_csv.close()
         if "qsv_excel_csv" in globals():
@@ -541,9 +542,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         if "qsv_applydp_csv" in globals():
             qsv_applydp_csv.close()
         if "qsv_stats_csv" in globals():
-            if "qsv_index_file" in globals():
-                if os.path.exists(qsv_index_file):
-                    os.remove(qsv_index_file)
             qsv_stats_csv.close()
 
     fetch_elapsed = time.perf_counter() - timer_start
