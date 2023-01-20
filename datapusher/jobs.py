@@ -600,8 +600,10 @@ def push_to_datastore(task_id, input, dry_run=False):
                 "Upload aborted. Cannot export spreadsheet(?) to CSV: {}".format(e)
             )
 
+            # it had a spreadsheet extension but `qsv excel` failed,
             # get some file info and log it by running `file`
             # just in case the file is not actually a spreadsheet or is encrypted
+            # so the user has some actionable info
             file_format = subprocess.run(
                 [file_bin, qsv_spreadsheet.name],
                 check=True,
@@ -631,7 +633,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         Note that we only change the workfile, the resource file itself is unchanged.
         """
 
-        # normalize to CSV, and transcode to UTF-8 if required
+        # normalize to CSV
+        # the --output option also automatically transcodes to UTF-8
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix=".csv")
         if format.upper() == "CSV":
             logger.info("Normalizing/UTF-8 transcoding {}...".format(format))
