@@ -1368,6 +1368,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         stats_resource["summary_of_resource"] = resource_id
         update_resource(stats_resource, api_key, ckan_url)
 
+        # also update the original resource to point to the stats resource
+        resource["has_summary_statistics"] = True
+        resource["summary_statistics_resource_id"] = stats_resource_id
+        update_resource(resource, api_key, ckan_url)
+
     cleanup_tempfiles()
     metadata_elapsed = time.perf_counter() - metadata_start
     logger.info(
