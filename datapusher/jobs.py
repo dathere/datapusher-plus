@@ -926,6 +926,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     )
 
     # if PREVIEW_ROWS is not zero, create a preview using qsv slice
+    # we do the rows_to_copy > preview_rows check because we don't need to slice
+    # the CSV anymore, since we only did a partial download of preview_rows already
     rows_to_copy = record_count
     if preview_rows and record_count > preview_rows:
         if preview_rows > 0:
