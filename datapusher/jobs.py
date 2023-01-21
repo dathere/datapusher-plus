@@ -1053,7 +1053,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         """
         truncate table to use copy freeze option and further increase
         performance as there is no need for WAL logs to be maintained
-        https://www.postgresql.org/docs/9.1/populate.html#POPULATE-COPY-FROM
+        https://www.postgresql.org/docs/current/populate.html#POPULATE-COPY-FROM
         """
         try:
             cur.execute(
