@@ -565,11 +565,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info(
             "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
         )
-        """
-        first, we need a temporary spreadsheet filename with the right file extension
-        we only need the filename though, that's why we remove it
-        and create a hardlink to the file we got from CKAN
-        """
+        # first, we need a temporary spreadsheet filename with the right file extension
+        # we only need the filename though, that's why we remove it
+        # and create a hardlink to the file we got from CKAN
         qsv_spreadsheet = tempfile.NamedTemporaryFile(suffix="." + format)
         os.remove(qsv_spreadsheet.name)
         os.link(tmp.name, qsv_spreadsheet.name)
@@ -629,7 +627,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         # Note that we only change the workfile, the resource file itself is unchanged.
 
         # ------------------- Normalize to CSV ---------------------
-        # the --output option also automatically transcodes to UTF-8
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix=".csv")
         if format.upper() == "CSV":
             logger.info("Normalizing/UTF-8 transcoding {}...".format(format))
@@ -661,7 +658,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # Run an RFC4180 check with `qsv validate` against the normalized, UTF-8 encoded CSV file.
     # Even excel exported CSVs can be potentially invalid, as it allows the export of "flexible"
     # CSVs - i.e. rows may have different column counts.
-    # If it passes validation, we can now handle it with confidence downstream as a "normal" CSV.
+    # If it passes validation, we can handle it with confidence downstream as a "normal" CSV.
     logger.info("Validating CSV...")
     try:
         qsv_validate = subprocess.run(
@@ -675,7 +672,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         return
     logger.info("Well-formed, valid CSV file confirmed...")
 
-    # ----------------------------------- Sortcheck & Dedup ----------------------------------
+    # --------------------- Sortcheck --------------------------
     # if SORT_AND_DUPE_CHECK is True or DEDUP is True
     # check if the file is sorted and if it has duplicates
     # get the record count, unsorted breaks and duplicate count as well
@@ -706,7 +703,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             sortcheck_msg = sortcheck_msg + " Duplicates: {:,}".format(dupe_count)
         logger.info(sortcheck_msg)
 
-    # do we need to dedup?
+    # --------------- Do we need to dedup? ------------------
     # note that deduping also ends up creating a sorted CSV
     if dedup and dupe_count > 0:
         qsv_dedup_csv = tempfile.NamedTemporaryFile(suffix=".csv")
@@ -739,7 +736,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     elif dupe_count > 0:
         logger.warning("{:,} duplicates found but not deduping...".format(dupe_count))
 
-    # ---------------------------------- Headers & Safenames -----------------------------------
+    # ----------------------- Headers & Safenames ---------------------------
     # get existing header names, so we can use them for data dictionary labels
     # should we need to change the column name to make it "db-safe"
     try:
@@ -970,8 +967,8 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # ---------------------- PREVIEW ROWS -------------------------
     # if PREVIEW_ROWS is not zero, create a preview using qsv slice
-    # we do the rows_to_copy > preview_rows check because we don't need to slice
-    # the CSV anymore, since we only did a partial download of preview_rows already
+    # we do the rows_to_copy > preview_rows to check if we don't need to slice
+    # the CSV anymore if we only did a partial download of N preview_rows already
     rows_to_copy = record_count
     if preview_rows and record_count > preview_rows:
         if preview_rows > 0:
@@ -1228,9 +1225,6 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
             alias = None
 
-    cur.close()
-    raw_connection.commit()
-
     # -------- should we ADD_SUMMARY_STATS_RESOURCE? -------------
     # by default, we only add summary stats if we're not doing a partial download
     # unless SUMMARY_STATS_WITH_PREVIEW is set to true
@@ -1245,8 +1239,6 @@ def push_to_datastore(task_id, input, dry_run=False):
             stats_resource_id = resource_id + "-stats"
         existing_stats = datastore_resource_exists(stats_resource_id, api_key, ckan_url)
 
-        stats_cur = raw_connection.cursor()
-
         # Delete existing datastore resource-stats before proceeding.
         if existing_stats:
             logger.info(
@@ -1255,11 +1247,11 @@ def push_to_datastore(task_id, input, dry_run=False):
                 )
             )
 
-            stats_cur.execute(
+            cur.execute(
                 "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
                 (stats_resource_id + "%",),
             )
-            stats_alias_result = stats_cur.fetchone()
+            stats_alias_result = cur.fetchone()
             if stats_alias_result:
                 existing_stats_alias_of = stats_alias_result[0]
 
@@ -1271,7 +1263,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         if auto_alias:
             stats_alias = [stats_alias_name]
             try:
-                stats_cur.execute(
+                cur.execute(
                     sql.SQL("DROP VIEW IF EXISTS {}").format(
                         sql.Identifier(stats_alias_name)
                     )
@@ -1302,8 +1294,6 @@ def push_to_datastore(task_id, input, dry_run=False):
             dict(id=ele.split(",")[0], type=type_mapping[ele.split(",")[1]])
             for idx, ele in enumerate(stats_stats.splitlines()[1:], 1)
         ]
-
-        # logger.info("DEBUG: stats_stats_dict: {}".format(stats_stats_dict))
 
         stats_resource = {
             "package_id": resource["package_id"],
@@ -1347,18 +1337,18 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         with open(qsv_stats_csv.name, "rb") as f:
             try:
-                stats_cur.copy_expert(copy_sql, f)
+                cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
                 cleanup_tempfiles()
                 raise util.JobError("Postgres COPY failed: {}".format(e))
-
-        stats_cur.close()
-        raw_connection.commit()
 
         stats_resource["id"] = stats_resource_id
         stats_resource["summary_statistics"] = True
         stats_resource["summary_of_resource"] = resource_id
         update_resource(stats_resource, ckan_url, api_key)
+
+    cur.close()
+    raw_connection.commit()
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
