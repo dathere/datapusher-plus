@@ -522,29 +522,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     )
 
-    def cleanup_tempfiles():
-        # cleanup temporary files
-        tmp.close()
-        if "qsv_index_file" in globals():
-            if os.path.exists(qsv_index_file):
-                os.remove(qsv_index_file)
-        if "qsv_slice_csv" in globals():
-            qsv_slice_csv.close()
-        if "qsv_excel_csv" in globals():
-            qsv_excel_csv.close()
-        if "qsv_input_csv" in globals():
-            qsv_input_csv.close()
-        if "qsv_dedup_csv" in globals():
-            qsv_dedup_csv.close()
-        if "qsv_headers" in globals():
-            qsv_headers.close()
-        if "qsv_safenames_csv" in globals():
-            qsv_safenames_csv.close()
-        if "qsv_applydp_csv" in globals():
-            qsv_applydp_csv.close()
-        if "qsv_stats_csv" in globals():
-            qsv_stats_csv.close()
-
     # ===================================================================================
     # ANALYZE WITH QSV
     # ===================================================================================
@@ -613,7 +590,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                 )
             )
 
-            cleanup_tempfiles()
             return
         qsv_spreadsheet.close()
         excel_export_msg = qsv_excel.stderr
@@ -646,7 +622,6 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
         except subprocess.CalledProcessError as e:
             # return as we can't push an invalid CSV file
-            cleanup_tempfiles()
             logger.error(
                 "Job aborted as the file cannot be normalized/transcoded: {}.".format(e)
             )
@@ -666,7 +641,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     except subprocess.CalledProcessError as e:
         # return as we can't push an invalid CSV file
-        cleanup_tempfiles()
         validate_error_msg = qsv_validate.stderr
         logger.error("Invalid CSV! Job aborted: {}.".format(validate_error_msg))
         return
@@ -688,7 +662,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
             raise util.JobError("Sortcheck error: {}".format(e))
         sortcheck_json = json.loads(str(qsv_sortcheck.stdout))
         is_sorted = sortcheck_json["sorted"]
@@ -717,13 +690,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         if is_sorted:
             qsv_dedup_cmd.append("--sorted")
         try:
-            qsv_dedup = subprocess.run(
-                qsv_dedup_cmd,
-                capture_output=True,
-                text=True,
-            )
+            qsv_dedup = subprocess.run(qsv_dedup_cmd, capture_output=True, text=True,)
         except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
             raise util.JobError("Check for duplicates error: {}".format(e))
         dupe_count = int(str(qsv_dedup.stderr).strip())
         if dupe_count > 0:
@@ -747,7 +715,6 @@ def push_to_datastore(task_id, input, dry_run=False):
             text=True,
         )
     except subprocess.CalledProcessError as e:
-        cleanup_tempfiles()
         raise util.JobError("Cannot scan CSV headers: {}".format(e))
     original_headers = str(qsv_headers.stdout).strip()
     original_header_dict = {
@@ -760,18 +727,11 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Checking for "database-safe" header names...')
     try:
         qsv_safenames = subprocess.run(
-            [
-                qsv_bin,
-                "safenames",
-                tmp.name,
-                "--mode",
-                "json",
-            ],
+            [qsv_bin, "safenames", tmp.name, "--mode", "json",],
             capture_output=True,
             text=True,
         )
     except subprocess.CalledProcessError as e:
-        cleanup_tempfiles()
         raise util.JobError("Safenames error: {}".format(e))
 
     unsafe_json = json.loads(str(qsv_safenames.stdout))
@@ -809,7 +769,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_index_file = tmp.name + ".idx"
         subprocess.run([qsv_bin, "index", tmp.name], check=True)
     except subprocess.CalledProcessError as e:
-        cleanup_tempfiles
         raise util.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
@@ -821,13 +780,11 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [qsv_bin, "count", tmp.name], capture_output=True, check=True, text=True
             )
         except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
             raise util.JobError("Cannot count records in CSV: {}".format(e))
         record_count = int(str(qsv_count.stdout).strip())
 
     # its empty, nothing to do
     if record_count == 0:
-        cleanup_tempfiles()
         logger.warning("Upload skipped as there are zero records.")
         return
 
@@ -868,7 +825,6 @@ def push_to_datastore(task_id, input, dry_run=False):
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
-        cleanup_tempfiles()
         raise util.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
@@ -894,11 +850,9 @@ def push_to_datastore(task_id, input, dry_run=False):
     # override with types user requested in Data Dictionary
     if existing_info:
         types = [
-            {
-                "text": "String",
-                "numeric": "Float",
-                "timestamp": "DateTime",
-            }.get(existing_info.get(h, {}).get("type_override"), t)
+            {"text": "String", "numeric": "Float", "timestamp": "DateTime",}.get(
+                existing_info.get(h, {}).get("type_override"), t
+            )
             for t, h in zip(types, headers)
         ]
 
@@ -989,7 +943,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                cleanup_tempfiles()
                 raise util.JobError("Cannot create a preview slice: {}".format(e))
             rows_to_copy = preview_rows
             tmp = qsv_slice_csv
@@ -1016,7 +969,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                cleanup_tempfiles()
                 raise util.JobError(
                     "Cannot create a preview slice from the end: {}".format(e)
                 )
@@ -1049,7 +1001,6 @@ def push_to_datastore(task_id, input, dry_run=False):
         try:
             qsv_applydp = subprocess.run(qsv_applydp_cmd, check=True)
         except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
             raise util.JobError("Applydp error: {}".format(e))
         tmp = qsv_applydp_csv
 
@@ -1059,6 +1010,10 @@ def push_to_datastore(task_id, input, dry_run=False):
             analysis_elapsed
         )
     )
+
+    # delete the qsv index file manually
+    # as it was created by qsv index, and not by tempfile
+    os.remove(qsv_index_file)
 
     # at this stage, the resource is ready for COPYing to the Datastore
 
@@ -1092,7 +1047,6 @@ def push_to_datastore(task_id, input, dry_run=False):
     try:
         raw_connection = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
     except psycopg2.Error as e:
-        cleanup_tempfiles()
         raise util.JobError("Could not connect to the Datastore: {}".format(e))
     else:
         cur = raw_connection.cursor()
@@ -1115,15 +1069,11 @@ def push_to_datastore(task_id, input, dry_run=False):
             "COPY {} ({}) FROM STDIN "
             "WITH (FORMAT CSV, FREEZE 1, "
             "HEADER 1, ENCODING 'UTF8');"
-        ).format(
-            sql.Identifier(resource_id),
-            column_names,
-        )
+        ).format(sql.Identifier(resource_id), column_names,)
         with open(tmp.name, "rb") as f:
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
-                cleanup_tempfiles()
                 raise util.JobError("Postgres COPY failed: {}".format(e))
             else:
                 copied_count = cur.rowcount
@@ -1275,18 +1225,12 @@ def push_to_datastore(task_id, input, dry_run=False):
         # we don't need summary statistics, so use the --typesonly option
         try:
             qsv_stats_stats = subprocess.run(
-                [
-                    qsv_bin,
-                    "stats",
-                    "--typesonly",
-                    qsv_stats_csv.name,
-                ],
+                [qsv_bin, "stats", "--typesonly", qsv_stats_csv.name,],
                 capture_output=True,
                 check=True,
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            cleanup_tempfiles()
             raise util.JobError("Cannot run stats on CSV stats: {}".format(e))
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
@@ -1318,9 +1262,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         col_names_list = [h["id"] for h in stats_stats_dict]
         logger.info(
             'ADDING SUMMARY STATISTICS {} in "{}"("{}")...'.format(
-                col_names_list,
-                stats_resource_id,
-                stats_alias_name,
+                col_names_list, stats_resource_id, stats_alias_name,
             )
         )
 
@@ -1330,16 +1272,12 @@ def push_to_datastore(task_id, input, dry_run=False):
             "COPY {} ({}) FROM STDIN "
             "WITH (FORMAT CSV, "
             "HEADER 1, ENCODING 'UTF8');"
-        ).format(
-            sql.Identifier(stats_resource_id),
-            column_names,
-        )
+        ).format(sql.Identifier(stats_resource_id), column_names,)
 
         with open(qsv_stats_csv.name, "rb") as f:
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
-                cleanup_tempfiles()
                 raise util.JobError("Postgres COPY failed: {}".format(e))
 
         stats_resource["id"] = stats_resource_id
@@ -1373,7 +1311,6 @@ def push_to_datastore(task_id, input, dry_run=False):
     if alias:
         logger.info('Created alias "{}" for "{}"...'.format(alias, resource_id))
 
-    cleanup_tempfiles()
     metadata_elapsed = time.perf_counter() - metadata_start
     logger.info(
         "METADATA UPDATES DONE! Resource metadata updated in {:.2f} seconds.".format(
@@ -1420,8 +1357,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     try:
                         index_cur.execute(
                             sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
-                                sql.Identifier(resource_id),
-                                sql.Identifier(curr_col),
+                                sql.Identifier(resource_id), sql.Identifier(curr_col),
                             )
                         )
                     except psycopg2.Error as e:
@@ -1451,8 +1387,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     try:
                         index_cur.execute(
                             sql.SQL("CREATE INDEX ON {} ({})").format(
-                                sql.Identifier(resource_id),
-                                sql.Identifier(curr_col),
+                                sql.Identifier(resource_id), sql.Identifier(curr_col),
                             )
                         )
                     except psycopg2.Error as e:
