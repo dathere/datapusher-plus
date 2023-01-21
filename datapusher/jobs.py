@@ -285,20 +285,8 @@ def send_resource_to_datastore(
     return r.json()
 
 
-def update_resource(resource, api_key, ckan_url):
+def update_resource(resource, ckan_url, api_key):
     url = get_url("resource_update", ckan_url)
-    r = requests.post(
-        url,
-        verify=config.get("SSL_VERIFY"),
-        data=json.dumps(resource),
-        headers={"Content-Type": "application/json", "Authorization": api_key},
-    )
-
-    check_response(r, url, "CKAN")
-
-
-def patch_resource(resource, api_key, ckan_url):
-    url = get_url("resource_patch", ckan_url)
     r = requests.post(
         url,
         verify=config.get("SSL_VERIFY"),
@@ -412,6 +400,9 @@ def push_to_datastore(task_id, input, dry_run=False):
     if scheme not in ("http", "https", "ftp"):
         raise util.JobError("Only http, https, and ftp resources may be fetched.")
 
+    # ==========================================================================
+    # DOWNLOAD
+    # ==========================================================================
     timer_start = time.perf_counter()
 
     # fetch the resource data
@@ -524,6 +515,13 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource["hash"] = file_hash
 
+    fetch_elapsed = time.perf_counter() - timer_start
+    logger.info(
+        "Fetched {:.2MB} file in {:,.2f} seconds.".format(
+            DataSize(length), fetch_elapsed
+        )
+    )
+
     def cleanup_tempfiles():
         # cleanup temporary files
         tmp.close()
@@ -547,20 +545,17 @@ def push_to_datastore(task_id, input, dry_run=False):
         if "qsv_stats_csv" in globals():
             qsv_stats_csv.close()
 
-    fetch_elapsed = time.perf_counter() - timer_start
-    logger.info(
-        "Fetched {:.2MB} file in {:,.2f} seconds.".format(
-            DataSize(length), fetch_elapsed
-        )
-    )
-    """
-    Start Analysis using qsv instead of messytables, as 1) its type inferences are bullet-proof
-    not guesses as it scans the entire file, 2) its super-fast, and 3) it has
-    addl data-wrangling capabilities we use in datapusher+ - slice, input, count, headers, etc.
-    """
+    # ===================================================================================
+    # ANALYZE WITH QSV
+    # ===================================================================================
+    # Start Analysis using qsv instead of messytables, as
+    # 1) its type inferences are bullet-proof not guesses as it scans the entire file,
+    # 2) its super-fast, and
+    # 3) it has addl data-wrangling capabilities we use in DP+ (e.g. stats, dedup, etc.)
     analysis_start = time.perf_counter()
     logger.info("ANALYZING WITH QSV..")
 
+    # ----------------- is it a spreadsheet? ---------------
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
     format = resource.get("format").upper()
@@ -627,16 +622,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.info("{}...".format(excel_export_msg))
         tmp = qsv_excel_csv
     else:
-        """
-        its a CSV/TSV/TAB file, not a spreadsheet.
-        Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as it could be
-        a CSV/TSV/TAB dialect with differing delimiters, quoting, etc.
-        Using qsv input's --output option also auto-transcodes to UTF-8.
+        # -------------- its not a spreadsheet, its a CSV/TSV/TAB file ---------------
+        # Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as
+        # it could be a CSV/TSV/TAB dialect with differing delimiters, quoting, etc.
+        # Using qsv input's --output option also auto-transcodes to UTF-8.
+        # Note that we only change the workfile, the resource file itself is unchanged.
 
-        Note that we only change the workfile, the resource file itself is unchanged.
-        """
-
-        # normalize to CSV
+        # ------------------- Normalize to CSV ---------------------
         # the --output option also automatically transcodes to UTF-8
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix=".csv")
         if format.upper() == "CSV":
@@ -665,7 +657,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         tmp = qsv_input_csv
         logger.info("Normalized & transcoded...")
 
-    # validation phase
+    # ------------------------------------- Validate CSV --------------------------------------
     # Run an RFC4180 check with `qsv validate` against the normalized, UTF-8 encoded CSV file.
     # Even excel exported CSVs can be potentially invalid, as it allows the export of "flexible"
     # CSVs - i.e. rows may have different column counts.
@@ -683,6 +675,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         return
     logger.info("Well-formed, valid CSV file confirmed...")
 
+    # ----------------------------------- Sortcheck & Dedup ----------------------------------
     # if SORT_AND_DUPE_CHECK is True or DEDUP is True
     # check if the file is sorted and if it has duplicates
     # get the record count, unsorted breaks and duplicate count as well
@@ -746,6 +739,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     elif dupe_count > 0:
         logger.warning("{:,} duplicates found but not deduping...".format(dupe_count))
 
+    # ---------------------------------- Headers & Safenames -----------------------------------
     # get existing header names, so we can use them for data dictionary labels
     # should we need to change the column name to make it "db-safe"
     try:
@@ -809,7 +803,8 @@ def push_to_datastore(task_id, input, dry_run=False):
     else:
         logger.info("No unsafe header names found...")
 
-    # at this stage, we have a "clean" CSV ready for type inferencing
+    # ---------------------- Type Inferencing -----------------------
+    # at this stage, we have a "clean" CSV ready for Type Inferencing
 
     # first, index csv for speed - count, stats and slice
     # are all accelerated/multithreaded when an index is present
@@ -973,6 +968,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         "Determined headers and types: {headers}...".format(headers=headers_dicts)
     )
 
+    # ---------------------- PREVIEW ROWS -------------------------
     # if PREVIEW_ROWS is not zero, create a preview using qsv slice
     # we do the rows_to_copy > preview_rows check because we don't need to slice
     # the CSV anymore, since we only did a partial download of preview_rows already
@@ -1030,6 +1026,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             rows_to_copy = slice_len
             tmp = qsv_slice_csv
 
+    # ---------------------- NORMALIZE DATES -------------------------
     # if there are any datetime fields, normalize them to RFC3339 format
     # so we can readily insert them as timestamps into postgresql with COPY
     if datetimecols_list:
@@ -1072,12 +1069,15 @@ def push_to_datastore(task_id, input, dry_run=False):
         logger.warning("Dry run only. Returning without copying to the Datastore...")
         return headers_dicts
 
+    # ============================================================
+    # COPY to Datastore
+    # ============================================================
+    copy_start = time.perf_counter()
+
     if preview_rows:
         logger.info("COPYING {:,}-row preview to Datastore...".format(rows_to_copy))
     else:
         logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
-
-    copy_start = time.perf_counter()
 
     # first, let's create an empty datastore table w/ guessed types
     send_resource_to_datastore(
@@ -1151,20 +1151,18 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     )
 
+    # ============================================================
+    # UPDATE METADATA
+    # ============================================================
     metadata_start = time.perf_counter()
     logger.info("UPDATING RESOURCE METADATA...")
-    resource["datastore_active"] = True
-    resource["total_record_count"] = record_count
-    if preview_rows < record_count or (preview_rows > 0 and download_preview_only):
-        resource["preview"] = True
-        resource["preview_rows"] = copied_count
-        resource["partial_download"] = download_preview_only
-    update_resource(resource, api_key, ckan_url)
 
+    # --------------------- AUTO-ALIASING ------------------------
     # aliases are human-readable, and make it easier to use than resource id hash
-    # in using the Datastore API and in SQL queries
+    # when using the Datastore API and in SQL queries
     auto_alias = config.get("AUTO_ALIAS")
     auto_alias_unique = config.get("AUTO_ALIAS_UNIQUE")
+
     if auto_alias:
         logger.info(
             "AUTO-ALIASING. Auto-alias-unique: {} ...".format(auto_alias_unique)
@@ -1222,11 +1220,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                 except psycopg2.Error as e:
                     logger.warning("Could not drop alias/view: {}".format(e))
 
-                resource_with_existing_alias = []
-                resource_with_existing_alias["id"] = existing_alias_of
-                resource_with_existing_alias["has_summary_statistics"] = False
-                resource_with_existing_alias["summary_statistics_resource_id"] = ""
-                patch_resource(resource_with_existing_alias, api_key, ckan_url)
         else:
             logger.warning(
                 "Cannot create alias: {}-{}-{}".format(
@@ -1235,25 +1228,10 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
             alias = None
 
-    # tell CKAN to calculate_record_count and set alias if set
-    send_resource_to_datastore(
-        resource=None,
-        resource_id=resource["id"],
-        headers=headers_dicts,
-        api_key=api_key,
-        ckan_url=ckan_url,
-        records=None,
-        aliases=alias,
-        calculate_record_count=True,
-    )
-
-    if alias:
-        logger.info('Created alias "{}" for "{}"...'.format(alias, resource_id))
-
     cur.close()
     raw_connection.commit()
 
-    # should we ADD_SUMMARY_STATS_RESOURCE?
+    # -------- should we ADD_SUMMARY_STATS_RESOURCE? -------------
     # by default, we only add summary stats if we're not doing a partial download
     # unless SUMMARY_STATS_WITH_PREVIEW is set to true
     if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
@@ -1380,12 +1358,30 @@ def push_to_datastore(task_id, input, dry_run=False):
         stats_resource["id"] = stats_resource_id
         stats_resource["summary_statistics"] = True
         stats_resource["summary_of_resource"] = resource_id
-        update_resource(stats_resource, api_key, ckan_url)
+        update_resource(stats_resource, ckan_url, api_key)
 
-        # also update the original resource to point to the stats resource
-        resource["has_summary_statistics"] = True
-        resource["summary_statistics_resource_id"] = stats_resource_id
-        update_resource(resource, api_key, ckan_url)
+    resource["datastore_active"] = True
+    resource["total_record_count"] = record_count
+    if preview_rows < record_count or (preview_rows > 0 and download_preview_only):
+        resource["preview"] = True
+        resource["preview_rows"] = copied_count
+        resource["partial_download"] = download_preview_only
+    update_resource(resource, ckan_url, api_key)
+
+    # tell CKAN to calculate_record_count and set alias if set
+    send_resource_to_datastore(
+        resource=None,
+        resource_id=resource["id"],
+        headers=headers_dicts,
+        api_key=api_key,
+        ckan_url=ckan_url,
+        records=None,
+        aliases=alias,
+        calculate_record_count=True,
+    )
+
+    if alias:
+        logger.info('Created alias "{}" for "{}"...'.format(alias, resource_id))
 
     cleanup_tempfiles()
     metadata_elapsed = time.perf_counter() - metadata_start
@@ -1395,6 +1391,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     )
 
+    # =================================================================================================
+    # INDEXING
+    # =================================================================================================
     # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
     # create indices automatically based on summary statistics
     # For columns w/ cardinality = record_count, it's all unique values, create a unique index
