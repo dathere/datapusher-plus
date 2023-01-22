@@ -4,7 +4,7 @@
 # in production mode, in the /etc/ckan/datapusher-plus directory
 #
 # Note that DP+ settings can also be passed using environment variables
-# See http://bit.ly/3CVd8zQ for details
+# See https://bit.ly/3CVd8zQ for details
 WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_default'
 SQLALCHEMY_DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
 
@@ -13,6 +13,9 @@ IGNORE_FILE_HASH = True
 CHUNK_SIZE = 16384
 DOWNLOAD_TIMEOUT = 30
 SSL_VERIFY = False
+PII_SCREENING = True
+PII_QUICK_SCREEN: bool = True
+PII_REGEX_RESOURCE_ID_OR_ALIAS = ''
 LOG_FILE = '/etc/ckan/datapusher-plus/ckan_service.log'
 STDERR = True
 QSV_BIN = '/usr/local/bin/qsvdp'

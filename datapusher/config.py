@@ -48,6 +48,9 @@ class DataPusherPlusConfig(MutableMapping):
     SSL_VERIFY: bool = False
     TYPES: tuple = _TYPES
     TYPE_MAPPING: dict = _TYPE_MAPPING
+    PII_SCREENING: bool = True
+    PII_QUICK_SCREEN: bool = True
+    PII_REGEX_RESOURCE_ID_OR_ALIAS: str = ""
     LOG_FILE: str = "/etc/ckan/datapusher-plus/ckan_service.log"
     STDERR: bool = True
     QSV_BIN: str = "/usr/local/bin/qsvdp"
