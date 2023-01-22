@@ -50,6 +50,7 @@ class DataPusherPlusConfig(MutableMapping):
     TYPE_MAPPING: dict = _TYPE_MAPPING
     PII_SCREENING: bool = True
     PII_QUICK_SCREEN: bool = True
+    PII_FOUND_ABORT: bool = True
     PII_REGEX_RESOURCE_ID_OR_ALIAS: str = ""
     LOG_FILE: str = "/etc/ckan/datapusher-plus/ckan_service.log"
     STDERR: bool = True
