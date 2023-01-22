@@ -1177,24 +1177,20 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # -------- should we ADD_SUMMARY_STATS_RESOURCE? -------------
     # by default, we only add summary stats if we're not doing a partial download
-    # unless SUMMARY_STATS_WITH_PREVIEW is set to true
+    # (otherwise, you're summarizing the preview, not the whole file)
+    # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
     if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
         download_preview_only and config.get("SUMMARY_STATS_WITH_PREVIEW")
     ):
 
-        # check if the stats already exist
-        if auto_alias:
-            stats_resource_id = alias + "-stats"
-        else:
-            stats_resource_id = resource_id + "-stats"
-        existing_stats = datastore_resource_exists(stats_resource_id, api_key, ckan_url)
+        stats_resource_id = resource_id + "-stats"
 
-        # Delete existing datastore resource-stats before proceeding.
+        # check if the stats already exist
+        existing_stats = datastore_resource_exists(stats_resource_id, api_key, ckan_url)
+        # Delete existing summary-stats before proceeding.
         if existing_stats:
             logger.info(
-                'Deleting existing summary stats "{res_id}".'.format(
-                    res_id=stats_resource_id
-                )
+                'Deleting existing summary stats "{}".'.format(stats_resource_id)
             )
 
             cur.execute(
@@ -1208,18 +1204,37 @@ def push_to_datastore(task_id, input, dry_run=False):
                 delete_datastore_resource(existing_stats_alias_of, api_key, ckan_url)
                 delete_resource(existing_stats_alias_of, api_key, ckan_url)
 
-        stats_alias = None
-        stats_alias_name = alias + "-stats"
+        stats_aliases = [stats_resource_id]
         if auto_alias:
-            stats_alias = [stats_alias_name]
-            try:
-                cur.execute(
-                    sql.SQL("DROP VIEW IF EXISTS {}").format(
-                        sql.Identifier(stats_alias_name)
+            auto_alias_stats_id = alias + "-stats"
+            stats_aliases.append(auto_alias_stats_id)
+
+            # check if the summary-stats alias already exist. We need to do this as summary-stats resources
+            # may end up having the same alias if AUTO_ALIAS_UNIQUE is False, so we need to drop the
+            # existing summary stats-alias.
+            existing_alias_stats = datastore_resource_exists(
+                auto_alias_stats_id, api_key, ckan_url
+            )
+            # Delete existing auto-aliased summary-stats before proceeding.
+            if existing_alias_stats:
+                logger.info(
+                    'Deleting existing alias summary stats "{}".'.format(
+                        auto_alias_stats_id
                     )
                 )
-            except psycopg2.Error as e:
-                logger.warning("Could not drop stats alias/view: {}".format(e))
+
+                cur.execute(
+                    "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
+                    (auto_alias_stats_id + "%",),
+                )
+                result = cur.fetchone()
+                if result:
+                    existing_stats_alias_of = result[0]
+
+                    delete_datastore_resource(
+                        existing_stats_alias_of, api_key, ckan_url
+                    )
+                    delete_resource(existing_stats_alias_of, api_key, ckan_url)
 
         # run stats on stats CSV to get header names and infer data types
         # we don't need summary statistics, so use the --typesonly option
@@ -1252,17 +1267,17 @@ def push_to_datastore(task_id, input, dry_run=False):
             api_key=api_key,
             ckan_url=ckan_url,
             records=None,
-            aliases=stats_alias,
+            aliases=stats_aliases,
             calculate_record_count=False,
         )
 
-        stats_resource_id = stats_response["result"]["resource_id"]
+        new_stats_resource_id = stats_response["result"]["resource_id"]
 
         # now COPY the stats to the datastore
         col_names_list = [h["id"] for h in stats_stats_dict]
         logger.info(
-            'ADDING SUMMARY STATISTICS {} in "{}"("{}")...'.format(
-                col_names_list, stats_resource_id, stats_alias_name,
+            'ADDING SUMMARY STATISTICS {} in "{}" with alias/es "{}"...'.format(
+                col_names_list, new_stats_resource_id, stats_aliases,
             )
         )
 
@@ -1272,7 +1287,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             "COPY {} ({}) FROM STDIN "
             "WITH (FORMAT CSV, "
             "HEADER 1, ENCODING 'UTF8');"
-        ).format(sql.Identifier(stats_resource_id), column_names,)
+        ).format(sql.Identifier(new_stats_resource_id), column_names,)
 
         with open(qsv_stats_csv.name, "rb") as f:
             try:
@@ -1280,7 +1295,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             except psycopg2.Error as e:
                 raise util.JobError("Postgres COPY failed: {}".format(e))
 
-        stats_resource["id"] = stats_resource_id
+        stats_resource["id"] = new_stats_resource_id
         stats_resource["summary_statistics"] = True
         stats_resource["summary_of_resource"] = resource_id
         update_resource(stats_resource, ckan_url, api_key)
