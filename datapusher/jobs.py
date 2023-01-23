@@ -386,12 +386,15 @@ def push_to_datastore(task_id, input, dry_run=False):
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" ") : qsv_version_info.find("-")
     ].lstrip()
-    if semver.compare(qsv_semver, "0.85.0") < 0:
-        raise util.JobError(
-            "At least qsv version 0.85.0 required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
-                qsv_version_info
+    try:
+        if semver.compare(qsv_semver, "0.85.0") < 0:
+            raise util.JobError(
+                "At least qsv version 0.85.0 required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
+                    qsv_version_info
+                )
             )
-        )
+    except ValueError as e:
+        raise util.JobError("Cannot parse qsv version info: {}".format(e))
 
     validate_input(input)
 
