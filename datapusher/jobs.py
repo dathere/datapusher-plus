@@ -384,12 +384,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         raise util.JobError("qsv version check error: {}".format(e))
     qsv_version_info = str(qsv_version.stdout)
     qsv_semver = qsv_version_info[
-        qsv_version_info.find(" 0") : qsv_version_info.find("-")
-    ]
-    version = semver.VersionInfo.parse(qsv_semver.strip())
-    if version.minor < 85:
+        qsv_version_info.find(" ") : qsv_version_info.find("-")
+    ].lstrip()
+    if semver.compare(qsv_semver, "0.85.0") < 0:
         raise util.JobError(
-            "At least version 0.85.0 required. Found {}".format(qsv_version_info)
+            "At least qsv version 0.85.0 required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
+                qsv_version_info
+            )
         )
 
     validate_input(input)
