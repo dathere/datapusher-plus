@@ -15,6 +15,7 @@ import subprocess
 import csv
 import os
 import psycopg2
+import semver
 from pathlib import Path
 from datasize import DataSize
 from psycopg2 import sql
@@ -373,6 +374,23 @@ def push_to_datastore(task_id, input, dry_run=False):
     file_path = Path(file_bin)
     if not file_path.is_file():
         raise util.JobError("{} not found.".format(file_bin))
+
+    # make sure qsv binary variant is up-to-date
+    try:
+        qsv_version = subprocess.run(
+            [qsv_bin, "--version"], capture_output=True, text=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise util.JobError("qsv version check error: {}".format(e))
+    qsv_version_info = str(qsv_version.stdout)
+    qsv_semver = qsv_version_info[
+        qsv_version_info.find(" 0") : qsv_version_info.find("-")
+    ]
+    version = semver.VersionInfo.parse(qsv_semver.strip())
+    if version.minor < 85:
+        raise util.JobError(
+            "At least version 0.85.0 required. Found {}".format(qsv_version_info)
+        )
 
     validate_input(input)
 
@@ -1081,6 +1099,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             if pii_total_matches > 0:
                 pii_found = True
 
+        pii_show_candidates = config.get("PII_SHOW_CANDIDATES")
         if pii_found and pii_found_abort:
             logger.error("PII Candidate/s Found!")
             if pii_quick_screen:
@@ -1089,12 +1108,25 @@ def push_to_datastore(task_id, input, dry_run=False):
                         pii_candidate_row.rstrip()
                     )
                 )
-            else:
+            elif not pii_show_candidates:
                 raise util.JobError(
                     "PII CANDIDATE/S FOUND! Job aborted. Screening results: {}".format(
                         pii_json
                     )
                 )
+
+            # TODO: Create PII Candidates resource and set package to private if its not private
+
+            raise util.JobError(
+                "PII CANDIDATE/S FOUND! PII candidates are available here for review"
+            )
+
+        if pii_found:
+            logger.warning(
+                "PII CANDIDATE/S FOUND! Proceeding with job per Datapusher+ configuration."
+            )
+        else:
+            logger.info("PII Scan complete. No PII candidate/s found.")
 
     # -------------------- QSV ANALYSIS DONE --------------------
     analysis_elapsed = time.perf_counter() - analysis_start
