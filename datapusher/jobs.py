@@ -1006,6 +1006,8 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # ---------------------- PII SCREENING -------------------------
     if config.get("PII_SCREENING"):
+        pii_found_abort = config.get("PII_FOUND_ABORT")
+
         pii_regex_resource_id = config.get("PII_REGEX_RESOURCE_ID_OR_ALIAS")
         if pii_regex_resource_id:
             pii_regex_resource_exist = datastore_resource_exists(
@@ -1046,11 +1048,10 @@ def push_to_datastore(task_id, input, dry_run=False):
                 )
             except subprocess.CalledProcessError as e:
                 raise util.JobError("Cannot quickly search CSV for PII: {}".format(e))
-            pii_stderr = str(qsv_searchset.stderr)
-            if pii_stderr:
-                logger.warning("Quick scanning indicates PII candidate on row {}".format(pii_stderr))
-            pii_found = True
-            
+            pii_candidate_row = str(qsv_searchset.stderr)
+            if pii_candidate_row:
+                pii_found = True
+
         else:
             logger.info("Scanning for PII using {}...".format(pii_regex_file))
             qsv_searchset_csv = tempfile.NamedTemporaryFile(suffix=".csv")
@@ -1062,7 +1063,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                         "--ignore-case",
                         "--flag",
                         "PII_info",
-                        "--count",
+                        "--flag-matches-only",
+                        "--json",
                         pii_regex_file,
                         tmp.name,
                         "--output",
@@ -1073,13 +1075,28 @@ def push_to_datastore(task_id, input, dry_run=False):
                 )
             except subprocess.CalledProcessError as e:
                 raise util.JobError("Cannot search CSV for PII: {}".format(e))
-            pii_stderr = str(qsv_searchset.stderr)
+            pii_json = json.loads(str(qsv_searchset.stderr))
+            pii_total_matches = int(pii_json["total_matches"])
+            pii_rows_with_matches = int(pii_json["rows_with_matches"])
+            if pii_total_matches > 0:
+                pii_found = True
 
-        if pii_found and config.get('PII_FOUND_ABORT'):
-            raise util.JobError("PII CANDIDATE FOUND! Job aborted. ")
-            
-        logger.info("PII screening results: {}".format(pii_stderr))
+        if pii_found and pii_found_abort:
+            logger.error("PII Candidate/s Found!")
+            if pii_quick_screen:
+                raise util.JobError(
+                    "PII CANDIDATE FOUND on row {}! Job aborted.".format(
+                        pii_candidate_row.rstrip()
+                    )
+                )
+            else:
+                raise util.JobError(
+                    "PII CANDIDATE/S FOUND! Job aborted. Screening results: {}".format(
+                        pii_json
+                    )
+                )
 
+    # -------------------- QSV ANALYSIS DONE --------------------
     analysis_elapsed = time.perf_counter() - analysis_start
     logger.info(
         "ANALYSIS DONE! Analyzed and prepped in {:,.2f} seconds.".format(
