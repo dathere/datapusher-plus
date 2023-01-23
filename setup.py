@@ -62,6 +62,7 @@ setup(
         'requests',
         "psycopg2-binary",
         'datasize',
+        'semver',
         'uwsgi',
     ],
 
