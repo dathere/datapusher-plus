@@ -16,6 +16,7 @@ SSL_VERIFY = False
 PII_SCREENING = True
 PII_QUICK_SCREEN: bool = True
 PII_FOUND_ABORT: bool = True
+PII_SHOW_CANDIDATES = True
 PII_REGEX_RESOURCE_ID_OR_ALIAS = ''
 LOG_FILE = '/etc/ckan/datapusher-plus/ckan_service.log'
 STDERR = True
