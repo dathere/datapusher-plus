@@ -941,7 +941,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         "Determined headers and types: {headers}...".format(headers=headers_dicts)
     )
 
-    # ---------------------- PREVIEW ROWS -------------------------
+    # ------------------- Do we need to create a Preview?  -----------------------
     # if PREVIEW_ROWS is not zero, create a preview using qsv slice
     # we do the rows_to_copy > preview_rows to check if we don't need to slice
     # the CSV anymore if we only did a partial download of N preview_rows already
@@ -997,7 +997,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             rows_to_copy = slice_len
             tmp = qsv_slice_csv
 
-    # ---------------------- NORMALIZE DATES -------------------------
+    # ---------------- Normalize dates to RFC3339 format --------------------
     # if there are any datetime fields, normalize them to RFC3339 format
     # so we can readily insert them as timestamps into postgresql with COPY
     if datetimecols_list:
@@ -1026,10 +1026,28 @@ def push_to_datastore(task_id, input, dry_run=False):
             raise util.JobError("Applydp error: {}".format(e))
         tmp = qsv_applydp_csv
 
-    # ---------------------- PII SCREENING -------------------------
+    # -------------------- QSV ANALYSIS DONE --------------------
+    analysis_elapsed = time.perf_counter() - analysis_start
+    logger.info(
+        "ANALYSIS DONE! Analyzed and prepped in {:,.2f} seconds.".format(
+            analysis_elapsed
+        )
+    )
+
+    # ----------------------------- PII Screening ------------------------------
+    # we scan for Personally Identifiable Information (PII) using qsv's powerful
+    # searchset command which can SIMULTANEOUSLY compare several regexes per
+    # field in one pass
+    piiscreening_start = 0
     if config.get("PII_SCREENING"):
+        piiscreening_start = time.perf_counter()
         pii_found_abort = config.get("PII_FOUND_ABORT")
 
+        # DP+ comes with default regex patterns for PII (SSN, credit cards,
+        # email, bank account numbers, & phone number). The DP+ admin can
+        # use a custom set of regex patterns by pointing to a resource with
+        # a text file, with each line having a regex pattern, and an optional
+        # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
         pii_regex_resource_id = config.get("PII_REGEX_RESOURCE_ID_OR_ALIAS")
         if pii_regex_resource_id:
             pii_regex_resource_exist = datastore_resource_exists(
@@ -1039,7 +1057,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 pii_resource = get_resource(pii_regex_resource_id, ckan_url, api_key)
                 pii_regex_url = pii_resource["url"]
 
-                r = requests.get(pii_regex_url, allow_redirects=True)
+                r = requests.get(pii_regex_url)
                 pii_regex_file = pii_regex_url.split("/")[-1]
 
                 p = Path(__file__).with_name("user-pii-regexes.txt")
@@ -1104,7 +1122,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 pii_found = True
 
         pii_show_candidates = config.get("PII_SHOW_CANDIDATES")
-        if pii_found and pii_found_abort:
+        if pii_found and pii_found_abort and not pii_show_candidates:
             logger.error("PII Candidate/s Found!")
             if pii_quick_screen:
                 raise util.JobError(
@@ -1112,33 +1130,138 @@ def push_to_datastore(task_id, input, dry_run=False):
                         pii_candidate_row.rstrip()
                     )
                 )
-            elif not pii_show_candidates:
+            else:
                 raise util.JobError(
-                    "PII CANDIDATE/S FOUND! Job aborted. Screening results: {}".format(
-                        pii_json
+                    "PII CANDIDATE/S FOUND! Job aborted. Found {} PII candidate/s in {} row/s.".format(
+                        pii_total_matches, pii_rows_with_matches
                     )
                 )
-
+        elif pii_found and pii_show_candidates and not pii_quick_screen:
             # TODO: Create PII Candidates resource and set package to private if its not private
-
-            raise util.JobError(
-                "PII CANDIDATE/S FOUND! PII candidates are available here for review"
-            )
-
-        if pii_found:
+            # ------------ Create PII Preview Resource ------------------
             logger.warning(
-                "PII CANDIDATE/S FOUND! Proceeding with job per Datapusher+ configuration."
+                "PII CANDIDATE/S FOUND! Found {} PII candidate/s in {} row/s. Creating PII preview...".format(
+                    pii_total_matches, pii_rows_with_matches
+                )
             )
-        else:
+            pii_resource_id = resource_id + "-pii"
+
+            try:
+                raw_connection_pii = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
+            except psycopg2.Error as e:
+                raise util.JobError("Could not connect to the Datastore: {}".format(e))
+            else:
+                cur_pii = raw_connection_pii.cursor()
+
+            # check if the pii already exist
+            existing_pii = datastore_resource_exists(pii_resource_id, api_key, ckan_url)
+
+            # Delete existing pii preview before proceeding.
+            if existing_pii:
+                logger.info(
+                    'Deleting existing PII preview "{}".'.format(pii_resource_id)
+                )
+
+                cur_pii.execute(
+                    "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
+                    (pii_resource_id + "%",),
+                )
+                pii_alias_result = cur_pii.fetchone()
+                if pii_alias_result:
+                    existing_pii_alias_of = pii_alias_result[0]
+
+                    delete_datastore_resource(existing_pii_alias_of, api_key, ckan_url)
+                    delete_resource(existing_pii_alias_of, api_key, ckan_url)
+
+            pii_alias = [pii_resource_id]
+
+            # run stats on pii preview CSV to get header names and infer data types
+            # we don't need summary statistics, so use the --typesonly option
+            try:
+                qsv_pii_stats = subprocess.run(
+                    [qsv_bin, "stats", "--typesonly", qsv_searchset_csv.name,],
+                    capture_output=True,
+                    check=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as e:
+                raise util.JobError("Cannot run stats on PII preview CSV: {}".format(e))
+
+            pii_stats = str(qsv_pii_stats.stdout).strip()
+            pii_stats_dict = [
+                dict(id=ele.split(",")[0], type=type_mapping[ele.split(",")[1]])
+                for idx, ele in enumerate(pii_stats.splitlines()[1:], 1)
+            ]
+
+            pii_resource = {
+                "package_id": resource["package_id"],
+                "name": resource["name"] + " - PII",
+                "format": "CSV",
+                "mimetype": "text/csv",
+            }
+            pii_response = send_resource_to_datastore(
+                pii_resource,
+                resource_id=None,
+                headers=pii_stats_dict,
+                api_key=api_key,
+                ckan_url=ckan_url,
+                records=None,
+                aliases=pii_alias,
+                calculate_record_count=False,
+            )
+
+            new_pii_resource_id = pii_response["result"]["resource_id"]
+
+            # now COPY the PII preview to the datastore
+            logger.info(
+                'ADDING PII PREVIEW in "{}" with alias "{}"...'.format(
+                    new_pii_resource_id, pii_alias,
+                )
+            )
+            col_names_list = [h["id"] for h in pii_stats_dict]
+            column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
+
+            copy_sql = sql.SQL(
+                "COPY {} ({}) FROM STDIN "
+                "WITH (FORMAT CSV, "
+                "HEADER 1, ENCODING 'UTF8');"
+            ).format(sql.Identifier(new_pii_resource_id), column_names,)
+
+            with open(qsv_searchset_csv.name, "rb") as f:
+                try:
+                    cur_pii.copy_expert(copy_sql, f)
+                except psycopg2.Error as e:
+                    raise util.JobError("Postgres COPY failed: {}".format(e))
+                else:
+                    pii_copied_count = cur_pii.rowcount
+
+            raw_connection_pii.commit()
+            cur_pii.close()
+
+            pii_resource["id"] = new_pii_resource_id
+            pii_resource["pii_preview"] = True
+            pii_resource["pii_of_resource"] = resource_id
+            pii_resource["total_record_count"] = pii_rows_with_matches
+            update_resource(pii_resource, ckan_url, api_key)
+
+            pii_msg = "{} PII candidate/s in {} row/s are available at {} for review".format(
+                pii_total_matches,
+                pii_copied_count,
+                resource["url"][: resource["url"].find("/resource/")]
+                + "/resource/"
+                + new_pii_resource_id,
+            )
+            if pii_found_abort:
+                raise util.JobError(pii_msg)
+            else:
+                logger.warning(pii_msg)
+                logger.warning(
+                    "PII CANDIDATE/S FOUND but proceeding with job per Datapusher+ configuration."
+                )
+        elif not pii_found:
             logger.info("PII Scan complete. No PII candidate/s found.")
 
-    # -------------------- QSV ANALYSIS DONE --------------------
-    analysis_elapsed = time.perf_counter() - analysis_start
-    logger.info(
-        "ANALYSIS DONE! Analyzed and prepped in {:,.2f} seconds.".format(
-            analysis_elapsed
-        )
-    )
+        piiscreening_elapsed = time.perf_counter() - piiscreening_start
 
     # delete the qsv index file manually
     # as it was created by qsv index, and not by tempfile
@@ -1567,9 +1690,10 @@ def push_to_datastore(task_id, input, dry_run=False):
     raw_connection.close()
     total_elapsed = time.perf_counter() - timer_start
     logger.info(
-        "DATAPUSHER+ JOB DONE!\n Download: {:,.2f}; Analysis: {:,.2f}; COPYing: {:,.2f}, Metadata updates: {:,.2f}, Indexing: {:,.2f}.\nTOTAL ELAPSED TIME: {:,.2f} seconds.".format(
+        "DATAPUSHER+ JOB DONE!\n Download: {:,.2f}; Analysis: {:,.2f}; PII Screening: {:,.2f}, COPYing: {:,.2f}, Metadata updates: {:,.2f}, Indexing: {:,.2f}.\nTOTAL ELAPSED TIME: {:,.2f} seconds.".format(
             fetch_elapsed,
             analysis_elapsed,
+            piiscreening_elapsed,
             copy_elapsed,
             metadata_elapsed,
             index_elapsed,
