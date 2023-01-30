@@ -262,30 +262,8 @@ file. The location of this file can be adjusted using the `JOB_CONFIG`
 environment variable which should provide an absolute path to a python-formatted
 config file.
 
-Here's a summary of the options available.
+See [dot-env.template](datapusher/dot-env.template) for a summary of configuration options available.
 
-| Name | Default | Description |
-| -- | -- | -- |
-| HOST | '0.0.0.0' | Web server host |
-| PORT | 8800 | Web server port |
-| SQLALCHEMY_DATABASE_URI | 'postgresql://datapusher_jobs:<br/>YOURPASSWORD<br/>@localhost/datapusher_jobs' | SQLAlchemy Database URL. See note below about setting up the `datapusher_jobs` db beforehand. |
-| MAX_CONTENT_LENGTH | '1024000' | Max size of files to process in bytes |
-| CHUNK_SIZE | '16384' | Chunk size when processing the data file |
-| DOWNLOAD_TIMEOUT | '30' | Download timeout for requesting the file |
-| SSL_VERIFY | False | Do not validate SSL certificates when requesting the data file (*Warning*: Do not use this setting in production) |
-| TYPES | 'String', 'Float', 'Integer', 'DateTime', 'Date', 'NULL' | These are the types that qsv can infer. |
-| TYPE_MAPPING | {'String': 'text', 'Integer': 'numeric', 'Float': 'numeric', 'DateTime': 'timestamp', 'Date': 'timestamp', 'NULL': 'text'} | Internal qsv type mapping to PostgreSQL types |
-| LOG_FILE | `/tmp/ckan_service.log` | Where to write the logs. Use an empty string to disable |
-| STDERR | `True` | Log to stderr? |
-| QSV_BIN | /usr/local/bin/qsvdp | The location of the qsv binary to use. qsvdp is the DP+ optimized version of qsv. It only has the commands used by DP+, has the self-update engine removed, and is 6x smaller than qsv and 3x smaller than qsvlite. You may also want to look into using `qsvdp_nightly`, for even more performance. |
-| PREVIEW_ROWS | 1000 | The number of rows to insert to the data store. Set to 0 to insert all rows |
-| QSV_DEDUP | `True` | Automatically deduplicate rows? |
-| DEFAULT_EXCEL_SHEET | 0 | The zero-based index of the Excel sheet to export to CSV and insert into the Datastore. Negative values are accepted, i.e. -1 is the last sheet, -2 is 2nd to the last, etc. |
-| AUTO_ALIAS | `True` | Automatically create a resource alias - RESOURCE_NAME-PACKAGE_NAME-OWNER_ORG, that's easier to use in API calls and with the scheming datastore_choices helper |
-| WRITE_ENGINE_URL | | The Postgres connection string to use to write to the Datastore using Postgres COPY. This should be **similar** to your `ckan.datastore.write_url`, except you'll need to use the `datapusher` user |
-
-All of the configuration options above can be also provided as environment
-variables, which can be set by setting key-value pairs in a `.env` file. For variables with boolean values you must use `1` or `0`.
 
 ### DataPusher+ Database Setup
 
