@@ -114,9 +114,9 @@ Install qsv:
 [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
 it to the appropriate directory, e.g. for Linux:
 
-    wget https://github.com/jqnatividad/qsv/releases/download/0.85.0/qsv-0.85.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.85.0-x86_64-unknown-linux-gnu.zip
-    rm qsv-0.85.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.87.0/qsv-0.87.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.87.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-0.87.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
 
 Alternatively, if you want to install qsv from source, follow
@@ -175,10 +175,10 @@ to keep the process up.
     sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
 
     # Install qsv binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.85.0/qsv-0.85.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.85.0-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.87.0/qsv-0.87.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.87.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
-    rm qsv-0.85.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-0.87.0-x86_64-unknown-linux-gnu.zip
     
     # Set Locales
     export LC_ALL="en_US.UTF-8"
