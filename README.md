@@ -140,9 +140,9 @@ Copy the `datapusher/dot-env.template` to file `datapusher/.env` and modify your
 Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
     cd datapusher
-    cp config.py config_local.py
+    cp dot-env.template .env
     # configure your installation as required
-    nano config_local.py
+    nano .env
 
     python3 datapusher/main.py datapusher/config.py
 
@@ -257,10 +257,9 @@ integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/
 
 ### DataPusher+ Configuration
 
-The DataPusher+ instance is configured in the `config_local.py`
-file. The location of this file can be adjusted using the `JOB_CONFIG`
-environment variable which should provide an absolute path to a python-formatted
-config file.
+The DataPusher+ instance is configured in the `.env` file located in the working directory of DP+
+(`/etc/ckan/datapusher-plus` when running a production deployment. The root of the datapusher-plus
+source directory when running a development installation.)
 
 See [dot-env.template](datapusher/dot-env.template) for a summary of configuration options available.
 
