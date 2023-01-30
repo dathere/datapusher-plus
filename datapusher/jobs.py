@@ -378,7 +378,9 @@ def push_to_datastore(task_id, input, dry_run=False):
     # make sure qsv binary variant is up-to-date
     try:
         qsv_version = subprocess.run(
-            [qsv_bin, "--version"], capture_output=True, text=True,
+            [qsv_bin, "--version"],
+            capture_output=True,
+            text=True,
         )
     except subprocess.CalledProcessError as e:
         raise util.JobError("qsv version check error: {}".format(e))
@@ -712,7 +714,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         if is_sorted:
             qsv_dedup_cmd.append("--sorted")
         try:
-            qsv_dedup = subprocess.run(qsv_dedup_cmd, capture_output=True, text=True,)
+            qsv_dedup = subprocess.run(
+                qsv_dedup_cmd,
+                capture_output=True,
+                text=True,
+            )
         except subprocess.CalledProcessError as e:
             raise util.JobError("Check for duplicates error: {}".format(e))
         dupe_count = int(str(qsv_dedup.stderr).strip())
@@ -749,7 +755,13 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info('Checking for "database-safe" header names...')
     try:
         qsv_safenames = subprocess.run(
-            [qsv_bin, "safenames", tmp.name, "--mode", "json",],
+            [
+                qsv_bin,
+                "safenames",
+                tmp.name,
+                "--mode",
+                "json",
+            ],
             capture_output=True,
             text=True,
         )
@@ -872,9 +884,11 @@ def push_to_datastore(task_id, input, dry_run=False):
     # override with types user requested in Data Dictionary
     if existing_info:
         types = [
-            {"text": "String", "numeric": "Float", "timestamp": "DateTime",}.get(
-                existing_info.get(h, {}).get("type_override"), t
-            )
+            {
+                "text": "String",
+                "numeric": "Float",
+                "timestamp": "DateTime",
+            }.get(existing_info.get(h, {}).get("type_override"), t)
             for t, h in zip(types, headers)
         ]
 
@@ -1039,6 +1053,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # searchset command which can SIMULTANEOUSLY compare several regexes per
     # field in one pass
     piiscreening_start = 0
+    piiscreening_elapsed = 0
     if config.get("PII_SCREENING"):
         piiscreening_start = time.perf_counter()
         pii_found_abort = config.get("PII_FOUND_ABORT")
@@ -1179,7 +1194,12 @@ def push_to_datastore(task_id, input, dry_run=False):
             # we don't need summary statistics, so use the --typesonly option
             try:
                 qsv_pii_stats = subprocess.run(
-                    [qsv_bin, "stats", "--typesonly", qsv_searchset_csv.name,],
+                    [
+                        qsv_bin,
+                        "stats",
+                        "--typesonly",
+                        qsv_searchset_csv.name,
+                    ],
                     capture_output=True,
                     check=True,
                     text=True,
@@ -1215,7 +1235,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             # now COPY the PII preview to the datastore
             logger.info(
                 'ADDING PII PREVIEW in "{}" with alias "{}"...'.format(
-                    new_pii_resource_id, pii_alias,
+                    new_pii_resource_id,
+                    pii_alias,
                 )
             )
             col_names_list = [h["id"] for h in pii_stats_dict]
@@ -1225,7 +1246,10 @@ def push_to_datastore(task_id, input, dry_run=False):
                 "COPY {} ({}) FROM STDIN "
                 "WITH (FORMAT CSV, "
                 "HEADER 1, ENCODING 'UTF8');"
-            ).format(sql.Identifier(new_pii_resource_id), column_names,)
+            ).format(
+                sql.Identifier(new_pii_resource_id),
+                column_names,
+            )
 
             with open(qsv_searchset_csv.name, "rb") as f:
                 try:
@@ -1244,12 +1268,14 @@ def push_to_datastore(task_id, input, dry_run=False):
             pii_resource["total_record_count"] = pii_rows_with_matches
             update_resource(pii_resource, ckan_url, api_key)
 
-            pii_msg = "{} PII candidate/s in {} row/s are available at {} for review".format(
-                pii_total_matches,
-                pii_copied_count,
-                resource["url"][: resource["url"].find("/resource/")]
-                + "/resource/"
-                + new_pii_resource_id,
+            pii_msg = (
+                "{} PII candidate/s in {} row/s are available at {} for review".format(
+                    pii_total_matches,
+                    pii_copied_count,
+                    resource["url"][: resource["url"].find("/resource/")]
+                    + "/resource/"
+                    + new_pii_resource_id,
+                )
             )
             if pii_found_abort:
                 raise util.JobError(pii_msg)
@@ -1321,7 +1347,10 @@ def push_to_datastore(task_id, input, dry_run=False):
             "COPY {} ({}) FROM STDIN "
             "WITH (FORMAT CSV, FREEZE 1, "
             "HEADER 1, ENCODING 'UTF8');"
-        ).format(sql.Identifier(resource_id), column_names,)
+        ).format(
+            sql.Identifier(resource_id),
+            column_names,
+        )
         with open(tmp.name, "rb") as f:
             try:
                 cur.copy_expert(copy_sql, f)
@@ -1361,7 +1390,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # when using the Datastore API and in SQL queries
     auto_alias = config.get("AUTO_ALIAS")
     auto_alias_unique = config.get("AUTO_ALIAS_UNIQUE")
-
+    alias = None
     if auto_alias:
         logger.info(
             "AUTO-ALIASING. Auto-alias-unique: {} ...".format(auto_alias_unique)
@@ -1492,7 +1521,12 @@ def push_to_datastore(task_id, input, dry_run=False):
         # we don't need summary statistics, so use the --typesonly option
         try:
             qsv_stats_stats = subprocess.run(
-                [qsv_bin, "stats", "--typesonly", qsv_stats_csv.name,],
+                [
+                    qsv_bin,
+                    "stats",
+                    "--typesonly",
+                    qsv_stats_csv.name,
+                ],
                 capture_output=True,
                 check=True,
                 text=True,
@@ -1529,7 +1563,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         col_names_list = [h["id"] for h in stats_stats_dict]
         logger.info(
             'ADDING SUMMARY STATISTICS {} in "{}" with alias/es "{}"...'.format(
-                col_names_list, new_stats_resource_id, stats_aliases,
+                col_names_list,
+                new_stats_resource_id,
+                stats_aliases,
             )
         )
 
@@ -1539,7 +1575,10 @@ def push_to_datastore(task_id, input, dry_run=False):
             "COPY {} ({}) FROM STDIN "
             "WITH (FORMAT CSV, "
             "HEADER 1, ENCODING 'UTF8');"
-        ).format(sql.Identifier(new_stats_resource_id), column_names,)
+        ).format(
+            sql.Identifier(new_stats_resource_id),
+            column_names,
+        )
 
         with open(qsv_stats_csv.name, "rb") as f:
             try:
@@ -1624,7 +1663,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                     try:
                         index_cur.execute(
                             sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
-                                sql.Identifier(resource_id), sql.Identifier(curr_col),
+                                sql.Identifier(resource_id),
+                                sql.Identifier(curr_col),
                             )
                         )
                     except psycopg2.Error as e:
@@ -1654,7 +1694,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                     try:
                         index_cur.execute(
                             sql.SQL("CREATE INDEX ON {} ({})").format(
-                                sql.Identifier(resource_id), sql.Identifier(curr_col),
+                                sql.Identifier(resource_id),
+                                sql.Identifier(curr_col),
                             )
                         )
                     except psycopg2.Error as e:
@@ -1689,14 +1730,14 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     raw_connection.close()
     total_elapsed = time.perf_counter() - timer_start
-    logger.info(
-        "DATAPUSHER+ JOB DONE!\n Download: {:,.2f}; Analysis: {:,.2f}; PII Screening: {:,.2f}, COPYing: {:,.2f}, Metadata updates: {:,.2f}, Indexing: {:,.2f}.\nTOTAL ELAPSED TIME: {:,.2f} seconds.".format(
-            fetch_elapsed,
-            analysis_elapsed,
-            piiscreening_elapsed,
-            copy_elapsed,
-            metadata_elapsed,
-            index_elapsed,
-            total_elapsed,
-        )
-    )
+    newline_var = "\n"
+    end_msg = f"""
+    DATAPUSHER+ JOB DONE!
+      Download: {fetch_elapsed:,.2f}
+      Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
+      COPYing: {copy_elapsed:,.2f}
+      Metadata updates: {metadata_elapsed:,.2f}
+      Indexing: {index_elapsed:,.2f}
+    TOTAL ELAPSED TIME: {total_elapsed:,.2f}
+    """
+    logger.info(end_msg)
