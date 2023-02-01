@@ -73,6 +73,10 @@ Without an index, it takes 1.3 seconds.
 
 Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same way.
 
+Install the required packages:
+
+    sudo apt-get install python3-dev python3-virtualenv build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
+
 Create a virtual environment for Datapusher+ using at least python 3.8:
 
     cd /usr/lib/ckan
@@ -94,10 +98,6 @@ Create a virtual environment for Datapusher+ using at least python 3.8:
 > ```
 >
 > Note that DP+ still works with CKAN<=2.8, which uses older versions of python.
-
-Install the required packages:
-
-    sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
 
 Get the code:
 
