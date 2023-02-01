@@ -97,7 +97,7 @@ Create a virtual environment for Datapusher+ using at least python 3.8:
 
 Install the required packages:
 
-    sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev
+    sudo apt-get install python-dev python-virtualenv build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
 
 Get the code:
 
@@ -167,7 +167,7 @@ to keep the process up.
 
 
     # Install requirements for DataPusher+. Be sure to have at least Python 3.8
-    sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev
+    sudo apt install python3-venv python3-dev build-essential libxslt1-dev libxml2-dev libffi-dev libpq-dev
      
     cd /usr/lib/ckan
 
