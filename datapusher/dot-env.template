@@ -26,17 +26,17 @@ IGNORE_FILE_HASH = False
 # In bytes. The resource is downloaded on a streaming basis, 16K at a time
 CHUNK_SIZE = 16384
 
-# In seconds. How long before DP+ download times out 
+# In seconds. How long before DP+ download times out
 DOWNLOAD_TIMEOUT = 30
 
 # If the SSL certificate is verified. This is set to False by default
 # since externally hosted datasets may sometimes have expired/self-signed SSL certificates
 SSL_VERIFY = False
 
-# If this is not zero, the number of rows to push into the datastore 
+# If this is not zero, the number of preview rows to push into the datastore 
 PREVIEW_ROWS = 1000
 
-# If this is True, only the first n PREVIEW_ROWS are downloaded
+# If this is True, only the first n PREVIEW_ROWS are downloaded, and not the whole file
 DOWNLOAD_PREVIEW_ONLY = False
 
 DOWNLOAD_PROXY = ''
@@ -79,7 +79,7 @@ DEDUP = False
 
 # -------- SUMMARY STATS SETTINGS -----------
 # Create a resource for calculated summary stats?
-ADD_SUMMARY_STATS_RESOURCE = True
+ADD_SUMMARY_STATS_RESOURCE = False
 
 # Summary Stats don't make sense if PREVIEW_ROWS > 0
 # because, you're only summarizing the preview, not the whole file
@@ -87,16 +87,16 @@ ADD_SUMMARY_STATS_RESOURCE = True
 SUMMARY_STATS_WITH_PREVIEW = False
 
 # additional command line options to pass to qsv stats when creating
-# summary stats.
-SUMMARY_STATS_OPTIONS = '--everything'
+# summary stats. Set to `--everything` if you want to include all the stats,
+# particularly, when ADD_SUMMARY_STATS_RESOURCE is True
+SUMMARY_STATS_OPTIONS = ''
 
 # -------- AUTO INDEX SETTINGS ----------
 # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
-# create indices automatically based on summary statistics
-# For columns w/ cardinality is equal to record_count, it's all unique values, create a unique index
-# If AUTO_INDEX_DATES is true, index all date columns
-# if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
-# if AUTO_INDEX_THRESHOLD = -1, index all columns
+# create indices automatically based on as column's cardinality (number of unique values)
+#   - for columns w/ cardinality is equal to record_count, it's all unique values, create a unique index
+#   - if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
+#   - if AUTO_INDEX_THRESHOLD = -1, index all columns regardless of its cardinality
 AUTO_INDEX_THRESHOLD = 3
 
 # always index date fields?
@@ -130,6 +130,6 @@ PII_SHOW_CANDIDATES = True
 # The resource ID/alias of a Text file that has the 
 # regex patterns to use for PII scanning.
 # If this is not specified, the default PII scanning rules in
-# default_ppi_regexes.txt are used
+# default_pii_regexes.txt are used
 PII_REGEX_RESOURCE_ID_OR_ALIAS = ''
 
