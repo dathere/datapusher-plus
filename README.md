@@ -87,7 +87,7 @@ Create a virtual environment for Datapusher+ using at least python 3.8:
 
 > ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.7/3.8
 > to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
-> To install python 3.8 on Ubuntu, follow the procedure below:
+> If you're using Ubuntu 18.04 or earlier, follow the procedure below to install python 3.8:
 > 
 > ```
 > sudo add-apt-repository ppa:deadsnakes/ppa
@@ -101,7 +101,7 @@ Create a virtual environment for Datapusher+ using at least python 3.8:
 
 Get the code:
 
-    git clone https://github.com/datHere/datapusher-plus
+    git clone --branch 0.9.0 https://github.com/datHere/datapusher-plus
     cd datapusher-plus
 
 Install the dependencies:
@@ -136,7 +136,7 @@ If you already have qsv, update it to the latest release by using the --update o
 qsv with the `--update` option and it will check for the latest version and update as required.
 
 
-Copy the `datapusher/dot-env.template` to file `datapusher/.env` and modify your configuration as required.
+Copy the `datapusher/dot-env.template` to `datapusher/.env` and modify your configuration as required.
 Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
 
     cd datapusher
