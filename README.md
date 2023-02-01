@@ -63,90 +63,106 @@ It features:
 [^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
 [^2]: It takes 0.16 seconds with an index to run `qsv stats` against the [qsv whirlwind tour sample file](https://raw.githubusercontent.com/wiki/jqnatividad/qsv/files/wcp.zip) on a Ryzen 4800H (8 physical/16 logical cores) with 32 gb memory and a 1 TB SSD.
 Without an index, it takes 1.3 seconds.
-[^3]: Imagine you have a 1M row CSV, and the last row has an invalid value for a numeric column (e.g. "N/A" instead of a number). 
-      After spending hours pushing the data very slowly, legacy datapusher will abort on the last row and the ENTIRE job is invalid. 
-      Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what 
+[^3]: Imagine you have a 1M row CSV, and the last row has an invalid value for a numeric column (e.g. "N/A" instead of a number).
+      After spending hours pushing the data very slowly, legacy datapusher will abort on the last row and the ENTIRE job is invalid.
+      Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what
       caused the job to fail! YIKES!!!!
 
-
-## Development installation
+## Development Installation
 
 Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same way.
 
-Install the required packages:
+1. Install the required packages.
 
+    ```bash
     sudo apt-get install python3-dev python3-virtualenv build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
+    ```
 
-Create a virtual environment for Datapusher+ using at least python 3.8:
+2. Create a virtual environment for Datapusher+ using at least python 3.8.
 
+    ```bash
     cd /usr/lib/ckan
     sudo python3.8 -m venv dpplus_venv
     sudo chown -R $(whoami) dpplus_venv
     . dpplus_venv/bin/activate
     cd dpplus_venv
+    ```
 
-> ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.7/3.8
-> to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
-> If you're using Ubuntu 18.04 or earlier, follow the procedure below to install python 3.8:
-> 
-> ```
-> sudo add-apt-repository ppa:deadsnakes/ppa
-> # we use 3.8 here, but you can get a higher version by changing the version suffix of the packages below
-> sudo apt install python3.8 python3.8-venv python3.8-dev
-> # install additional dependencies
-> sudo apt install build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev
-> ```
->
-> Note that DP+ still works with CKAN<=2.8, which uses older versions of python.
+    > ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.7/3.8
+    > to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
+    > If you're using Ubuntu 18.04 or earlier, follow the procedure below to install python 3.8:
+    >
+    > ```bash
+    > sudo add-apt-repository ppa:deadsnakes/ppa
+    > # we use 3.8 here, but you can get a higher version by changing the version suffix of the packages below
+    > sudo apt install python3.8 python3.8-venv python3.8-dev
+    > # install additional dependencies
+    > sudo apt install build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev
+    > ```
+    >
+    > Note that DP+ still works with CKAN<=2.8, which uses older versions of python.
 
-Get the code:
+3. Get the code.
 
+    ```bash
     git clone --branch 0.9.0 https://github.com/datHere/datapusher-plus
     cd datapusher-plus
+    ```
 
-Install the dependencies:
+4. Install the dependencies.
 
     pip install -r requirements-dev.txt
     pip install -e .
 
-Install qsv:
+5. Install [qsv](https://github.com/jqnatividad/qsv).
 
-[Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
-it to the appropriate directory, e.g. for Linux:
+    [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
+    it to the appropriate directory, e.g. for Linux:
 
+    ```bash
     wget https://github.com/jqnatividad/qsv/releases/download/0.87.0/qsv-0.87.0-x86_64-unknown-linux-gnu.zip
     unzip qsv-0.87.0-x86_64-unknown-linux-gnu.zip
     rm qsv-0.87.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
+    ```
 
-Alternatively, if you want to install qsv from source, follow
-the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
-you may want to look into the [Performance Tuning](https://github.com/jqnatividad/qsv#performance-tuning)
-section to squeeze even more performance from qsv.
+    Alternatively, if you want to install qsv from source, follow
+    the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
+    you may want to look into the [Performance Tuning](https://github.com/jqnatividad/qsv#performance-tuning)
+    section to squeeze even more performance from qsv.
 
-Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library.
-In that case, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+    Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
+    (This will be the case when running Ubuntu 18.04 or older).
+    If so, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
 
-If you already have qsv, update it to the latest release by using the --update option.
+    If you already have qsv, update it to the latest release by using the --update option.
 
-    qsvdp --update
+    `qsvdp --update`
 
+    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
+    qsv with the `--update` option and it will check for the latest version and update as required.
 
-> ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
-qsv with the `--update` option and it will check for the latest version and update as required.
+6. Configure the Datapusher+ database.
 
+   Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database
+   (see [DataPusher+ Database Setup](#datapusher-database-setup)).
 
-Copy the `datapusher/dot-env.template` to `datapusher/.env` and modify your configuration as required.
-Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database (see [DataPusher+ Database Setup](#DataPusher+_Database_Setup)).
+7. Copy the `datapusher/dot-env.template` to `datapusher/.env` and modify your configuration as required.
 
+    ```bash
     cd datapusher
     cp dot-env.template .env
     # configure your installation as required
     nano .env
+    ```
 
+8. Run Datapusher+.
+
+    ```bash
     python3 datapusher/main.py datapusher/config.py
+    ```
 
-By default, DataPusher+ should be running at the following port:
+    By default, DataPusher+ should be running at the following port:
 
     http://localhost:8800/
 
