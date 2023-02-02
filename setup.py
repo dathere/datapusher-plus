@@ -60,7 +60,7 @@ setup(
         'wheel',
         'ckanserviceprovider >= 1.0',
         'requests',
-        "psycopg2",
+        "psycopg2-binary",
         'datasize',
         'semver',
         'uwsgi',
