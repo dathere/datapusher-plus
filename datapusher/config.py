@@ -32,6 +32,9 @@ def _parse_bool(val: Union[str, bool]) -> bool:  # pylint: disable=E1136
 
 # DataPusherPlusConfig class with required fields, default values, type checking, and typecasting for int and bool values
 class DataPusherPlusConfig(MutableMapping):
+    # ckan_service_provider settings
+    SQLALCHEMY_DATABASE_URI: str = _DATABASE_URI
+    WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
     DEBUG: bool = False
     TESTING: bool = False
     SECRET_KEY: str = str(uuid.uuid4())
@@ -39,24 +42,30 @@ class DataPusherPlusConfig(MutableMapping):
     PASSWORD: str = str(uuid.uuid4())
     NAME: str = "datapusher"
     HOST: str = "0.0.0.0"
-    PORT: int = 8800
-    SQLALCHEMY_DATABASE_URI: str = _DATABASE_URI
+    PORT: int = 8000
+    LOG_FILE: str = "/etc/ckan/datapusher-plus/ckan_service.log"
+    STDERR: bool = True
+    KEEP_JOBS_AGE: int = 60
+
     MAX_CONTENT_LENGTH: str = "25600000"
     IGNORE_FILE_HASH: bool = True
     CHUNK_SIZE: str = "16384"
     DOWNLOAD_TIMEOUT: int = 30
     SSL_VERIFY: bool = False
+    DOWNLOAD_PROXY: str = ""
+
     TYPES: tuple = _TYPES
     TYPE_MAPPING: dict = _TYPE_MAPPING
+
     PII_SCREENING: bool = True
     PII_QUICK_SCREEN: bool = True
     PII_FOUND_ABORT: bool = True
     PII_SHOW_CANDIDATES: bool = True
     PII_REGEX_RESOURCE_ID_OR_ALIAS: str = ""
-    LOG_FILE: str = "/etc/ckan/datapusher-plus/ckan_service.log"
-    STDERR: bool = True
+
     QSV_BIN: str = "/usr/local/bin/qsvdp"
     FILE_BIN: str = "/usr/bin/file"
+
     PREFER_DMY: bool = False
     PREVIEW_ROWS: int = 1000
     DOWNLOAD_PREVIEW_ONLY: bool = False
@@ -70,8 +79,6 @@ class DataPusherPlusConfig(MutableMapping):
     SUMMARY_STATS_OPTIONS: str = "--everything"
     AUTO_ALIAS: bool = True
     AUTO_ALIAS_UNIQUE: bool = False
-    WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
-    DOWNLOAD_PROXY: str = ""
 
     """
     Map environment variables to class fields according to these rules:
@@ -131,6 +138,17 @@ class DataPusherPlusConfig(MutableMapping):
 # Expose config object for app to import
 config = DataPusherPlusConfig(os.environ)
 
-# Expose these two variables so ckanserviceprovider can use it
+# Expose these variables so ckanserviceprovider can use it
 SQLALCHEMY_DATABASE_URI = config.get("SQLALCHEMY_DATABASE_URI")
 WRITE_ENGINE_URL = config.get("WRITE_ENGINE_URL")
+DEBUG = config.get("DEBUG")
+TESTING = config.get("TESTING")
+SECRET_KEY = config.get("SECRET_KEY")
+USERNAME = config.get("USERNAME")
+PASSWORD = config.get("PASSWORD")
+NAME = config.get("NAME")
+HOST = config.get("HOST")
+PORT = config.get("PORT")
+LOG_FILE = config.get("LOG_FILE")
+STDERR = config.get("STDERR")
+KEEP_JOBS_AGE = config.get("KEEP_JOBS_AGE")
