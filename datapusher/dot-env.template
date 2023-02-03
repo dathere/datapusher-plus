@@ -43,7 +43,7 @@ DOWNLOAD_PROXY = ''
 
 # =========== CKAN SERVICE PROVIDER SETTINGS ==========
 HOST = "0.0.0.0"
-PORT = 8000
+PORT = 8800
 
 # Error logging
 LOG_FILE = '/etc/ckan/datapusher-plus/ckan_service.log'

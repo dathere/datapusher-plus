@@ -149,7 +149,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
    Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database
    (see [DataPusher+ Database Setup](#datapusher-database-setup)).
 
-7. Copy the `datapusher/dot-env.template` to `datapusher/.env` and modify your configuration as required.
+7. Copy the `datapusher/dot-env.template` to `datapusher/.env` and [modify your configuration](#datapusher-configuration).
 
     ```bash
     cd datapusher
@@ -166,7 +166,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 
     By default, DP+ should be running at the following port:
 
-    http://localhost:8000/
+    http://localhost:8800/
 
 ## Production deployment
 
