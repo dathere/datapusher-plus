@@ -44,6 +44,8 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
+MINIMUM_QSV_VERSION = "0.87.1"
+
 DATASTORE_URLS = {
     "datastore_delete": "{ckan_url}/api/action/datastore_delete",
     "resource_update": "{ckan_url}/api/action/resource_update",
@@ -389,10 +391,10 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_version_info.find(" ") : qsv_version_info.find("-")
     ].lstrip()
     try:
-        if semver.compare(qsv_semver, "0.85.0") < 0:
+        if semver.compare(qsv_semver, MINIMUM_QSV_VERSION) < 0:
             raise util.JobError(
-                "At least qsv version 0.85.0 required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
-                    qsv_version_info
+                "At least qsv version {} required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
+                    MINIMUM_QSV_VERSION, qsv_version_info
                 )
             )
     except ValueError as e:
