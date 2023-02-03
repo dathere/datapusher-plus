@@ -110,10 +110,12 @@ SUMMARY_STATS_OPTIONS = ''
 # -------- AUTO INDEX SETTINGS ----------
 # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
 # create indices automatically based on as column's cardinality (number of unique values)
-#   - for columns w/ cardinality is equal to record_count, it's all unique values, create a unique index
 #   - if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
 #   - if AUTO_INDEX_THRESHOLD = -1, index all columns regardless of its cardinality
 AUTO_INDEX_THRESHOLD = 3
+
+# for columns w/ cardinality equal to record_count, it's all unique values, create a unique index
+AUTO_UNIQUE_INDEX = True
 
 # always index date fields?
 AUTO_INDEX_DATES = True
