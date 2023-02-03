@@ -70,6 +70,7 @@ class DataPusherPlusConfig(MutableMapping):
     PREVIEW_ROWS: int = 1000
     DOWNLOAD_PREVIEW_ONLY: bool = False
     AUTO_INDEX_THRESHOLD: int = 3
+    AUTO_UNIQUE_INDEX:bool = True
     AUTO_INDEX_DATES: bool = True
     SORT_AND_DUPE_CHECK: bool = True
     DEDUP: bool = False

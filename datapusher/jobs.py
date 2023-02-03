@@ -1635,11 +1635,16 @@ def push_to_datastore(task_id, input, dry_run=False):
     # If AUTO_INDEX_DATES is true, index all date columns
     # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
     auto_index_dates = config.get("AUTO_INDEX_DATES")
-    if auto_index_threshold or (auto_index_dates and datetimecols_list):
+    auto_unique_index = config.get("AUTO_UNIQUE_INDEX")
+    if (
+        auto_index_threshold
+        or (auto_index_dates and datetimecols_list)
+        or auto_unique_index
+    ):
         index_start = time.perf_counter()
         logger.info(
-            "AUTO-INDEXING. Auto-index threshold: {:,} unique value/s. Auto-index dates: {} ...".format(
-                auto_index_threshold, auto_index_dates
+            "AUTO-INDEXING. Auto-index threshold: {:,} unique value/s. Auto-unique index: {} Auto-index dates: {} ...".format(
+                auto_index_threshold, auto_unique_index, auto_index_dates
             )
         )
         index_cur = raw_connection.cursor()
@@ -1653,10 +1658,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         for idx, cardinality in enumerate(headers_cardinality):
 
             curr_col = headers[idx]
-            if auto_index_threshold > 0 or auto_index_dates:
-                if cardinality == record_count:
+            if auto_index_threshold > 0 or auto_index_dates or auto_unique_index:
+                if cardinality == record_count and auto_unique_index:
                     # all the values are unique for this column, create a unique index
-                    unique_value_count = min(preview_rows, cardinality)
+                    if preview_rows > 0:
+                        unique_value_count = min(preview_rows, cardinality)
+                    else:
+                        unique_value_count = cardinality
                     logger.info(
                         'Creating UNIQUE index on "{}" for {:,} unique values...'.format(
                             curr_col, unique_value_count
