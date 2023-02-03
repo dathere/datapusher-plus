@@ -105,7 +105,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 3. Get the code.
 
     ```bash
-    git clone --branch 0.9.0 https://github.com/datHere/datapusher-plus
+    git clone --branch 0.10.1 https://github.com/datHere/datapusher-plus
     cd datapusher-plus
     ```
 
