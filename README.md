@@ -162,7 +162,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 8. Run Datapusher+.
 
     ```bash
-    python3 datapusher/main.py datapusher/config.py
+    python3 main.py config.py
     ```
 
     By default, DP+ should be running at the following port:
