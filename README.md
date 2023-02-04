@@ -112,6 +112,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 4. Install the dependencies.
 
     ```bash
+    pip install wheel
     pip install -r requirements-dev.txt
     pip install -e .
     ```
@@ -186,18 +187,15 @@ to keep the process up.
 
     # Install requirements for DataPusher+. Be sure to have at least Python 3.8
     sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
-     
-    cd /usr/lib/ckan
 
-    # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
-    sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
-    sudo chown -R $(whoami) dpplus_venv
-
-    # Install qsv binary, if required
+    # Install qsv, if required
     wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
     unzip /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -d /tmp
     rm /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
     sudo mv /tmp/qsv* /usr/local/bin
+
+    # if qsv is already installed, be sure to update it to the latest release
+    sudo qsvdp --update
     
     # find out the locale settings
     locale
@@ -207,12 +205,16 @@ to keep the process up.
     export LC_CTYPE="en_US.UTF-8"
     sudo dpkg-reconfigure locales
 
-    # if qsv is already installed, be sure to update it to the latest release
-    sudo qsvdp --update
+    cd /usr/lib/ckan
+
+    # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
+    sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
+    sudo chown -R $(whoami) dpplus_venv
 
     # install datapusher-plus in the virtual environment
     . /usr/lib/ckan/dpplus_venv/bin/activate
-    pip3 install datapusher-plus
+    pip install wheel
+    pip install datapusher-plus
 
     # create an .env file and tune DP+ settings. Tune the uwsgi.ini file as well
     sudo mkdir -p /etc/ckan/datapusher-plus
