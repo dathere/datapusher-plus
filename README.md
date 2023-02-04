@@ -193,10 +193,10 @@ to keep the process up.
     sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
 
     # Install qsv binary, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    sudo mv qsv* /usr/local/bin
-    rm qsv-0.87.1-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
+    unzip /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -d /tmp
+    rm /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
+    sudo mv /tmp/qsv* /usr/local/bin
     
     # Set Locales
     export LC_ALL="en_US.UTF-8"
