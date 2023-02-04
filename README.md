@@ -105,6 +105,8 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 3. Get the code.
 
     ```bash
+    mkdir src
+    cd src
     git clone --branch 0.10.1 https://github.com/datHere/datapusher-plus
     cd datapusher-plus
     ```
@@ -153,7 +155,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 7. Copy the `datapusher/dot-env.template` to `datapusher/.env` and [modify your configuration](#datapusher-configuration).
 
     ```bash
-    cd datapusher
+    cd /usr/lib/ckan/dpplus_env/src/datapusher-plus/datapusher
     cp dot-env.template .env
     # configure your installation as required
     nano .env
@@ -162,7 +164,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 8. Run Datapusher+.
 
     ```bash
-    python3 main.py config.py
+    python main.py config.py
     ```
 
     By default, DP+ should be running at the following port:
