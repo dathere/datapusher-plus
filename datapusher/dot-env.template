@@ -58,7 +58,7 @@ FROM_EMAIL = 'dpplus-errors@domain.com'
 ADMINS = ''
 
 # Error logging
-LOG_FILE = '/etc/ckan/datapusher-plus/ckan_service_provider.log'
+LOG_FILE = '/tmp/ckan_service.log'
 # Also show log on STDERR
 STDERR = True
 
@@ -82,8 +82,8 @@ KEEP_JOBS_AGE = 60
 # see https://github.com/jqnatividad/qsv/blob/master/docs/PERFORMANCE.md#nightly-release-builds
 QSV_BIN = '/usr/local/bin/qsvdp'
 
-# file binary to use. `file` is used to get file metadata
-# if qsv cannot open a spreadsheet file
+# file binary to use. `file` is used to get file metadata to display on the log
+# if qsv cannot open a spreadsheet file (probably, because its password-protected or corrupt)
 FILE_BIN = '/usr/bin/file'
 
 # Dates are parsed with an MDY preference by default
