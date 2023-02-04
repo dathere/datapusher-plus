@@ -173,73 +173,72 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 
 ### Manual installation
 
-These instructions assume you already have CKAN installed on this server in the
-default location described in the CKAN install documentation (`/usr/lib/ckan/default`). If this is the case,
-you should be able to run the following commands directly, if not you will need to adapt the previous path to
-your needs.
-
 These instructions set up the DataPusher web service on
 [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) running on port 8800, but
 can be easily adapted to other WSGI servers like Gunicorn. You'll probably need
 to set up Nginx as a reverse proxy in front of it and something like Supervisor
 to keep the process up.
 
+```bash
+# Install requirements for DataPusher+. Be sure to have at least Python 3.8
+sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
 
-    # Install requirements for DataPusher+. Be sure to have at least Python 3.8
-    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
+# Install qsv, if required
+wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
+unzip /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -d /tmp
+rm /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
+sudo mv /tmp/qsv* /usr/local/bin
 
-    # Install qsv, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
-    unzip /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -d /tmp
-    rm /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    sudo mv /tmp/qsv* /usr/local/bin
+# if qsv is already installed, be sure to update it to the latest release
+sudo qsvdp --update
 
-    # if qsv is already installed, be sure to update it to the latest release
-    sudo qsvdp --update
-    
-    # find out the locale settings
-    locale
+# find out the locale settings
+locale
 
-    # Set Locales (only do this if the current locale LANG is not "en_US.UTF-8")
-    export LC_ALL="en_US.UTF-8"
-    export LC_CTYPE="en_US.UTF-8"
-    sudo dpkg-reconfigure locales
+# ONLY IF LANG is not "en_US.UTF-8", set locale
+export LC_ALL="en_US.UTF-8"
+export LC_CTYPE="en_US.UTF-8"
+sudo dpkg-reconfigure locales
 
-    cd /usr/lib/ckan
+# Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
+sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
+sudo chown -R $(whoami) dpplus_venv
 
-    # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
-    sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
-    sudo chown -R $(whoami) dpplus_venv
+# install datapusher-plus in the virtual environment
+. /usr/lib/ckan/dpplus_venv/bin/activate
+pip install wheel
+pip install datapusher-plus
 
-    # install datapusher-plus in the virtual environment
-    . /usr/lib/ckan/dpplus_venv/bin/activate
-    pip install wheel
-    pip install datapusher-plus
+# create an .env file and tune DP+ settings. Tune the uwsgi.ini file as well
+sudo mkdir -p /etc/ckan/datapusher-plus
+sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/dot-env.template -o /etc/ckan/datapusher-plus/.env
+sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
-    # create an .env file and tune DP+ settings. Tune the uwsgi.ini file as well
-    sudo mkdir -p /etc/ckan/datapusher-plus
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/dot-env.template -o /etc/ckan/datapusher-plus/.env
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
+# Be sure to initialize the database if required. (See Database Setup section below)
+# Be sure to the .env file have the right connect strings!
 
-    # Be sure to initialize the database if required. (See Database Setup section below)
-    # Be sure to the .env file have the right connect strings!
-
-    # Create a user to run the web service (if necessary)
-    sudo addgroup www-data
-    sudo adduser -G www-data www-data
+# Create a user to run the web service (if necessary)
+sudo addgroup www-data
+sudo adduser -G www-data www-data
+```
 
 At this point you can run DataPusher+ with the following command:
 
-    /usr/lib/ckan/dpplus_venv/bin/uwsgi --enable-threads -i /etc/ckan/datapusher-plus/uwsgi.ini
+```bash
+/usr/lib/ckan/dpplus_venv/bin/uwsgi --enable-threads -i /etc/ckan/datapusher-plus/uwsgi.ini
+```
 
 You might need to change the `uid` and `guid` in the `uwsgi.ini` file when using a different user.
 
 To deploy it using supervisor:
 
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.conf -o /etc/supervisor/conf.d/datapusher-uwsgi.conf
-    sudo service supervisor restart
+```bash
+sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.conf -o /etc/supervisor/conf.d/datapusher-uwsgi.conf
+sudo service supervisor restart
+```
 
 ### Package deployment (WIP)
+
 As Datapusher+ is quite involved as evinced by the above procedure, a containerized package installation 
 will make it far easier not only to deploy DP+ to production, but also to experiment with.
 
@@ -294,7 +293,7 @@ DP+ requires a dedicated PostgreSQL account named `datapusher` to connect to the
 
 To create the `datapusher` user and give it the required privileges to the `datastore_default` database:
 
-```
+```bash
 su - postgres
 psql -d datastore_default
 CREATE ROLE datapusher LOGIN PASSWORD 'YOURPASSWORD';
@@ -308,8 +307,10 @@ this was a sqlite database by default. Though DP+ can still use a sqlite databas
 
 To setup the `datapusher_jobs` database and its user:
 
-    sudo -u postgres createuser -S -D -R -P datapusher_jobs
-    sudo -u postgres createdb -O datapusher_jobs datapusher_jobs -E utf-8
+```bash
+sudo -u postgres createuser -S -D -R -P datapusher_jobs
+sudo -u postgres createdb -O datapusher_jobs datapusher_jobs -E utf-8
+```
 
 ## Usage
 
