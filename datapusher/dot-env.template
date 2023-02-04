@@ -76,7 +76,12 @@ KEEP_JOBS_AGE = 60
 
 # ---------- BINARY PATHS -------------
 # qsv binary to use
+# optionally, you can also use qsvdp_nightly.
+# qsvdp is already very fast, but if you want even more speed
+# qsvdp_nightly is compiled/linked in such a way that it's even faster/smaller
+# see https://github.com/jqnatividad/qsv/blob/master/docs/PERFORMANCE.md#nightly-release-builds
 QSV_BIN = '/usr/local/bin/qsvdp'
+
 # file binary to use. `file` is used to get file metadata
 # if qsv cannot open a spreadsheet file
 FILE_BIN = '/usr/bin/file'
