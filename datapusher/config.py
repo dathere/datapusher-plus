@@ -42,7 +42,7 @@ class DataPusherPlusConfig(MutableMapping):
     PASSWORD: str = str(uuid.uuid4())
     NAME: str = "datapusher"
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
+    PORT: int = 8800
     LOG_FILE: str = "/etc/ckan/datapusher-plus/ckan_service.log"
     STDERR: bool = True
     KEEP_JOBS_AGE: int = 60
