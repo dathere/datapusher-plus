@@ -191,6 +191,7 @@ to keep the process up.
 
     # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
     sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
+    sudo chown -R $(whoami) dpplus_venv
 
     # Install qsv binary, if required
     wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
@@ -198,7 +199,10 @@ to keep the process up.
     rm /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
     sudo mv /tmp/qsv* /usr/local/bin
     
-    # Set Locales
+    # find out the locale settings
+    locale
+
+    # Set Locales (only do this if the current locale LANG is not "en_US.UTF-8")
     export LC_ALL="en_US.UTF-8"
     export LC_CTYPE="en_US.UTF-8"
     sudo dpkg-reconfigure locales
