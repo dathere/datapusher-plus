@@ -43,12 +43,12 @@ class DataPusherPlusConfig(MutableMapping):
     NAME: str = "datapusher"
     HOST: str = "0.0.0.0"
     PORT: int = 8800
-    LOG_FILE: str = "/etc/ckan/datapusher-plus/ckan_service.log"
+    LOG_FILE: str = "/tmp/ckan_service.log"
     STDERR: bool = True
     KEEP_JOBS_AGE: int = 60
 
     MAX_CONTENT_LENGTH: str = "25600000"
-    IGNORE_FILE_HASH: bool = True
+    IGNORE_FILE_HASH: bool = False
     CHUNK_SIZE: str = "16384"
     DOWNLOAD_TIMEOUT: int = 30
     SSL_VERIFY: bool = False
@@ -57,27 +57,31 @@ class DataPusherPlusConfig(MutableMapping):
     TYPES: tuple = _TYPES
     TYPE_MAPPING: dict = _TYPE_MAPPING
 
-    PII_SCREENING: bool = True
-    PII_QUICK_SCREEN: bool = True
-    PII_FOUND_ABORT: bool = True
-    PII_SHOW_CANDIDATES: bool = True
+    PII_SCREENING: bool = False
+    PII_QUICK_SCREEN: bool = False
+    PII_FOUND_ABORT: bool = False
+    PII_SHOW_CANDIDATES: bool = False
     PII_REGEX_RESOURCE_ID_OR_ALIAS: str = ""
 
     QSV_BIN: str = "/usr/local/bin/qsvdp"
     FILE_BIN: str = "/usr/bin/file"
 
     PREFER_DMY: bool = False
-    PREVIEW_ROWS: int = 1000
+    PREVIEW_ROWS: int = 0
     DOWNLOAD_PREVIEW_ONLY: bool = False
+    
     AUTO_INDEX_THRESHOLD: int = 3
     AUTO_UNIQUE_INDEX:bool = True
     AUTO_INDEX_DATES: bool = True
+    
     SORT_AND_DUPE_CHECK: bool = True
     DEDUP: bool = False
     DEFAULT_EXCEL_SHEET: int = 0
-    ADD_SUMMARY_STATS_RESOURCE: bool = True
+    
+    ADD_SUMMARY_STATS_RESOURCE: bool = False
     SUMMARY_STATS_WITH_PREVIEW: bool = False
-    SUMMARY_STATS_OPTIONS: str = "--everything"
+    SUMMARY_STATS_OPTIONS: str = ""
+    
     AUTO_ALIAS: bool = True
     AUTO_ALIAS_UNIQUE: bool = False
 

@@ -33,8 +33,9 @@ DOWNLOAD_TIMEOUT = 30
 # since externally hosted datasets may sometimes have expired/self-signed SSL certificates
 SSL_VERIFY = False
 
-# If this is not zero, the number of preview rows to push into the datastore 
-PREVIEW_ROWS = 1000
+# If this is not zero, the number of preview rows to push into the datastore
+# If zero, it pushes the entire file
+PREVIEW_ROWS = 0
 
 # If this is True, only the first n PREVIEW_ROWS are downloaded, and not the whole file
 DOWNLOAD_PREVIEW_ONLY = False
@@ -93,6 +94,9 @@ PREFER_DMY = False
 # The zero-based index of the default sheet to export to CSV. 0 is the first sheet.
 # Accepts negative numbers. -1 is the last sheet, -2 the 2nd to last sheet, etc.
 DEFAULT_EXCEL_SHEET = 0
+
+# Check if a file is sorted and has duplicates
+SORT_AND_DUPE_CHECK = True
 
 # Should CSVs be deduped? Note that deduping also
 # sorts the CSV.
