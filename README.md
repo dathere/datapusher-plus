@@ -256,12 +256,16 @@ not only Datapusher+ jobs, but also to manage the CKAN Datastore.
 Add `datapusher` to the plugins in your CKAN configuration file
 (generally located at `/etc/ckan/default/ckan.ini`):
 
-    ckan.plugins = <other plugins> datapusher
+```ini
+ckan.plugins = <other plugins> datapusher
+```
 
 In order to tell CKAN where this webservice is located, the following must be
 added to the `[app:main]` section of your CKAN configuration file :
 
-    ckan.datapusher.url = http://127.0.0.1:8800/
+```ini
+ckan.datapusher.url = http://127.0.0.1:8800/
+```
 
 There are other CKAN configuration options that allow to customize the CKAN - DataPusher
 integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/latest/maintaining/configuration.html#datapusher-settings) section in the CKAN documentation for more details.
@@ -269,13 +273,13 @@ integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/
 > ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - `xlsm` and `xlsb` for Excel Spreadsheets,
 > and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
 >
->```
+>```ini
 > ckan.datapusher.formats = csv xls xlsx xlsm xlsb tsv tab application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet ods application/vnd.oasis.opendocument.spreadsheet
 >```
 >
 >and add this entry to your CKAN's `resource_formats.json` file.
 >
->```
+>```json
 > ["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
 >```
 
