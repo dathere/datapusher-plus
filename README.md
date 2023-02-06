@@ -342,6 +342,58 @@ On CKAN<=2.8:
 
     paster --plugin=ckan datapusher submit <pkgname> -c /etc/ckan/default/ckan.ini
 
+### Uninstalling Datapusher+
+
+Should you need to remove Datapusher+, and you followed either the Development or Production Installation procedures above:
+
+```bash
+# deactivate the dpplus_venv virtual environment, if you're currently using it
+/usr/lib/ckan/dpplus_venv/bin/deactivate
+
+# remove the python virtual environment
+sudo rm -rf /usr/lib/ckan/dpplus_venv
+
+# remove the supervisor DP+ configuration
+sudo rm -rf /etc/supervisor/conf.d/datapusher-uwsgi.conf
+
+# remove the production deployment directory
+sudo rm -rf /etc/ckan/datapusher-plus
+
+# remove qsv binary variants
+sudo rm /usr/local/bin/qsv /usr/local/bin/qsvdp /usr/local/bin/qsvlite /usr/local/bin/qsv_nightly /usr/local/bin/qsvdp_nightly /usr/local/bin/qsvlite_nightly
+
+# restart the supervisor, without the Datapusher+ service
+sudo service supervisor reload
+
+# ========= DATABASE objects ============
+# be sure to backup the datapusher_jobs database first if 
+# you want to retain the DP+ job history
+# to remove the Datapusher+ job database
+sudo -u postgres dropdb datapusher_jobs
+sudo -u postgres dropuser datapusher_jobs
+
+# to drop the datapusher user which DP+ uses to write to the CKAN Datastore
+sudo -u postgres dropuser datapusher
+```
+
+To ensure the Datapusher+ service is not automatically invoked when tabular resources are uploaded, remove/comment out the following `ckan.datapusher` entries in your `ckan.ini`:
+
+* `ckan.datapusher.formats`
+* `ckan.datapusher.url`
+* `ckan.datapusher.callback_url_base`
+* `ckan.datapusher.assume_task_stale_after`
+
+If you're no longer using the CKAN Datastore:
+
+* Edit your `ckan.ini` and remove/comment `datastore` from `ckan.plugins`.
+* Remove/comment out the `ckan.datastore.write_url` and `ckan.datastore.read_url` entries.
+
+To confirm the uninstallation is successful:
+
+* tabular Resource Views (e.g. datatables_view, recline_view, etc.) are no longer available
+* the **Datastore** and **Data Dictionary** tabs are no longer available
+* the **Download** button on the resource page will no longer offer alternate download formats (CSV, TSV, JSON, XML)
+* the **Datastore API** button will no longer display on tabular resources
 
 ## License
 
