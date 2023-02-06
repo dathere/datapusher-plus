@@ -347,16 +347,16 @@ On CKAN<=2.8:
 Should you need to remove Datapusher+, and you followed either the Development or Production Installation procedures above:
 
 ```bash
-# deactivate the dpplus_venv virtual environment, if you're currently using it
+# deactivate the dpplus_venv virtual environment
 /usr/lib/ckan/dpplus_venv/bin/deactivate
 
-# remove the python virtual environment
+# remove the DP+ python virtual environment
 sudo rm -rf /usr/lib/ckan/dpplus_venv
 
 # remove the supervisor DP+ configuration
 sudo rm -rf /etc/supervisor/conf.d/datapusher-uwsgi.conf
 
-# remove the production deployment directory
+# remove the DP+ production deployment directory
 sudo rm -rf /etc/ckan/datapusher-plus
 
 # remove qsv binary variants
