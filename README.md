@@ -56,9 +56,10 @@ It features:
 
   * create "Smarter" Data Dictionaries, with:
     * guaranteed data type inferences
-    * sanitized column names (guaranteeing valid Postgresql column identifiers) while preserving the original column name as a label, which is used to label columns in DataTables_view.
+    * optional ability to automatically choose the best integer PostgreSQL data type ("smartint") based on the range of the numeric column ([PostgreSQL's int, bigint and numeric types](https://www.postgresql.org/docs/12/datatype-numeric.html)) for optimal storage/indexing efficiency and SQL query performance.
+    * sanitized column names (guaranteeing valid PostgreSQL column identifiers) while preserving the original column name as a label, which is used to label columns in DataTables_view.
     * an optional "summary stats" resource as an extension of the Data Dictionary, with comprehensive summary statistics for each column - sum, min/max/range, min/max length, mean, stddev, variance, nullcount, sparsity, quartiles, IQR, lower/upper fences, skewness, median, mode/s, antimode/s & cardinality.
-  * convert Excel & OpenOffice/LibreOffice Calc (ODS) files to CSV
+  * convert Excel & OpenOffice/LibreOffice Calc (ODS) files to CSV, with the ability to choose which sheet to use by default (e.g. 0 is the first sheet, -1 is the last sheet, -2 the second to last sheet, etc.)
   * convert various date formats ([19 date formats are recognized](https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats) with each format having several variants (~80 date format permutations in total)) to standard [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339) format
   * instantaneously count the number of rows
   * normalizes and transcodes CSV/TSV dialects into standard UTF-8-encoded CSV
