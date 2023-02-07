@@ -22,7 +22,7 @@ It features:
   a column, [qsv][] scans the entire table so its data type inferences are guaranteed[^1].
 
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
-  only inferring data types, it also calculates [summary statistics as well](https://github.com/jqnatividad/qsv/blob/b0fbd0e575e2e80f57f94ce916438edf9dc32859/src/cmd/stats.rs#L2-L18). For example,
+  only inferring data types, it also calculates [summary statistics](https://github.com/jqnatividad/qsv/blob/b0fbd0e575e2e80f57f94ce916438edf9dc32859/src/cmd/stats.rs#L2-L18) as well. For example,
   [scanning a 2.7 million row, 124MB CSV file for types and stats took 0.16 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour)[^2].
 
   It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded,
@@ -52,9 +52,23 @@ It features:
 
 * **Extended preprocessing with qsv**
 
-  Apart from bullet-proof data type inferences, qsv is leveraged by Datapusher+ to convert Excel & ODS files;
-  count the number of rows; transcode to UTF-8 if required; validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180); sanitize header names so they are always valid Postgres column identifers;
-  optionally create a preview subset and optionally deduplicate rows.
+  qsv is leveraged by Datapusher+ to:
+
+  * create "Smarter" Data Dictionaries, with:
+    * guaranteed data type inferences
+    * sanitized column names (guaranteeing valid Postgresql column identifiers) while preserving the original column name as a label, which is used to label columns in DataTables_view.
+    * an optional "summary stats" resource as an extension of the Data Dictionary, with comprehensive summary statistics for each column - sum, min/max/range, min/max length, mean, stddev, variance, nullcount, sparsity, quartiles, IQR, lower/upper fences, skewness, median, mode/s, antimode/s & cardinality.
+  * convert Excel & ODS files to CSV
+  * convert various date format ([19 date formats are recognized](https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats) with each format having several variants (~80 date format permutations in total)) to standard RFC3339 format
+  * instantaneously count the number of rows
+  * transcode to UTF-8 if required
+  * validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180) standard
+  * optionally create a preview subset, with the ability to only download the preview rows of a file, and not the entire file
+  * auto-index columns based on its cardinality/format (unique indices created for columns with all unique values, auto-index columns whose cardinality is below a given threshold; auto-index date columns)
+  * check for duplicates, and optionally deduplicate rows
+  * screen for Personally Identifiable Information (PII), with an option to "quarantine" the PII-candidate rows in a separate resource, while still creating the screened resource.
+
+  Even with all these pre-processing tasks, qsv typically takes less than 5 seconds to finish all its analysis tasks, even for a 100mb CSV file.
 
   Future versions of Datapusher+ will further leverage qsv's 80+ commands to do additional
   preprocessing, data-wrangling and validation. The Roadmap is available [here](https://github.com/dathere/datapusher-plus/issues/5).
