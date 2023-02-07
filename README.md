@@ -370,8 +370,8 @@ On CKAN<=2.8:
 Should you need to remove Datapusher+, and you followed either the Development or Production Installation procedures above:
 
 ```bash
-# deactivate the dpplus_venv virtual environment
-/usr/lib/ckan/dpplus_venv/bin/deactivate
+# if you're running inside the dpplus_venv virtual environment, deactivate it first
+deactivate
 
 # remove the DP+ python virtual environment
 sudo rm -rf /usr/lib/ckan/dpplus_venv
@@ -389,9 +389,11 @@ sudo rm /usr/local/bin/qsv /usr/local/bin/qsvdp /usr/local/bin/qsvlite /usr/loca
 sudo service supervisor reload
 
 # ========= DATABASE objects ============
-# be sure to backup the datapusher_jobs database first if 
+# OPTIONAL: backup the datapusher_jobs database first if 
 # you want to retain the DP+ job history
-# to remove the Datapusher+ job database
+sudo -u postgres pg_dump --format=custom -d datapusher_jobs > datapusher_jobs.dump
+
+# to remove the Datapusher+ job database and the datapusher_jobs user/role
 sudo -u postgres dropdb datapusher_jobs
 sudo -u postgres dropuser datapusher_jobs
 
@@ -399,19 +401,24 @@ sudo -u postgres dropuser datapusher_jobs
 sudo -u postgres dropuser datapusher
 ```
 
-To ensure the Datapusher+ service is not automatically invoked when tabular resources are uploaded, remove/comment out the following `ckan.datapusher` entries in your `ckan.ini`:
+To ensure the Datapusher+ service is not automatically invoked when tabular resources are uploaded, remove `datapusher` from `ckan.plugins` in your `ckan.ini` file.
+
+Also remove/comment out the following `ckan.datapusher` entries in your `ckan.ini`:
 
 * `ckan.datapusher.formats`
 * `ckan.datapusher.url`
 * `ckan.datapusher.callback_url_base`
 * `ckan.datapusher.assume_task_stale_after`
 
+Note that resources which has been pushed previously will still be available on the CKAN Datastore.
+You will have to delete these resources separately using the UI or the CKAN [resource_delete](https://docs.ckan.org/en/2.9/api/index.html#ckan.logic.action.delete.resource_delete) API.
+
 If you're no longer using the CKAN Datastore:
 
 * Edit your `ckan.ini` and remove/comment `datastore` from `ckan.plugins`.
 * Remove/comment out the `ckan.datastore.write_url` and `ckan.datastore.read_url` entries.
 
-To confirm the uninstallation is successful:
+To confirm the uninstallation is successful, upload a new tabular resource and check if:
 
 * tabular Resource Views (e.g. datatables_view, recline_view, etc.) are no longer available
 * the **Datastore** and **Data Dictionary** tabs are no longer available
