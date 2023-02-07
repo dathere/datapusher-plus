@@ -22,7 +22,7 @@ It features:
   a column, [qsv][] scans the entire table so its data type inferences are guaranteed[^1].
 
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
-  only inferring data types, it also calculates some descriptive statistics as well. For example,
+  only inferring data types, it also calculates [summary statistics as well](https://github.com/jqnatividad/qsv/blob/b0fbd0e575e2e80f57f94ce916438edf9dc32859/src/cmd/stats.rs#L2-L18). For example,
   [scanning a 2.7 million row, 124MB CSV file for types and stats took 0.16 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour)[^2].
 
   It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded,
