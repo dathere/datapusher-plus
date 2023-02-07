@@ -194,6 +194,11 @@ sudo mv /tmp/qsv* /usr/local/bin
 # if qsv is already installed, be sure to update it to the latest release
 sudo qsvdp --update
 
+# if you get a glibc error when running `qsvdp --update`
+# you're on an old distro (e.g. Ubuntu 18.04) without the required version of the glibc libraries.
+# If so, use the statically linked MUSL version instead
+# https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-musl.zip
+
 # find out the locale settings
 locale
 
@@ -217,7 +222,7 @@ sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datap
 sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
 
 # Be sure to initialize the database if required. (See Database Setup section below)
-# Be sure to the .env file have the right connect strings!
+# Be sure to edit the .env file and set the right database connect strings!
 
 # Create a user to run the web service (if necessary)
 sudo addgroup www-data
