@@ -58,15 +58,16 @@ It features:
     * guaranteed data type inferences
     * sanitized column names (guaranteeing valid Postgresql column identifiers) while preserving the original column name as a label, which is used to label columns in DataTables_view.
     * an optional "summary stats" resource as an extension of the Data Dictionary, with comprehensive summary statistics for each column - sum, min/max/range, min/max length, mean, stddev, variance, nullcount, sparsity, quartiles, IQR, lower/upper fences, skewness, median, mode/s, antimode/s & cardinality.
-  * convert Excel & ODS files to CSV
-  * convert various date format ([19 date formats are recognized](https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats) with each format having several variants (~80 date format permutations in total)) to standard RFC3339 format
+  * convert Excel & OpenOffice/LibreOffice Calc (ODS) files to CSV
+  * convert various date formats ([19 date formats are recognized](https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats) with each format having several variants (~80 date format permutations in total)) to standard [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339) format
   * instantaneously count the number of rows
-  * transcode to UTF-8 if required
+  * normalizes and transcodes CSV/TSV dialects into standard UTF-8-encoded CSV
   * validate if a CSV conforms to the [RFC 4180 standard](https://datatracker.ietf.org/doc/html/rfc4180) standard
-  * optionally create a preview subset, with the ability to only download the preview rows of a file, and not the entire file
+  * optionally create a preview subset, with the ability to only download the preview rows of a file, and not the entire file (e.g. only download first 1,000 rows of 3 gb CSV file - especially good for harvesting external sites).
+  * optionally create a preview subset from the end of a file (e.g. last 1,000 rows, good for time-series/sensor data)
   * auto-index columns based on its cardinality/format (unique indices created for columns with all unique values, auto-index columns whose cardinality is below a given threshold; auto-index date columns)
   * check for duplicates, and optionally deduplicate rows
-  * screen for Personally Identifiable Information (PII), with an option to "quarantine" the PII-candidate rows in a separate resource, while still creating the screened resource.
+  * optionally screen for Personally Identifiable Information (PII), with an option to "quarantine" the PII-candidate rows in a separate resource, while still creating the screened resource.
 
   Even with all these pre-processing tasks, qsv typically takes less than 5 seconds to finish all its analysis tasks, even for a 100mb CSV file.
 
