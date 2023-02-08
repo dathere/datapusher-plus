@@ -310,7 +310,7 @@ integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/
 ### DataPusher+ Configuration
 
 The DataPusher+ instance is configured in the `.env` file located in the working directory of DP+
-(`/etc/ckan/datapusher-plus` when running a production deployment. The root of the datapusher-plus
+(`/etc/ckan/datapusher-plus` when running a production deployment. The `datapusher-plus/datapusher`
 source directory when running a development installation.)
 
 See [dot-env.template](datapusher/dot-env.template) for a summary of configuration options available.
@@ -346,7 +346,7 @@ sudo -u postgres createdb -O datapusher_jobs datapusher_jobs -E utf-8
 Any file that has one of the supported formats (defined in [`ckan.datapusher.formats`](https://docs.ckan.org/en/latest/maintaining/configuration.html#ckan-datapusher-formats)) will be attempted to be loaded
 into the DataStore.
 
-You can also manually trigger resources to be resubmitted. When editing a resource in CKAN (clicking the "Manage" button on a resource page), a new tab named "DataStore" will appear. This will contain a log of the last attempted upload and a button to retry the upload.
+You can also manually trigger resources to be resubmitted. When editing a resource in CKAN (clicking the "Manage" button on a resource page), a new tab named "DataStore" will appear. This will contain a log of the last attempted upload and a button to retry the upload. Once a resource has been "pushed" into the Datastore, a "Data Dictionary" tab will also be available where the data pusblisher can fine-tune the inferred data dictionary.
 
 ![DataPusher+ UI](images/datapusher-plus-scn1.png)
 ![DataPusher+ UI 2](images/datapusher-plus-scn2.png)
