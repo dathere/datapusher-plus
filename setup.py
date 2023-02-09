@@ -57,9 +57,9 @@ setup(
     # requirements files see:
     # https://packaging.python.org/en/latest/discussions/install-requires-vs-requirements/
     install_requires=[
-        "APScheduler < 3.10.0",
+        "APScheduler == 3.9.1.post1",
         "python-dotenv",
-        'ckanserviceprovider >= 1.0',
+        'ckanserviceprovider == 1.1.0',
         'requests',
         "psycopg2",
         'datasize',
