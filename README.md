@@ -93,7 +93,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 1. Install the required packages.
 
     ```bash
-    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
+    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file
     ```
 
 2. Create a virtual environment for Datapusher+ using at least python 3.8.
@@ -201,7 +201,7 @@ to keep the process up.
 
 ```bash
 # Install requirements for DataPusher+. Be sure to have at least Python 3.8
-sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
+sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file
 
 # Install qsv, if required
 wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
@@ -266,6 +266,8 @@ sudo service supervisor restart
 
 As Datapusher+ is quite involved as evinced by the above procedure, a containerized package installation 
 will make it far easier not only to deploy DP+ to production, but also to experiment with.
+
+Instructions to set up the DataPusher Docker instance https://github.com/dathere/datapusher-plus-docker
 
 The upcoming DP+ package will also expose additional features and administrative interface to manage
 not only Datapusher+ jobs, but also to manage the CKAN Datastore.
