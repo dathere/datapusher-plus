@@ -11,7 +11,7 @@ import ckan.plugins as p
 import ckanext.datapusher_plus.views as views
 import ckanext.datapusher_plus.helpers as helpers
 import ckanext.datapusher_plus.logic.action as action
-# import ckanext.datapusher_plus.logic.auth as auth
+import ckanext.datapusher_plus.logic.auth as auth
 
 log = logging.getLogger(__name__)
 

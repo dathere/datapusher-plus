@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from ckan.types import Context
+import ckan.lib.jobs as rq_jobs
+
 import logging
 import json
 import datetime
@@ -24,6 +26,10 @@ import ckanext.datapusher.interfaces as interfaces
 log = logging.getLogger(__name__)
 _get_or_bust = logic.get_or_bust
 _validate = ckan.lib.navl.dictization_functions.validate
+
+
+get_queue = rq_jobs.get_queue
+
 
 
 def datapusher_submit(context: Context, data_dict: dict[str, Any]):
@@ -61,21 +67,7 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
         })
     except logic.NotFound:
         return False
-
-    datapusher_url: str = config.get('ckan.datapusher.url')
-
-    callback_url_base = config.get(
-        'ckan.datapusher.callback_url_base'
-    ) or config.get("ckan.site_url")
-    if callback_url_base:
-        site_url = callback_url_base
-        callback_url = urljoin(
-            callback_url_base.rstrip('/'), '/api/3/action/datapusher_hook')
-    else:
-        site_url = h.url_for('home.index', qualified=True)
-        callback_url = h.url_for(
-            '/api/3/action/datapusher_hook', qualified=True)
-
+ 
     for plugin in p.PluginImplementations(interfaces.IDataPusher):
         upload = plugin.can_upload(res_id)
         if not upload:
@@ -87,23 +79,32 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     task = {
         'entity_id': res_id,
         'entity_type': 'resource',
-        'task_type': 'datapusher',
+        'task_type': 'datapusher_plus',
         'last_updated': str(datetime.datetime.utcnow()),
         'state': 'submitting',
-        'key': 'datapusher',
+        'key': 'datapusher_plus',
         'value': '{}',
         'error': '{}',
     }
     try:
         existing_task = p.toolkit.get_action('task_status_show')(context, {
             'entity_id': res_id,
-            'task_type': 'datapusher',
-            'key': 'datapusher'
+            'task_type': 'datapusher_plus',
+            'key': 'datapusher_plus'
         })
         assume_task_stale_after = datetime.timedelta(
-            seconds=config.get(
-                'ckan.datapusher.assume_task_stale_after'))
+            seconds=int(config.get(
+                'ckan.datapusher.assume_task_stale_after', 3600)))
+        assume_task_stillborn_after = datetime.timedelta(
+            seconds=int(config.get(
+                'ckan.datapusher.assume_task_stillborn_after', 5)))
         if existing_task.get('state') == 'pending':
+            import re
+            queued_res_ids = [
+                re.search(r"'resource_id': u?'([^']+)'", job.description).group()[]
+                for job in get_queue().get_jobs()
+                if 'datapusher_plus_to_datastore' in job.description
+            ]
             updated = datetime.datetime.strptime(
                 existing_task['last_updated'], '%Y-%m-%dT%H:%M:%S.%f')
             time_since_last_updated = datetime.datetime.utcnow() - updated
