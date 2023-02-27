@@ -20,14 +20,15 @@ import ckan.lib.navl.dictization_functions
 import ckan.logic as logic
 import ckan.plugins as p
 from ckan.common import config
-import ckanext.datapusher.logic.schema as dpschema
-import ckanext.datapusher.interfaces as interfaces
+import ckanext.datapusher_plus.logic.schema as dpschema
+import ckanext.datapusher_plus.interfaces as interfaces
+import ckanext.datapusher_plus.jobs as jobs
 
 log = logging.getLogger(__name__)
 _get_or_bust = logic.get_or_bust
 _validate = ckan.lib.navl.dictization_functions.validate
 
-
+tk = p.toolkit
 get_queue = rq_jobs.get_queue
 
 
@@ -101,14 +102,24 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
         if existing_task.get('state') == 'pending':
             import re
             queued_res_ids = [
-                re.search(r"'resource_id': u?'([^']+)'", job.description).group()[]
+                re.search(r"'resource_id': u?'([^']+)'", job.description).group()[0]
                 for job in get_queue().get_jobs()
-                if 'datapusher_plus_to_datastore' in job.description
+                if 'push_to_datastore' in job.description
             ]
             updated = datetime.datetime.strptime(
                 existing_task['last_updated'], '%Y-%m-%dT%H:%M:%S.%f')
             time_since_last_updated = datetime.datetime.utcnow() - updated
-            if time_since_last_updated > assume_task_stale_after:
+            if (res_id not in queued_res_ids
+                    and time_since_last_updated > assume_task_stillborn_after):
+                # it's not on the queue (and if it had just been started then
+                # its taken too long to update the task_status from pending -
+                # the first thing it should do in the datapusher job).
+                # Let it be restarted.
+                log.info('A pending task was found %r, but its not found in '
+                         'the queue %r and is %s hours old',
+                         existing_task['id'], queued_res_ids,
+                         time_since_last_updated)
+            elif time_since_last_updated > assume_task_stale_after:
                 # it's been a while since the job was last updated - it's more
                 # likely something went wrong with it and the state wasn't
                 # updated than its still in progress. Let it be restarted.
@@ -120,7 +131,7 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
                 return False
 
         task['id'] = existing_task['id']
-    except logic.NotFound:
+    except tk.ObjectNotFound:
         pass
 
     context['ignore_auth'] = True
@@ -129,40 +140,66 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     # updats of dataset/resource/etc.
     context['session'] = cast(
         Any, context['model'].meta.create_local_session())
-    p.toolkit.get_action('task_status_update')(context, task)
+    tk.get_action('task_status_update')(context, task)
 
     timeout = config.get('ckan.requests.timeout')
 
     # This setting is checked on startup
-    api_token = p.toolkit.config.get("ckan.datapusher.api_token")
+    api_token = tk.config.get("ckan.datapusher.api_token")
+    callback_url = tk.url_for(
+        "api.action",
+        ver=3,
+        logic_function="datapusher_hook",
+        qualified=True
+    )
+
+    data = {
+        'api_key': api_token,
+        'job_type': 'push_to_datastore',
+        'result_url': callback_url,
+        'metadata': {
+            'ignore_hash': data_dict.get('ignore_hash', False),
+            'ckan_url': tk.get('ckan.site_url') or tk.get('datapusher.site_url'), # noqa
+            'resource_id': res_id,
+            'set_url_type': data_dict.get('set_url_type', False),
+            'task_created': task['last_updated'],
+            'original_url': resource_dict.get('url'),
+        }
+    }
+    timeout = tk.config.get('ckan.datapusher.timeout', 30)
     try:
-        r = requests.post(
-            urljoin(datapusher_url, 'job'),
-            headers={
-                'Content-Type': 'application/json'
-            },
-            timeout=timeout,
-            data=json.dumps({
-                'api_key': api_token,
-                'job_type': 'push_to_datastore',
-                'result_url': callback_url,
-                'metadata': {
-                    'ignore_hash': data_dict.get('ignore_hash', False),
-                    'ckan_url': site_url,
-                    'resource_id': res_id,
-                    'set_url_type': data_dict.get('set_url_type', False),
-                    'task_created': task['last_updated'],
-                    'original_url': resource_dict.get('url'),
-                }
-            }))
-    except requests.exceptions.ConnectionError as e:
-        error: dict[str, Any] = {'message': 'Could not connect to DataPusher.',
-                                 'details': str(e)}
-        task['error'] = json.dumps(error)
-        task['state'] = 'error'
-        task['last_updated'] = str(datetime.datetime.utcnow()),
-        p.toolkit.get_action('task_status_update')(context, task)
-        raise p.toolkit.ValidationError(error)
+        job = jobs.push_to_datastore(task["id"], data, timeout)
+    except Exception as e:
+        log.error("Error submitting job to DataPusher: %s", e)
+        return False
+    # try:
+    #     r = requests.post(
+    #         urljoin(datapusher_url, 'job'),
+    #         headers={
+    #             'Content-Type': 'application/json'
+    #         },
+    #         timeout=timeout,
+    #         data=json.dumps({
+    #             'api_key': api_token,
+    #             'job_type': 'push_to_datastore',
+    #             'result_url': callback_url,
+    #             'metadata': {
+    #                 'ignore_hash': data_dict.get('ignore_hash', False),
+    #                 'ckan_url': site_url,
+    #                 'resource_id': res_id,
+    #                 'set_url_type': data_dict.get('set_url_type', False),
+    #                 'task_created': task['last_updated'],
+    #                 'original_url': resource_dict.get('url'),
+    #             }
+    #         }))
+    # except requests.exceptions.ConnectionError as e:
+    #     error: dict[str, Any] = {'message': 'Could not connect to DataPusher.',
+    #                              'details': str(e)}
+    #     task['error'] = json.dumps(error)
+    #     task['state'] = 'error'
+    #     task['last_updated'] = str(datetime.datetime.utcnow()),
+    #     p.toolkit.get_action('task_status_update')(context, task)
+    #     raise p.toolkit.ValidationError(error)
     try:
         r.raise_for_status()
     except requests.exceptions.HTTPError as e:

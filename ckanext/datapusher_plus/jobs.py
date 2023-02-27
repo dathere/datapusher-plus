@@ -20,9 +20,9 @@ from pathlib import Path
 from datasize import DataSize
 from psycopg2 import sql
 
-import ckanserviceprovider.job as job
-import ckanserviceprovider.util as util
-from ckanserviceprovider import web
+# import ckanserviceprovider.job as job
+# import ckanserviceprovider.util as util
+# from ckanserviceprovider import web
 from datapusher.config import config
 
 
@@ -347,7 +347,6 @@ def validate_input(input):
         raise util.JobError("No CKAN API key provided")
 
 
-@job.asynchronous
 def push_to_datastore(task_id, input, dry_run=False):
     """Download and parse a resource push its data into CKAN's DataStore.
 
