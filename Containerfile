@@ -38,7 +38,7 @@ ENV QSV_RELEASE=0.87.1
 ENV QSV_ARCHIVE=qsv-$QSV_RELEASE-x86_64-unknown-linux-gnu.zip
 RUN cd /tmp && \
     wget https://github.com/jqnatividad/qsv/releases/download/$QSV_RELEASE/$QSV_ARCHIVE && \
-    unzip $QSV_ARCHIVE && mv qsvlite /usr/local/bin/ && rm $QSV_ARCHIVE
+    unzip $QSV_ARCHIVE && mv qsvdp /usr/local/bin/ && rm $QSV_ARCHIVE
 
 # Setup virtual environment for CKAN
 RUN mkdir -p $DATAPUSHER_CONFIG && \
