@@ -25,6 +25,8 @@ from psycopg2 import sql
 # from ckanserviceprovider import web
 from datapusher.config import config
 
+import ckanext.datapusher_plus.utils as util
+
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()

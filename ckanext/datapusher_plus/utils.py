@@ -49,3 +49,24 @@ class DatetimeJsonEncoder(json.JSONEncoder):
             return obj.isoformat()
 
         return json.JSONEncoder.default(self, obj)
+    
+class JobError(Exception):
+    """The exception type that jobs raise to signal failure."""
+
+    def __init__(self, message):
+        """Initialize a JobError with the given error message string.
+        The error message string that you give here will be returned to the
+        client site in the job dict's "error" key.
+        """
+        self.message = message
+
+    def as_dict(self):
+        """Return a dictionary representation of this JobError object.
+        Returns a dictionary with a "message" key whose value is a string error
+        message - suitable for use as the "error" key in a ckanserviceprovider
+        job dict.
+        """
+        return {"message": self.message}
+
+    def __str__(self):
+        return self.message
