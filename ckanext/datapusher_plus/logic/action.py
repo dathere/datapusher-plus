@@ -168,7 +168,7 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     }
     timeout = tk.config.get('ckan.datapusher.timeout', 30)
     try:
-        job = jobs.push_to_datastore(task["id"], data, timeout)
+        job = tk.enqueue_job(jobs.push_to_datastore, [data], rq_kwargs=dict(timeout=timeout))
     except Exception as e:
         log.error("Error submitting job to DataPusher: %s", e)
         return False
