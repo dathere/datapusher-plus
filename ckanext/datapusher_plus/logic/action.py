@@ -1,14 +1,12 @@
 # encoding: utf-8
 from __future__ import annotations
 
-from ckan.types import Context
 import ckan.lib.jobs as rq_jobs
 
 import logging
 import json
 import datetime
 import time
-from typing import Any, cast
 
 from urllib.parse import urljoin
 from dateutil.parser import parse as parse_date
@@ -30,6 +28,11 @@ _validate = ckan.lib.navl.dictization_functions.validate
 
 tk = p.toolkit
 get_queue = rq_jobs.get_queue
+
+if p.toolkit.check_ckan_version('2.10'):
+    from ckan.types import Context
+    from typing import Any, cast
+
 
 
 
@@ -200,24 +203,24 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     #     task['last_updated'] = str(datetime.datetime.utcnow()),
     #     p.toolkit.get_action('task_status_update')(context, task)
     #     raise p.toolkit.ValidationError(error)
-    try:
-        r.raise_for_status()
-    except requests.exceptions.HTTPError as e:
-        m = 'An Error occurred while sending the job: {0}'.format(str(e))
-        try:
-            body = e.response.json()
-            if body.get('error'):
-                m += ' ' + body['error']
-        except ValueError:
-            body = e.response.text
-        error = {'message': m,
-                 'details': body,
-                 'status_code': r.status_code}
-        task['error'] = json.dumps(error)
-        task['state'] = 'error'
-        task['last_updated'] = str(datetime.datetime.utcnow()),
-        p.toolkit.get_action('task_status_update')(context, task)
-        raise p.toolkit.ValidationError(error)
+    # try:
+    #     r.raise_for_status()
+    # except requests.exceptions.HTTPError as e:
+    #     m = 'An Error occurred while sending the job: {0}'.format(str(e))
+    #     try:
+    #         body = e.response.json()
+    #         if body.get('error'):
+    #             m += ' ' + body['error']
+    #     except ValueError:
+    #         body = e.response.text
+    #     error = {'message': m,
+    #              'details': body,
+    #              'status_code': r.status_code}
+    #     task['error'] = json.dumps(error)
+    #     task['state'] = 'error'
+    #     task['last_updated'] = str(datetime.datetime.utcnow()),
+    #     p.toolkit.get_action('task_status_update')(context, task)
+    #     raise p.toolkit.ValidationError(error)
 
     value = json.dumps({'job_id': r.json()['job_id'],
                         'job_key': r.json()['job_key']})

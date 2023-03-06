@@ -4,7 +4,9 @@
 This module provides a set of public functions that other modules should call
 to interact with the database, rather than using sqlalchemy directly.
 
-TODO: Some more refactoring is still needed to have the model completely
+TODO: This is same script as the one in the CKAN service provider. We will need
+to migrate it at some point.
+Some more refactoring is still needed to have the model completely
 encapsulated in this module, other modules are still using sqlalchemy directly
 in some places.
 

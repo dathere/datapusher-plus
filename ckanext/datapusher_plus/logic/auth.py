@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 from typing import Any
-from ckan.types import AuthResult, Context
+import ckan.plugins as p
 import ckanext.datastore.logic.auth as auth
+
+if p.toolkit.check_ckan_version('2.10'):
+    from ckan.types import AuthResult, Context
+
 
 
 def datapusher_submit(

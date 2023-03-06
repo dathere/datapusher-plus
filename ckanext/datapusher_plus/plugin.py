@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from ckan.common import CKANConfig
-from ckan.types import Action, AuthFunction, Context
 import logging
 from typing import Any, Callable, cast
 
@@ -15,6 +14,10 @@ import ckanext.datapusher_plus.logic.auth as auth
 
 log = logging.getLogger(__name__)
 
+
+# Get ready for CKAN 2.10 upgrade
+if p.toolkit.check_ckan_version('2.10'):
+    from ckan.types import Action, AuthFunction, Context
 
 class DatastoreException(Exception):
     pass
