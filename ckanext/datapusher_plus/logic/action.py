@@ -8,10 +8,8 @@ import json
 import datetime
 import time
 
-from urllib.parse import urljoin
 from dateutil.parser import parse as parse_date
 
-import requests
 
 import ckan.lib.helpers as h
 import ckan.lib.navl.dictization_functions
@@ -21,6 +19,7 @@ from ckan.common import config
 import ckanext.datapusher_plus.logic.schema as dpschema
 import ckanext.datapusher_plus.interfaces as interfaces
 import ckanext.datapusher_plus.jobs as jobs
+import ckanext.datapusher_plus.db as db
 
 log = logging.getLogger(__name__)
 _get_or_bust = logic.get_or_bust
@@ -28,8 +27,9 @@ _validate = ckan.lib.navl.dictization_functions.validate
 
 tk = p.toolkit
 get_queue = rq_jobs.get_queue
+side_effect_free = logic.side_effect_free
 
-if p.toolkit.check_ckan_version('2.10'):
+if tk.check_ckan_version('2.10'):
     from ckan.types import Context
     from typing import Any, cast
 
@@ -141,12 +141,13 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     # Use local session for task_status_update, so it can commit its own
     # results without messing up with the parent session that contains pending
     # updats of dataset/resource/etc.
-    context['session'] = cast(
-        Any, context['model'].meta.create_local_session())
+    if tk.check_ckan_version('2.10'):
+        context['session'] = cast(Any, context['model'].meta.create_local_session())
+    else:
+        context['session'] =context['model'].meta.create_local_session()
     tk.get_action('task_status_update')(context, task)
 
     timeout = config.get('ckan.requests.timeout')
-
     # This setting is checked on startup
     api_token = tk.config.get("ckan.datapusher.api_token")
     callback_url = tk.url_for(
@@ -162,7 +163,7 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
         'result_url': callback_url,
         'metadata': {
             'ignore_hash': data_dict.get('ignore_hash', False),
-            'ckan_url': tk.get('ckan.site_url') or tk.get('datapusher.site_url'), # noqa
+            'ckan_url': tk.config.get('datapusher.site_url') or tk.config.get('ckan.site_url'),
             'resource_id': res_id,
             'set_url_type': data_dict.get('set_url_type', False),
             'task_created': task['last_updated'],
@@ -171,7 +172,7 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     }
     timeout = tk.config.get('ckan.datapusher.timeout', 30)
     try:
-        job = tk.enqueue_job(jobs.push_to_datastore, [data], rq_kwargs=dict(timeout=timeout))
+        job = tk.enqueue_job(jobs.datapusher_plus_to_datastore, [data], rq_kwargs=dict(timeout=timeout))
     except Exception as e:
         log.error("Error submitting job to DataPusher: %s", e)
         return False
@@ -222,9 +223,7 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     #     p.toolkit.get_action('task_status_update')(context, task)
     #     raise p.toolkit.ValidationError(error)
 
-    value = json.dumps({'job_id': r.json()['job_id'],
-                        'job_key': r.json()['job_key']})
-
+    value = json.dumps({'job_id': job.id})
     task['value'] = value
     task['state'] = 'pending'
     task['last_updated'] = str(datetime.datetime.utcnow()),
@@ -315,6 +314,7 @@ def datapusher_hook(context: Context, data_dict: dict[str, Any]):
             context, {'resource_id': res_id})
 
 
+@side_effect_free
 def datapusher_status(
         context: Context, data_dict: dict[str, Any]) -> dict[str, Any]:
     ''' Get the status of a datapusher job for a certain resource.
@@ -336,11 +336,6 @@ def datapusher_status(
         'key': 'datapusher'
     })
 
-    datapusher_url = config.get('ckan.datapusher.url')
-    if not datapusher_url:
-        raise p.toolkit.ValidationError(
-            {'configuration': ['ckan.datapusher.url not in config file']})
-
     value = json.loads(task['value'])
     job_key = value.get('job_key')
     job_id = value.get('job_id')
@@ -348,25 +343,17 @@ def datapusher_status(
     job_detail = None
 
     if job_id:
-        url = urljoin(datapusher_url, 'job' + '/' + job_id)
-        try:
-            timeout = config.get('ckan.requests.timeout')
-            r = requests.get(url,
-                             timeout=timeout,
-                             headers={'Content-Type': 'application/json',
-                                      'Authorization': job_key})
-            r.raise_for_status()
-            job_detail = r.json()
+        db.init(config)
+        job_detail = db.get_job(job_id)
+
+        if job_detail and job_detail.get('logs'):
             for log in job_detail['logs']:
-                if 'timestamp' in log:
-                    date = time.strptime(
-                        log['timestamp'], "%Y-%m-%dT%H:%M:%S.%f")
-                    date = datetime.datetime.utcfromtimestamp(
-                        time.mktime(date))
-                    log['timestamp'] = date
-        except (requests.exceptions.ConnectionError,
-                requests.exceptions.HTTPError):
-            job_detail = {'error': 'cannot connect to datapusher'}
+                if 'timestamp' in log and isinstance(log['timestamp'], datetime.datetime):
+                    log['timestamp'] = log['timestamp'].isoformat()
+    try:
+        error = json.loads(task['error'])
+    except ValueError:
+        error = task['error']
 
     return {
         'status': task['state'],
@@ -375,5 +362,5 @@ def datapusher_status(
         'last_updated': task['last_updated'],
         'job_key': job_key,
         'task_info': job_detail,
-        'error': json.loads(task['error'])
+        'error': error
     }

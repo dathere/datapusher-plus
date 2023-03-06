@@ -46,7 +46,6 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
         for config_option in (
             "ckan.site_url",
-            "ckan.datapusher.url",
             "ckan.datapusher.api_token",
         ):
             if not config.get(config_option):

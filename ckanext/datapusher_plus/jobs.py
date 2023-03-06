@@ -16,16 +16,24 @@ import csv
 import os
 import psycopg2
 import semver
+import sys
+import traceback
+
 from pathlib import Path
 from datasize import DataSize
 from psycopg2 import sql
+
+
+from rq import get_current_job
+import ckan.plugins.toolkit as tk
 
 # import ckanserviceprovider.job as job
 # import ckanserviceprovider.util as util
 # from ckanserviceprovider import web
 from datapusher.config import config
 
-import ckanext.datapusher_plus.utils as util
+import ckanext.datapusher_plus.utils as utils
+import ckanext.datapusher_plus.db as db
 
 
 if locale.getdefaultlocale()[0]:
@@ -33,6 +41,11 @@ if locale.getdefaultlocale()[0]:
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
 else:
     locale.setlocale(locale.LC_ALL, "")
+
+
+SSL_VERIFY = tk.asbool(tk.config.get('ckanext.xloader.ssl_verify', True))
+if not SSL_VERIFY:
+    requests.packages.urllib3.disable_warnings()
 
 USE_PROXY = "DOWNLOAD_PROXY" in config
 if USE_PROXY:
@@ -54,55 +67,55 @@ DATASTORE_URLS = {
 }
 
 
-class HTTPError(util.JobError):
-    """Exception that's raised if a job fails due to an HTTP problem."""
+# class HTTPError(util.JobError):
+#     """Exception that's raised if a job fails due to an HTTP problem."""
 
-    def __init__(self, message, status_code, request_url, response):
-        """Initialise a new HTTPError.
+#     def __init__(self, message, status_code, request_url, response):
+#         """Initialise a new HTTPError.
 
-        :param message: A human-readable error message
-        :type message: string
+#         :param message: A human-readable error message
+#         :type message: string
 
-        :param status_code: The status code of the errored HTTP response,
-            e.g. 500
-        :type status_code: int
+#         :param status_code: The status code of the errored HTTP response,
+#             e.g. 500
+#         :type status_code: int
 
-        :param request_url: The URL that was requested
-        :type request_url: string
+#         :param request_url: The URL that was requested
+#         :type request_url: string
 
-        :param response: The body of the errored HTTP response as unicode
-            (if you have a requests.Response object then response.text will
-            give you this)
-        :type response: unicode
+#         :param response: The body of the errored HTTP response as unicode
+#             (if you have a requests.Response object then response.text will
+#             give you this)
+#         :type response: unicode
 
-        """
-        super(HTTPError, self).__init__(message)
-        self.status_code = status_code
-        self.request_url = request_url
-        self.response = response
+#         """
+#         super(HTTPError, self).__init__(message)
+#         self.status_code = status_code
+#         self.request_url = request_url
+#         self.response = response
 
-    def as_dict(self):
-        """Return a JSON-serializable dictionary representation of this error.
+#     def as_dict(self):
+#         """Return a JSON-serializable dictionary representation of this error.
 
-        Suitable for ckanserviceprovider to return to the client site as the
-        value for the "error" key in the job dict.
+#         Suitable for ckanserviceprovider to return to the client site as the
+#         value for the "error" key in the job dict.
 
-        """
-        if self.response and len(self.response) > 200:
-            response = self.response[:200]
-        else:
-            response = self.response
-        return {
-            "message": self.message,
-            "HTTP status code": self.status_code,
-            "Requested URL": self.request_url,
-            "Response": response,
-        }
+#         """
+#         if self.response and len(self.response) > 200:
+#             response = self.response[:200]
+#         else:
+#             response = self.response
+#         return {
+#             "message": self.message,
+#             "HTTP status code": self.status_code,
+#             "Requested URL": self.request_url,
+#             "Response": response,
+#         }
 
-    def __str__(self):
-        return "{} status={} url={} response={}".format(
-            self.message, self.status_code, self.request_url, self.response
-        ).encode("ascii", "replace")
+#     def __str__(self):
+#         return "{} status={} url={} response={}".format(
+#             self.message, self.status_code, self.request_url, self.response
+#         ).encode("ascii", "replace")
 
 
 def get_url(action, ckan_url):
@@ -114,60 +127,6 @@ def get_url(action, ckan_url):
     ckan_url = ckan_url.rstrip("/")
     return "{ckan_url}/api/3/action/{action}".format(ckan_url=ckan_url, action=action)
 
-
-def check_response(
-    response, request_url, who, good_status=(201, 200), ignore_no_success=False
-):
-    """
-    Checks the response and raises exceptions if something went terribly wrong
-
-    :param who: A short name that indicated where the error occurred
-                (for example "CKAN")
-    :param good_status: Status codes that should not raise an exception
-
-    """
-    if not response.status_code:
-        raise HTTPError(
-            "DataPusher received an HTTP response with no status code",
-            status_code=None,
-            request_url=request_url,
-            response=response.text,
-        )
-
-    message = "{who} bad response. Status code: {code} {reason}. At: {url}."
-    try:
-        if response.status_code not in good_status:
-            json_response = response.json()
-            if not ignore_no_success or json_response.get("success"):
-                try:
-                    message = json_response["error"]["message"]
-                except Exception:
-                    message = message.format(
-                        who=who,
-                        code=response.status_code,
-                        reason=response.reason,
-                        url=request_url,
-                    )
-                raise HTTPError(
-                    message,
-                    status_code=response.status_code,
-                    request_url=request_url,
-                    response=response.text,
-                )
-    except ValueError:
-        message = message.format(
-            who=who,
-            code=response.status_code,
-            reason=response.reason,
-            url=request_url,
-            resp=response.text[:200],
-        )
-        raise HTTPError(
-            message,
-            status_code=response.status_code,
-            request_url=request_url,
-            response=response.text,
-        )
 
 
 class DatastoreEncoder(json.JSONEncoder):
@@ -181,68 +140,68 @@ class DatastoreEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-def delete_datastore_resource(resource_id, api_key, ckan_url):
-    try:
-        delete_url = get_url("datastore_delete", ckan_url)
-        response = requests.post(
-            delete_url,
-            verify=config.get("SSL_VERIFY"),
-            data=json.dumps({"id": resource_id, "force": True}),
-            headers={"Content-Type": "application/json", "Authorization": api_key},
-        )
-        check_response(
-            response,
-            delete_url,
-            "CKAN",
-            good_status=(201, 200, 404),
-            ignore_no_success=True,
-        )
-    except requests.exceptions.RequestException:
-        raise util.JobError("Deleting existing datastore failed.")
+# def delete_datastore_resource(resource_id, api_key, ckan_url):
+#     try:
+#         delete_url = get_url("datastore_delete", ckan_url)
+#         response = requests.post(
+#             delete_url,
+#             verify=config.get("SSL_VERIFY"),
+#             data=json.dumps({"id": resource_id, "force": True}),
+#             headers={"Content-Type": "application/json", "Authorization": api_key},
+#         )
+#         check_response(
+#             response,
+#             delete_url,
+#             "CKAN",
+#             good_status=(201, 200, 404),
+#             ignore_no_success=True,
+#         )
+#     except requests.exceptions.RequestException:
+#         raise util.JobError("Deleting existing datastore failed.")
 
 
-def delete_resource(resource_id, api_key, ckan_url):
-    try:
-        delete_url = get_url("resource_delete", ckan_url)
-        response = requests.post(
-            delete_url,
-            verify=config.get("SSL_VERIFY"),
-            data=json.dumps({"id": resource_id, "force": True}),
-            headers={"Content-Type": "application/json", "Authorization": api_key},
-        )
-        check_response(
-            response,
-            delete_url,
-            "CKAN",
-            good_status=(201, 200, 404),
-            ignore_no_success=True,
-        )
-    except requests.exceptions.RequestException:
-        raise util.JobError("Deleting existing resource failed.")
+# def delete_resource(resource_id, api_key, ckan_url):
+#     try:
+#         delete_url = get_url("resource_delete", ckan_url)
+#         response = requests.post(
+#             delete_url,
+#             verify=config.get("SSL_VERIFY"),
+#             data=json.dumps({"id": resource_id, "force": True}),
+#             headers={"Content-Type": "application/json", "Authorization": api_key},
+#         )
+#         check_response(
+#             response,
+#             delete_url,
+#             "CKAN",
+#             good_status=(201, 200, 404),
+#             ignore_no_success=True,
+#         )
+#     except requests.exceptions.RequestException:
+#         raise util.JobError("Deleting existing resource failed.")
 
 
-def datastore_resource_exists(resource_id, api_key, ckan_url):
-    try:
-        search_url = get_url("datastore_search", ckan_url)
-        response = requests.post(
-            search_url,
-            verify=config.get("SSL_VERIFY"),
-            data=json.dumps({"id": resource_id, "limit": 0}),
-            headers={"Content-Type": "application/json", "Authorization": api_key},
-        )
-        if response.status_code == 404:
-            return False
-        elif response.status_code == 200:
-            return response.json().get("result", {"fields": []})
-        else:
-            raise HTTPError(
-                "Error getting datastore resource.",
-                response.status_code,
-                search_url,
-                response,
-            )
-    except requests.exceptions.RequestException as e:
-        raise util.JobError("Error getting datastore resource ({!s}).".format(e))
+# def datastore_resource_exists(resource_id, api_key, ckan_url):
+#     try:
+#         search_url = get_url("datastore_search", ckan_url)
+#         response = requests.post(
+#             search_url,
+#             verify=config.get("SSL_VERIFY"),
+#             data=json.dumps({"id": resource_id, "limit": 0}),
+#             headers={"Content-Type": "application/json", "Authorization": api_key},
+#         )
+#         if response.status_code == 404:
+#             return False
+#         elif response.status_code == 200:
+#             return response.json().get("result", {"fields": []})
+#         else:
+#             raise HTTPError(
+#                 "Error getting datastore resource.",
+#                 response.status_code,
+#                 search_url,
+#                 response,
+#             )
+#     except requests.exceptions.RequestException as e:
+#         raise util.JobError("Error getting datastore resource ({!s}).".format(e))
 
 
 def send_resource_to_datastore(
@@ -337,16 +296,83 @@ def get_package(package_id, ckan_url, api_key):
 def validate_input(input):
     # Especially validate metadata which is provided by the user
     if "metadata" not in input:
-        raise util.JobError("Metadata missing")
+        raise utils.JobError("Metadata missing")
 
     data = input["metadata"]
 
     if "resource_id" not in data:
-        raise util.JobError("No id provided.")
+        raise utils.JobError("No id provided.")
     if "ckan_url" not in data:
-        raise util.JobError("No ckan_url provided.")
+        raise utils.JobError("No ckan_url provided.")
     if not input.get("api_key"):
-        raise util.JobError("No CKAN API key provided")
+        raise utils.JobError("No CKAN API key provided")
+
+
+def callback_datapusher_hook(result_url, api_key, job_dict):
+    api_key_from_job = job_dict.pop('api_key', None)
+    if not api_key:
+        api_key = api_key_from_job
+    headers = {'Content-Type': 'application/json'}
+    if api_key:
+        if ':' in api_key:
+            header, key = api_key.split(':')
+        else:
+            header, key = 'Authorization', api_key
+        headers[header] = key
+
+    try:
+        result = requests.post(
+            result_url,
+            data=json.dumps(job_dict, cls=utils.DatetimeJsonEncoder),
+            verify=SSL_VERIFY,
+            headers=headers)
+    except requests.ConnectionError:
+        return False
+
+    return result.status_code == requests.codes.ok
+
+
+def datapusher_plus_to_datastore(input):
+    '''
+    This is the main function that is called by the datapusher_plus worker
+    
+    Errors are caught and logged in the database
+
+    '''
+    job_dict = dict(metadata=input['metadata'], status='running')
+    callback_datapusher_hook(result_url=input['result_url'],
+                             api_key=input['api_key'],
+                             job_dict=job_dict)
+    
+    job_id = get_current_job().id
+    errored = False
+    try:
+        push_to_datastore(input, job_id)
+        job_dict['status'] = 'success'
+        db.mark_job_as_success(job_id, job_dict)
+    except utils.JobError as e:
+        db.mark_job_as_errored(job_id, str(e))
+        job_dict['status'] = 'error'
+        job_dict['error'] = str(e)
+        log = logging.getLogger(__name__)
+        log.error('Datapusher Plus error: {0}, {1}'.format(e, traceback.format_exc()))
+        errored = True
+    except Exception as e:
+        db.mark_job_as_errored(
+            job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e))
+        job_dict['status'] = 'error'
+        job_dict['error'] = str(e)
+        log = logging.getLogger(__name__)
+        log.error('Datapusher Plus error: {0}, {1}'.format(e, traceback.format_exc()))
+        errored = True
+    finally:
+        # job_dict is defined in datapusher_hook's docstring
+        is_saved_ok = callback_datapusher_hook(result_url=input['result_url'],
+                                            api_key=input['api_key'],
+                                            job_dict=job_dict)
+        errored = errored or not is_saved_ok
+    return 'error' if errored else None
+
 
 
 def push_to_datastore(task_id, input, dry_run=False):
@@ -362,7 +388,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     :type dry_run: boolean
 
     """
-    handler = util.StoringHandler(task_id, input)
+    handler = utils.StoringHandler(task_id, input)
     logger = logging.getLogger(task_id)
     logger.addHandler(handler)
     logger.setLevel(logging.DEBUG)
@@ -371,12 +397,12 @@ def push_to_datastore(task_id, input, dry_run=False):
     qsv_bin = config.get("QSV_BIN")
     qsv_path = Path(qsv_bin)
     if not qsv_path.is_file():
-        raise util.JobError("{} not found.".format(qsv_bin))
+        raise utils.JobError("{} not found.".format(qsv_bin))
     file_bin = config.get("FILE_BIN")
 
     file_path = Path(file_bin)
     if not file_path.is_file():
-        raise util.JobError("{} not found.".format(file_bin))
+        raise utils.JobError("{} not found.".format(file_bin))
 
     # make sure qsv binary variant is up-to-date
     try:
@@ -386,20 +412,20 @@ def push_to_datastore(task_id, input, dry_run=False):
             text=True,
         )
     except subprocess.CalledProcessError as e:
-        raise util.JobError("qsv version check error: {}".format(e))
+        raise utils.JobError("qsv version check error: {}".format(e))
     qsv_version_info = str(qsv_version.stdout)
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" ") : qsv_version_info.find("-")
     ].lstrip()
     try:
         if semver.compare(qsv_semver, MINIMUM_QSV_VERSION) < 0:
-            raise util.JobError(
+            raise utils.JobError(
                 "At least qsv version {} required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
                     MINIMUM_QSV_VERSION, qsv_version_info
                 )
             )
     except ValueError as e:
-        raise util.JobError("Cannot parse qsv version info: {}".format(e))
+        raise utils.JobError("Cannot parse qsv version info: {}".format(e))
 
     validate_input(input)
 
@@ -411,7 +437,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     try:
         resource = get_resource(resource_id, ckan_url, api_key)
-    except util.JobError:
+    except utils.JobError:
         # try again in 5 seconds just incase CKAN is slow at adding resource
         time.sleep(5)
         resource = get_resource(resource_id, ckan_url, api_key)
@@ -425,7 +451,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     url = resource.get("url")
     scheme = urlsplit(url).scheme
     if scheme not in ("http", "https", "ftp"):
-        raise util.JobError("Only http, https, and ftp resources may be fetched.")
+        raise utils.JobError("Only http, https, and ftp resources may be fetched.")
 
     # ==========================================================================
     # DOWNLOAD
@@ -461,7 +487,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 and int(cl) > max_content_length
                 and (preview_rows > 0 and not download_preview_only)
             ):
-                raise util.JobError(
+                raise utils.JobError(
                     "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
                         cl=DataSize(int(cl)), max_cl=DataSize(int(max_content_length))
                     )
@@ -503,7 +529,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
                 length += len(chunk)
                 if length > max_content_length and not preview_rows:
-                    raise util.JobError(
+                    raise utils.JobError(
                         "Resource too large to process: {cl} > max ({max_cl}).".format(
                             cl=length, max_cl=max_content_length
                         )
@@ -689,7 +715,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            raise util.JobError("Sortcheck error: {}".format(e))
+            raise utils.JobError("Sortcheck error: {}".format(e))
         sortcheck_json = json.loads(str(qsv_sortcheck.stdout))
         is_sorted = sortcheck_json["sorted"]
         record_count = int(sortcheck_json["record_count"])
@@ -723,7 +749,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            raise util.JobError("Check for duplicates error: {}".format(e))
+            raise utils.JobError("Check for duplicates error: {}".format(e))
         dupe_count = int(str(qsv_dedup.stderr).strip())
         if dupe_count > 0:
             tmp = qsv_dedup_csv
@@ -746,7 +772,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             text=True,
         )
     except subprocess.CalledProcessError as e:
-        raise util.JobError("Cannot scan CSV headers: {}".format(e))
+        raise utils.JobError("Cannot scan CSV headers: {}".format(e))
     original_headers = str(qsv_headers.stdout).strip()
     original_header_dict = {
         idx: ele for idx, ele in enumerate(original_headers.splitlines())
@@ -769,7 +795,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             text=True,
         )
     except subprocess.CalledProcessError as e:
-        raise util.JobError("Safenames error: {}".format(e))
+        raise utils.JobError("Safenames error: {}".format(e))
 
     unsafe_json = json.loads(str(qsv_safenames.stdout))
     unsafe_headers = unsafe_json["unsafe_headers"]
@@ -806,7 +832,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_index_file = tmp.name + ".idx"
         subprocess.run([qsv_bin, "index", tmp.name], check=True)
     except subprocess.CalledProcessError as e:
-        raise util.JobError("Cannot index CSV: {}".format(e))
+        raise utils.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
     # so we can skip qsv count.
@@ -817,7 +843,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [qsv_bin, "count", tmp.name], capture_output=True, check=True, text=True
             )
         except subprocess.CalledProcessError as e:
-            raise util.JobError("Cannot count records in CSV: {}".format(e))
+            raise utils.JobError("Cannot count records in CSV: {}".format(e))
         record_count = int(str(qsv_count.stdout).strip())
 
     # its empty, nothing to do
@@ -862,7 +888,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
-        raise util.JobError(
+        raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
 
@@ -982,7 +1008,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                raise util.JobError("Cannot create a preview slice: {}".format(e))
+                raise utils.JobError("Cannot create a preview slice: {}".format(e))
             rows_to_copy = preview_rows
             tmp = qsv_slice_csv
         else:
@@ -1008,7 +1034,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                raise util.JobError(
+                raise utils.JobError(
                     "Cannot create a preview slice from the end: {}".format(e)
                 )
             rows_to_copy = slice_len
@@ -1040,7 +1066,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         try:
             qsv_applydp = subprocess.run(qsv_applydp_cmd, check=True)
         except subprocess.CalledProcessError as e:
-            raise util.JobError("Applydp error: {}".format(e))
+            raise utils.JobError("Applydp error: {}".format(e))
         tmp = qsv_applydp_csv
 
     # -------------------- QSV ANALYSIS DONE --------------------
@@ -1105,7 +1131,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     text=True,
                 )
             except subprocess.CalledProcessError as e:
-                raise util.JobError("Cannot quickly search CSV for PII: {}".format(e))
+                raise utils.JobError("Cannot quickly search CSV for PII: {}".format(e))
             pii_candidate_row = str(qsv_searchset.stderr)
             if pii_candidate_row:
                 pii_found = True
@@ -1132,7 +1158,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     text=True,
                 )
             except subprocess.CalledProcessError as e:
-                raise util.JobError("Cannot search CSV for PII: {}".format(e))
+                raise utils.JobError("Cannot search CSV for PII: {}".format(e))
             pii_json = json.loads(str(qsv_searchset.stderr))
             pii_total_matches = int(pii_json["total_matches"])
             pii_rows_with_matches = int(pii_json["rows_with_matches"])
@@ -1143,13 +1169,13 @@ def push_to_datastore(task_id, input, dry_run=False):
         if pii_found and pii_found_abort and not pii_show_candidates:
             logger.error("PII Candidate/s Found!")
             if pii_quick_screen:
-                raise util.JobError(
+                raise utils.JobError(
                     "PII CANDIDATE FOUND on row {}! Job aborted.".format(
                         pii_candidate_row.rstrip()
                     )
                 )
             else:
-                raise util.JobError(
+                raise utils.JobError(
                     "PII CANDIDATE/S FOUND! Job aborted. Found {} PII candidate/s in {} row/s.".format(
                         pii_total_matches, pii_rows_with_matches
                     )
@@ -1167,7 +1193,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             try:
                 raw_connection_pii = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
             except psycopg2.Error as e:
-                raise util.JobError("Could not connect to the Datastore: {}".format(e))
+                raise utils.JobError("Could not connect to the Datastore: {}".format(e))
             else:
                 cur_pii = raw_connection_pii.cursor()
 
@@ -1208,7 +1234,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     text=True,
                 )
             except subprocess.CalledProcessError as e:
-                raise util.JobError("Cannot run stats on PII preview CSV: {}".format(e))
+                raise utils.JobError("Cannot run stats on PII preview CSV: {}".format(e))
 
             pii_stats = str(qsv_pii_stats.stdout).strip()
             pii_stats_dict = [
@@ -1258,7 +1284,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 try:
                     cur_pii.copy_expert(copy_sql, f)
                 except psycopg2.Error as e:
-                    raise util.JobError("Postgres COPY failed: {}".format(e))
+                    raise utils.JobError("Postgres COPY failed: {}".format(e))
                 else:
                     pii_copied_count = cur_pii.rowcount
 
@@ -1281,7 +1307,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 )
             )
             if pii_found_abort:
-                raise util.JobError(pii_msg)
+                raise utils.JobError(pii_msg)
             else:
                 logger.warning(pii_msg)
                 logger.warning(
@@ -1328,7 +1354,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     try:
         raw_connection = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
     except psycopg2.Error as e:
-        raise util.JobError("Could not connect to the Datastore: {}".format(e))
+        raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
         cur = raw_connection.cursor()
         """
@@ -1358,7 +1384,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
-                raise util.JobError("Postgres COPY failed: {}".format(e))
+                raise utils.JobError("Postgres COPY failed: {}".format(e))
             else:
                 copied_count = cur.rowcount
 
@@ -1535,7 +1561,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 text=True,
             )
         except subprocess.CalledProcessError as e:
-            raise util.JobError("Cannot run stats on CSV stats: {}".format(e))
+            raise utils.JobError("Cannot run stats on CSV stats: {}".format(e))
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
         stats_stats_dict = [
@@ -1587,7 +1613,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
-                raise util.JobError("Postgres COPY failed: {}".format(e))
+                raise utils.JobError("Postgres COPY failed: {}".format(e))
 
         stats_resource["id"] = new_stats_resource_id
         stats_resource["summary_statistics"] = True
