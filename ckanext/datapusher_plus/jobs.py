@@ -22,6 +22,7 @@ import traceback
 from pathlib import Path
 from datasize import DataSize
 from psycopg2 import sql
+import sqlalchemy as sa
 
 
 from rq import get_current_job
@@ -31,6 +32,7 @@ import ckan.plugins.toolkit as tk
 # import ckanserviceprovider.util as util
 # from ckanserviceprovider import web
 from datapusher.config import config
+
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.db as db
@@ -388,9 +390,24 @@ def push_to_datastore(task_id, input, dry_run=False):
     :type dry_run: boolean
 
     """
-    handler = utils.StoringHandler(task_id, input)
-    logger = logging.getLogger(task_id)
+    job_id = get_current_job().id
+    db.init(config)
+
+    # Store details of the job in the db
+    try:
+        db.add_pending_job(job_id, **input)
+    except sa.exc.IntegrityError:
+        raise utils.JobError('job_id {} already exists'.format(job_id))
+
+    # Set-up logging to the db
+    handler = utils.StoringHandler(job_id, input)
+    level = logging.DEBUG
+    handler.setLevel(level)
+    logger = logging.getLogger(job_id)
+    handler.setFormatter(logging.Formatter('%(message)s'))
     logger.addHandler(handler)
+    # also show logs on stderr
+    logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.DEBUG)
 
     # check if QSV_BIN and FILE_BIN exists
