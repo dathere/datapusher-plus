@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
 load_dotenv(env_file)
 
-_DATABASE_URI = "postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs"
+_DATABASE_URI = "postgresql://ckan_default:pass@localhost/ckan_default"
 _WRITE_ENGINE_URL = "postgresql://datapusher:YOURPASSWORD@localhost/datastore_default"
 _TYPES = "String", "Float", "Integer", "DateTime", "Date", "NULL"
 _TYPE_MAPPING = {
@@ -50,7 +50,7 @@ class DataPusherPlusConfig(MutableMapping):
     MAX_CONTENT_LENGTH: str = "25600000"
     IGNORE_FILE_HASH: bool = False
     CHUNK_SIZE: str = "16384"
-    DOWNLOAD_TIMEOUT: int = 30
+    DOWNLOAD_TIMEOUT: int = 10030
     SSL_VERIFY: bool = False
     DOWNLOAD_PROXY: str = ""
 
@@ -142,7 +142,6 @@ class DataPusherPlusConfig(MutableMapping):
 
 # Expose config object for app to import
 config = DataPusherPlusConfig(os.environ)
-
 # Expose these variables so ckanserviceprovider can use it
 SQLALCHEMY_DATABASE_URI = config.get("SQLALCHEMY_DATABASE_URI")
 WRITE_ENGINE_URL = config.get("WRITE_ENGINE_URL")

@@ -16,8 +16,9 @@ log = logging.getLogger(__name__)
 
 
 # Get ready for CKAN 2.10 upgrade
-if p.toolkit.check_ckan_version('2.10'):
+if p.toolkit.check_ckan_version("2.10"):
     from ckan.types import Action, AuthFunction, Context
+
 
 class DatastoreException(Exception):
     pass
@@ -37,85 +38,76 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
     resource_show_action = None
 
     def update_config(self, config: CKANConfig):
-        p.toolkit.add_template_directory(config, 'templates')
-        p.toolkit.add_public_directory(config, 'public')
-        p.toolkit.add_resource('assets', 'datapusher_plus')
+        p.toolkit.add_template_directory(config, "templates")
+        p.toolkit.add_public_directory(config, "public")
+        p.toolkit.add_resource("assets", "datapusher_plus")
 
     def configure(self, config: CKANConfig):
         self.config = config
 
-        for config_option in (
-            "ckan.site_url",
-            "ckan.datapusher.api_token",
-        ):
-            if not config.get(config_option):
-                raise Exception(
-                    u'Config option `{0}` must be set to use the DataPusher.'.
-                    format(config_option)
+        if not config.get("ckan.site_url"):
+            raise Exception(
+                "Config option `{0}` must be set to use the DataPusher.".format(
+                    "ckan.site_url"
                 )
+            )
 
     # IResourceUrlChange
 
     def notify(self, resource: model.Resource):
-        context = cast(Context, {
-            u'model': model,
-            u'ignore_auth': True,
-        })
-        resource_dict = p.toolkit.get_action(u'resource_show')(
-            context, {
-                u'id': resource.id,
-            }
+        context = {
+            "model": model,
+            "ignore_auth": True,
+        }
+        resource_dict = p.toolkit.get_action("resource_show")(
+            context,
+            {
+                "id": resource.id,
+            },
         )
         self._submit_to_datapusher(resource_dict)
 
     # IResourceController
 
-    def after_resource_create(
-            self, context: Context, resource_dict: dict[str, Any]):
-
+    def after_resource_create(self, context, resource_dict: dict[str, Any]):
         self._submit_to_datapusher(resource_dict)
 
-    def after_update(
-            self, context: Context, resource_dict: dict[str, Any]):
+    if not p.toolkit.check_ckan_version("2.10"):
 
-        self._submit_to_datapusher(resource_dict)
+        def after_create(self, context, resource_dict):
+            self.after_resource_create(context, resource_dict)
 
     def _submit_to_datapusher(self, resource_dict: dict[str, Any]):
-        context = cast(Context, {
-            u'model': model,
-            u'ignore_auth': True,
-            u'defer_commit': True
-        })
+        context = {"model": model, "ignore_auth": True, "defer_commit": True}
 
-        resource_format = resource_dict.get('format')
-        supported_formats = p.toolkit.config.get(
-            'ckan.datapusher.formats'
-        )
+        resource_format = resource_dict.get("format")
+        supported_formats = p.toolkit.config.get("ckan.datapusher.formats")
 
         submit = (
             resource_format
             and resource_format.lower() in supported_formats
-            and resource_dict.get('url_type') != u'datapusher'
+            and resource_dict.get("url_type") != "datapusher"
         )
 
         if not submit:
             return
 
         try:
-            task = p.toolkit.get_action(u'task_status_show')(
-                context, {
-                    u'entity_id': resource_dict['id'],
-                    u'task_type': u'datapusher',
-                    u'key': u'datapusher'
-                }
+            task = p.toolkit.get_action("task_status_show")(
+                context,
+                {
+                    "entity_id": resource_dict["id"],
+                    "task_type": "datapusher",
+                    "key": "datapusher",
+                },
             )
 
-            if task.get(u'state') in (u'pending', u'submitting'):
+            if task.get("state") in ("pending", "submitting"):
                 # There already is a pending DataPusher submission,
                 # skip this one ...
                 log.debug(
-                    u'Skipping DataPusher submission for '
-                    u'resource {0}'.format(resource_dict['id'])
+                    "Skipping DataPusher submission for "
+                    "resource {0}".format(resource_dict["id"])
                 )
                 return
         except p.toolkit.ObjectNotFound:
@@ -123,13 +115,10 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
         try:
             log.debug(
-                u'Submitting resource {0}'.format(resource_dict['id']) +
-                u' to DataPusher'
+                "Submitting resource {0}".format(resource_dict["id"]) + " to DataPusher"
             )
-            p.toolkit.get_action(u'datapusher_submit')(
-                context, {
-                    u'resource_id': resource_dict['id']
-                }
+            p.toolkit.get_action("datapusher_submit")(
+                context, {"resource_id": resource_dict["id"]}
             )
         except p.toolkit.ValidationError as e:
             # If datapusher is offline want to catch error instead
@@ -139,22 +128,21 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
     def get_actions(self) -> dict[str, Action]:
         return {
-            u'datapusher_submit': action.datapusher_submit,
-            u'datapusher_hook': action.datapusher_hook,
-            u'datapusher_status': action.datapusher_status
+            "datapusher_submit": action.datapusher_submit,
+            "datapusher_hook": action.datapusher_hook,
+            "datapusher_status": action.datapusher_status,
         }
 
     def get_auth_functions(self) -> dict[str, AuthFunction]:
         return {
-            u'datapusher_submit': auth.datapusher_submit,
-            u'datapusher_status': auth.datapusher_status
+            "datapusher_submit": auth.datapusher_submit,
+            "datapusher_status": auth.datapusher_status,
         }
 
     def get_helpers(self) -> dict[str, Callable[..., Any]]:
         return {
-            u'datapusher_status': helpers.datapusher_status,
-            u'datapusher_status_description': helpers.
-            datapusher_status_description,
+            "datapusher_status": helpers.datapusher_status,
+            "datapusher_status_description": helpers.datapusher_status_description,
         }
 
     # IBlueprint

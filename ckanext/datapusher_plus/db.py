@@ -59,7 +59,7 @@ METADATA_TABLE = None
 LOGS_TABLE = None
 
 
-def init(uri, echo=False):
+def init(config, echo=False):
     """Initialise the database.
 
     Initialise the sqlalchemy engine, metadata and table objects that we use to
@@ -77,7 +77,9 @@ def init(uri, echo=False):
 
     """
     global ENGINE, _METADATA, JOBS_TABLE, METADATA_TABLE, LOGS_TABLE
-    ENGINE = sqlalchemy.create_engine(uri, echo=echo, convert_unicode=True)
+    db_uri = config.get('sqlalchemy.url',
+                        'sqlite:////tmp/datapusher_plus.db')
+    ENGINE = sqlalchemy.create_engine(db_uri, echo=echo, convert_unicode=True)
     _METADATA = sqlalchemy.MetaData(ENGINE)
     JOBS_TABLE = _init_jobs_table()
     METADATA_TABLE = _init_metadata_table()
@@ -188,7 +190,7 @@ def get_job(job_id, limit=None, use_aps_id=False):
 
 
 def add_pending_job(
-    job_id, job_key, job_type, api_key, data=None, metadata=None, result_url=None
+    job_id, api_key, job_type, job_key=None, data=None, metadata=None, result_url=None
 ):
     """Add a new job with status "pending" to the jobs table.
 
@@ -227,6 +229,7 @@ def add_pending_job(
     :type result_url: unicode
 
     """
+
     if not data:
         data = {}
     data = json.dumps(data)

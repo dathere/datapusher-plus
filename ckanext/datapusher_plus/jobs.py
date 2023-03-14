@@ -24,15 +24,10 @@ from datasize import DataSize
 from psycopg2 import sql
 import sqlalchemy as sa
 
-
 from rq import get_current_job
 import ckan.plugins.toolkit as tk
 
-# import ckanserviceprovider.job as job
-# import ckanserviceprovider.util as util
-# from ckanserviceprovider import web
 from datapusher.config import config
-
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.db as db
@@ -45,7 +40,7 @@ else:
     locale.setlocale(locale.LC_ALL, "")
 
 
-SSL_VERIFY = tk.asbool(tk.config.get('ckanext.xloader.ssl_verify', True))
+SSL_VERIFY = tk.asbool(config.get("SSL_VERIFY"))
 if not SSL_VERIFY:
     requests.packages.urllib3.disable_warnings()
 
@@ -53,71 +48,18 @@ USE_PROXY = "DOWNLOAD_PROXY" in config
 if USE_PROXY:
     DOWNLOAD_PROXY = config.get("DOWNLOAD_PROXY")
 
-if not config.get("SSL_VERIFY"):
-    requests.packages.urllib3.disable_warnings()
-
 POSTGRES_INT_MAX = 2147483647
 POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
 MINIMUM_QSV_VERSION = "0.87.1"
+MAX_CONTENT_LENGTH = config.get("MAX_CONTENT_LENGTH")
 
 DATASTORE_URLS = {
     "datastore_delete": "{ckan_url}/api/action/datastore_delete",
     "resource_update": "{ckan_url}/api/action/resource_update",
 }
-
-
-# class HTTPError(util.JobError):
-#     """Exception that's raised if a job fails due to an HTTP problem."""
-
-#     def __init__(self, message, status_code, request_url, response):
-#         """Initialise a new HTTPError.
-
-#         :param message: A human-readable error message
-#         :type message: string
-
-#         :param status_code: The status code of the errored HTTP response,
-#             e.g. 500
-#         :type status_code: int
-
-#         :param request_url: The URL that was requested
-#         :type request_url: string
-
-#         :param response: The body of the errored HTTP response as unicode
-#             (if you have a requests.Response object then response.text will
-#             give you this)
-#         :type response: unicode
-
-#         """
-#         super(HTTPError, self).__init__(message)
-#         self.status_code = status_code
-#         self.request_url = request_url
-#         self.response = response
-
-#     def as_dict(self):
-#         """Return a JSON-serializable dictionary representation of this error.
-
-#         Suitable for ckanserviceprovider to return to the client site as the
-#         value for the "error" key in the job dict.
-
-#         """
-#         if self.response and len(self.response) > 200:
-#             response = self.response[:200]
-#         else:
-#             response = self.response
-#         return {
-#             "message": self.message,
-#             "HTTP status code": self.status_code,
-#             "Requested URL": self.request_url,
-#             "Response": response,
-#         }
-
-#     def __str__(self):
-#         return "{} status={} url={} response={}".format(
-#             self.message, self.status_code, self.request_url, self.response
-#         ).encode("ascii", "replace")
 
 
 def get_url(action, ckan_url):
@@ -128,7 +70,6 @@ def get_url(action, ckan_url):
         ckan_url = "http://" + ckan_url.lstrip("/")  # DevSkim: ignore DS137138
     ckan_url = ckan_url.rstrip("/")
     return "{ckan_url}/api/3/action/{action}".format(ckan_url=ckan_url, action=action)
-
 
 
 class DatastoreEncoder(json.JSONEncoder):
@@ -142,68 +83,70 @@ class DatastoreEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-# def delete_datastore_resource(resource_id, api_key, ckan_url):
-#     try:
-#         delete_url = get_url("datastore_delete", ckan_url)
-#         response = requests.post(
-#             delete_url,
-#             verify=config.get("SSL_VERIFY"),
-#             data=json.dumps({"id": resource_id, "force": True}),
-#             headers={"Content-Type": "application/json", "Authorization": api_key},
-#         )
-#         check_response(
-#             response,
-#             delete_url,
-#             "CKAN",
-#             good_status=(201, 200, 404),
-#             ignore_no_success=True,
-#         )
-#     except requests.exceptions.RequestException:
-#         raise util.JobError("Deleting existing datastore failed.")
+def delete_datastore_resource(resource_id, api_key, ckan_url):
+    try:
+        delete_url = get_url("datastore_delete", ckan_url)
+        response = requests.post(
+            delete_url,
+            verify=SSL_VERIFY,
+            data=json.dumps({"id": resource_id, "force": True}),
+            headers={"Content-Type": "application/json", "Authorization": api_key},
+        )
+        utils.check_response(
+            response,
+            delete_url,
+            "CKAN",
+            good_status=(201, 200, 404),
+            ignore_no_success=True,
+        )
+    except requests.exceptions.RequestException:
+        raise utils.JobError("Deleting existing datastore failed.")
 
 
-# def delete_resource(resource_id, api_key, ckan_url):
-#     try:
-#         delete_url = get_url("resource_delete", ckan_url)
-#         response = requests.post(
-#             delete_url,
-#             verify=config.get("SSL_VERIFY"),
-#             data=json.dumps({"id": resource_id, "force": True}),
-#             headers={"Content-Type": "application/json", "Authorization": api_key},
-#         )
-#         check_response(
-#             response,
-#             delete_url,
-#             "CKAN",
-#             good_status=(201, 200, 404),
-#             ignore_no_success=True,
-#         )
-#     except requests.exceptions.RequestException:
-#         raise util.JobError("Deleting existing resource failed.")
+def delete_resource(resource_id, api_key, ckan_url):
+    try:
+        delete_url = get_url("resource_delete", ckan_url)
+        response = requests.post(
+            delete_url,
+            verify=SSL_VERIFY,
+            data=json.dumps({"id": resource_id, "force": True}),
+            headers={"Content-Type": "application/json", "Authorization": api_key},
+        )
+        utils.check_response(
+            response,
+            delete_url,
+            "CKAN",
+            good_status=(201, 200, 404),
+            ignore_no_success=True,
+        )
+    except requests.exceptions.RequestException:
+        raise utils.JobError("Deleting existing resource failed.")
 
 
-# def datastore_resource_exists(resource_id, api_key, ckan_url):
-#     try:
-#         search_url = get_url("datastore_search", ckan_url)
-#         response = requests.post(
-#             search_url,
-#             verify=config.get("SSL_VERIFY"),
-#             data=json.dumps({"id": resource_id, "limit": 0}),
-#             headers={"Content-Type": "application/json", "Authorization": api_key},
-#         )
-#         if response.status_code == 404:
-#             return False
-#         elif response.status_code == 200:
-#             return response.json().get("result", {"fields": []})
-#         else:
-#             raise HTTPError(
-#                 "Error getting datastore resource.",
-#                 response.status_code,
-#                 search_url,
-#                 response,
-#             )
-#     except requests.exceptions.RequestException as e:
-#         raise util.JobError("Error getting datastore resource ({!s}).".format(e))
+def datastore_resource_exists(resource_id, api_key, ckan_url):
+    from ckanext.datapusher_plus.job_exceptions import HTTPError, JobError
+
+    try:
+        search_url = get_url("datastore_search", ckan_url)
+        response = requests.post(
+            search_url,
+            verify=SSL_VERIFY,
+            data=json.dumps({"id": resource_id, "limit": 0}),
+            headers={"Content-Type": "application/json", "Authorization": api_key},
+        )
+        if response.status_code == 404:
+            return False
+        elif response.status_code == 200:
+            return response.json().get("result", {"fields": []})
+        else:
+            raise HTTPError(
+                "Error getting datastore resource.",
+                response.status_code,
+                search_url,
+                response,
+            )
+    except requests.exceptions.RequestException as e:
+        raise JobError("Error getting datastore resource ({!s}).".format(e))
 
 
 def send_resource_to_datastore(
@@ -243,11 +186,11 @@ def send_resource_to_datastore(
     url = get_url("datastore_create", ckan_url)
     r = requests.post(
         url,
-        verify=config.get("SSL_VERIFY"),
+        verify=SSL_VERIFY,
         data=json.dumps(request, cls=DatastoreEncoder),
         headers={"Content-Type": "application/json", "Authorization": api_key},
     )
-    check_response(r, url, "CKAN DataStore")
+    utils.check_response(r, url, "CKAN DataStore")
     return r.json()
 
 
@@ -255,12 +198,12 @@ def update_resource(resource, ckan_url, api_key):
     url = get_url("resource_update", ckan_url)
     r = requests.post(
         url,
-        verify=config.get("SSL_VERIFY"),
+        verify=SSL_VERIFY,
         data=json.dumps(resource),
         headers={"Content-Type": "application/json", "Authorization": api_key},
     )
 
-    check_response(r, url, "CKAN")
+    utils.check_response(r, url, "CKAN")
 
 
 def get_resource(resource_id, ckan_url, api_key):
@@ -270,11 +213,11 @@ def get_resource(resource_id, ckan_url, api_key):
     url = get_url("resource_show", ckan_url)
     r = requests.post(
         url,
-        verify=config.get("SSL_VERIFY"),
+        verify=SSL_VERIFY,
         data=json.dumps({"id": resource_id}),
         headers={"Content-Type": "application/json", "Authorization": api_key},
     )
-    check_response(r, url, "CKAN")
+    utils.check_response(r, url, "CKAN")
 
     return r.json()["result"]
 
@@ -286,11 +229,11 @@ def get_package(package_id, ckan_url, api_key):
     url = get_url("package_show", ckan_url)
     r = requests.post(
         url,
-        verify=config.get("SSL_VERIFY"),
+        verify=SSL_VERIFY,
         data=json.dumps({"id": package_id}),
         headers={"Content-Type": "application/json", "Authorization": api_key},
     )
-    check_response(r, url, "CKAN")
+    utils.check_response(r, url, "CKAN")
 
     return r.json()["result"]
 
@@ -311,15 +254,15 @@ def validate_input(input):
 
 
 def callback_datapusher_hook(result_url, api_key, job_dict):
-    api_key_from_job = job_dict.pop('api_key', None)
+    api_key_from_job = job_dict.pop("api_key", None)
     if not api_key:
         api_key = api_key_from_job
-    headers = {'Content-Type': 'application/json'}
+    headers = {"Content-Type": "application/json"}
     if api_key:
-        if ':' in api_key:
-            header, key = api_key.split(':')
+        if ":" in api_key:
+            header, key = api_key.split(":")
         else:
-            header, key = 'Authorization', api_key
+            header, key = "Authorization", api_key
         headers[header] = key
 
     try:
@@ -327,7 +270,8 @@ def callback_datapusher_hook(result_url, api_key, job_dict):
             result_url,
             data=json.dumps(job_dict, cls=utils.DatetimeJsonEncoder),
             verify=SSL_VERIFY,
-            headers=headers)
+            headers=headers,
+        )
     except requests.ConnectionError:
         return False
 
@@ -335,49 +279,49 @@ def callback_datapusher_hook(result_url, api_key, job_dict):
 
 
 def datapusher_plus_to_datastore(input):
-    '''
+    """
     This is the main function that is called by the datapusher_plus worker
-    
+
     Errors are caught and logged in the database
 
-    '''
-    job_dict = dict(metadata=input['metadata'], status='running')
-    callback_datapusher_hook(result_url=input['result_url'],
-                             api_key=input['api_key'],
-                             job_dict=job_dict)
-    
+    """
+    job_dict = dict(metadata=input["metadata"], status="running")
+    callback_datapusher_hook(
+        result_url=input["result_url"], api_key=input["api_key"], job_dict=job_dict
+    )
+
     job_id = get_current_job().id
     errored = False
     try:
         push_to_datastore(input, job_id)
-        job_dict['status'] = 'success'
-        db.mark_job_as_success(job_id, job_dict)
+        job_dict["status"] = "complete"
+        db.mark_job_as_completed(job_id, job_dict)
     except utils.JobError as e:
         db.mark_job_as_errored(job_id, str(e))
-        job_dict['status'] = 'error'
-        job_dict['error'] = str(e)
+        job_dict["status"] = "error"
+        job_dict["error"] = str(e)
         log = logging.getLogger(__name__)
-        log.error('Datapusher Plus error: {0}, {1}'.format(e, traceback.format_exc()))
+        log.error("Datapusher Plus error: {0}, {1}".format(e, traceback.format_exc()))
         errored = True
     except Exception as e:
         db.mark_job_as_errored(
-            job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e))
-        job_dict['status'] = 'error'
-        job_dict['error'] = str(e)
+            job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e)
+        )
+        job_dict["status"] = "error"
+        job_dict["error"] = str(e)
         log = logging.getLogger(__name__)
-        log.error('Datapusher Plus error: {0}, {1}'.format(e, traceback.format_exc()))
+        log.error("Datapusher Plus error: {0}, {1}".format(e, traceback.format_exc()))
         errored = True
     finally:
         # job_dict is defined in datapusher_hook's docstring
-        is_saved_ok = callback_datapusher_hook(result_url=input['result_url'],
-                                            api_key=input['api_key'],
-                                            job_dict=job_dict)
+        is_saved_ok = callback_datapusher_hook(
+            result_url=input["result_url"], api_key=input["api_key"], job_dict=job_dict
+        )
         errored = errored or not is_saved_ok
-    return 'error' if errored else None
+    return "error" if errored else None
 
 
-
-def push_to_datastore(task_id, input, dry_run=False):
+def push_to_datastore(input, task_id, dry_run=False):
     """Download and parse a resource push its data into CKAN's DataStore.
 
     An asynchronous job that gets a resource from CKAN, downloads the
@@ -390,21 +334,21 @@ def push_to_datastore(task_id, input, dry_run=False):
     :type dry_run: boolean
 
     """
-    job_id = get_current_job().id
-    db.init(config)
+    job_id = task_id or get_current_job().id
+    db.init(tk.config)
 
     # Store details of the job in the db
     try:
         db.add_pending_job(job_id, **input)
     except sa.exc.IntegrityError:
-        raise utils.JobError('job_id {} already exists'.format(job_id))
+        raise utils.JobError("job_id {} already exists".format(job_id))
 
     # Set-up logging to the db
     handler = utils.StoringHandler(job_id, input)
     level = logging.DEBUG
     handler.setLevel(level)
     logger = logging.getLogger(job_id)
-    handler.setFormatter(logging.Formatter('%(message)s'))
+    handler.setFormatter(logging.Formatter("%(message)s"))
     logger.addHandler(handler)
     # also show logs on stderr
     logger.addHandler(logging.StreamHandler())
@@ -480,15 +424,17 @@ def push_to_datastore(task_id, input, dry_run=False):
     headers = {}
     preview_rows = int(config.get("PREVIEW_ROWS"))
     download_preview_only = config.get("DOWNLOAD_PREVIEW_ONLY")
+
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
         headers["Authorization"] = api_key
+
     try:
         kwargs = {
             "headers": headers,
             "timeout": config.get("DOWNLOAD_TIMEOUT"),
-            "verify": config.get("SSL_VERIFY"),
+            "verify": SSL_VERIFY,
             "stream": True,
         }
         if USE_PROXY:
@@ -497,7 +443,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         response.raise_for_status()
 
         cl = response.headers.get("content-length")
-        max_content_length = int(config.get("MAX_CONTENT_LENGTH"))
+        max_content_length = int(MAX_CONTENT_LENGTH)
         try:
             if (
                 cl
@@ -519,11 +465,12 @@ def push_to_datastore(task_id, input, dry_run=False):
         if download_preview_only and preview_rows > 0:
             # if download_preview_only and preview_rows is greater than zero
             # we're downloading the preview rows only, not the whole file
-            logger.info(
-                "Downloading only first {:,} row preview from {:.2MB} file...".format(
-                    preview_rows, DataSize(int(cl))
+            if cl:
+                logger.info(
+                    "Downloading only first {:,} row preview from {:.2MB} file...".format(
+                        preview_rows, DataSize(int(cl))
+                    )
                 )
-            )
 
             curr_line = 0
             for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
@@ -541,7 +488,8 @@ def push_to_datastore(task_id, input, dry_run=False):
             # TODO: handle when preview_rows is negative (get the preview from the
             # end of the file) so we can use http range request to get the preview from
             # the end without downloading the entire file
-            logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+            if cl:
+                logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
 
             for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
                 length += len(chunk)
@@ -556,7 +504,7 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         ct = response.headers.get("content-type", "").split(";", 1)[0]
     except requests.HTTPError as e:
-        raise HTTPError(
+        raise utils.HTTPError(
             "DataPusher+ received a bad HTTP response when trying to download "
             "the data file",
             status_code=e.response.status_code,
@@ -564,7 +512,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             response=e.response.content,
         )
     except requests.RequestException as e:
-        raise HTTPError(
+        raise utils.HTTPError(
             message=str(e), status_code=None, request_url=url, response=None
         )
 
@@ -1251,7 +1199,9 @@ def push_to_datastore(task_id, input, dry_run=False):
                     text=True,
                 )
             except subprocess.CalledProcessError as e:
-                raise utils.JobError("Cannot run stats on PII preview CSV: {}".format(e))
+                raise utils.JobError(
+                    "Cannot run stats on PII preview CSV: {}".format(e)
+                )
 
             pii_stats = str(qsv_pii_stats.stdout).strip()
             pii_stats_dict = [
@@ -1509,7 +1459,6 @@ def push_to_datastore(task_id, input, dry_run=False):
     if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
         download_preview_only and config.get("SUMMARY_STATS_WITH_PREVIEW")
     ):
-
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -1700,7 +1649,6 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         index_count = 0
         for idx, cardinality in enumerate(headers_cardinality):
-
             curr_col = headers[idx]
             if auto_index_threshold > 0 or auto_index_dates or auto_unique_index:
                 if cardinality == record_count and auto_unique_index:

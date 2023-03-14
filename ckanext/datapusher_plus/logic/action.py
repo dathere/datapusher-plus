@@ -20,6 +20,8 @@ import ckanext.datapusher_plus.logic.schema as dpschema
 import ckanext.datapusher_plus.interfaces as interfaces
 import ckanext.datapusher_plus.jobs as jobs
 import ckanext.datapusher_plus.db as db
+import ckanext.datapusher_plus.utils as utils
+
 
 log = logging.getLogger(__name__)
 _get_or_bust = logic.get_or_bust
@@ -34,9 +36,7 @@ if tk.check_ckan_version('2.10'):
     from typing import Any, cast
 
 
-
-
-def datapusher_submit(context: Context, data_dict: dict[str, Any]):
+def datapusher_submit(context, data_dict: dict[str, Any]):
     ''' Submit a job to the datapusher. The datapusher is a service that
     imports tabular data into the datastore.
 
@@ -144,12 +144,12 @@ def datapusher_submit(context: Context, data_dict: dict[str, Any]):
     if tk.check_ckan_version('2.10'):
         context['session'] = cast(Any, context['model'].meta.create_local_session())
     else:
-        context['session'] =context['model'].meta.create_local_session()
+        context['session'] = context['model'].meta.create_local_session()
     tk.get_action('task_status_update')(context, task)
 
     timeout = config.get('ckan.requests.timeout')
     # This setting is checked on startup
-    api_token = tk.config.get("ckan.datapusher.api_token")
+    api_token = utils.get_dp_plus_user_apitoken()
     callback_url = tk.url_for(
         "api.action",
         ver=3,
@@ -253,8 +253,8 @@ def datapusher_hook(context: Context, data_dict: dict[str, Any]):
 
     task = p.toolkit.get_action('task_status_show')(context, {
         'entity_id': res_id,
-        'task_type': 'datapusher',
-        'key': 'datapusher'
+        'task_type': 'datapusher_plus',
+        'key': 'datapusher_plus'
     })
 
     task['state'] = status
@@ -332,8 +332,8 @@ def datapusher_status(
 
     task = p.toolkit.get_action('task_status_show')(context, {
         'entity_id': res_id,
-        'task_type': 'datapusher',
-        'key': 'datapusher'
+        'task_type': 'datapusher_plus',
+        'key': 'datapusher_plus'
     })
 
     value = json.loads(task['value'])
