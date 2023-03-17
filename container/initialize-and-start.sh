@@ -8,9 +8,10 @@ abort () {
   exit 1
 }
 
-# Fail if postgresql is not running
-if ! pg_isready -h "${POSTGRES_HOST}" -U "${POSTGRES_USER}"; then
-    abort "Postgresql not running"
+# Fail if postgresql is not running, if that's in the sqlalchemy connection string
+if echo "${DATAPUSHER_SQLALCHEMY_DATABASE_URI}" | grep -q 'postgres' \
+       && ! psql -l ${DATAPUSHER_SQLALCHEMY_DATABASE_URI} > /dev/null; then
+   abort "Postgresql not running"
 fi
 
 if [ ! -e $UWSGI_FILE ]; then

@@ -61,7 +61,7 @@ setup(
         "python-dotenv",
         'ckanserviceprovider == 1.1.0',
         'requests',
-        "psycopg2",
+        "psycopg2-binary",
         'datasize',
         'semver',
         'uwsgi',
