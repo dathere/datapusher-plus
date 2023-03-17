@@ -1,4 +1,6 @@
-from setuptools import setup, find_packages  # Always prefer setuptools over distutils
+# -*- coding: utf-8 -*-
+# Always prefer setuptools over distutils
+from setuptools import setup, find_packages
 from codecs import open  # To use a consistent encoding
 from os import path
 
@@ -51,20 +53,16 @@ setup(
     # simple. Or you can use find_packages().
     packages=find_packages(exclude=['tests*']),
 
-    setup_requires=['wheel'],
+    # setup_requires=['wheel'],
     # List run-time dependencies here.  These will be installed by pip when your
     # project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/discussions/install-requires-vs-requirements/
     install_requires=[
-        "APScheduler == 3.9.1.post1",
-        "python-dotenv",
-        'ckanserviceprovider == 1.1.0',
-        'requests',
-        "psycopg2",
-        'datasize',
-        'semver',
-        'uwsgi',
+        # CKAN extensions should not list dependencies here, but in a separate
+        # ``requirements.txt`` file.
+        #
+        # http://docs.ckan.org/en/latest/extensions/best-practices.html#add-third-party-libraries-to-requirements-txt
     ],
 
     # If there are data files included in your packages that need to be
@@ -82,10 +80,20 @@ setup(
     # To provide executable scripts, use entry points in preference to the
     # "scripts" keyword. Entry points provide cross-platform support and allow
     # pip to create the appropriate form of executable for the target platform.
-    entry_points={
-        'console_scripts': [
-            'datapusher = datapusher.main:main',
-            'datapusher_initdb = datapusher.main:initdb',
+    entry_points='''
+        [ckan.plugins]
+        datapusher_plus=ckanext.datapusher_plus.plugin:DatapusherPlusPlugin
+
+        [babel.extractors]
+        ckan = ckan.lib.extract:extract_ckan
+
+    '''
+    ,
+    message_extractors={
+        'ckanext': [
+            ('**.py', 'python', None),
+            ('**.js', 'javascript', None),
+            ('**/templates/**.html', 'ckan', None),
         ],
     },
 )
