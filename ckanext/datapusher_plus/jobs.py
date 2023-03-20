@@ -27,11 +27,10 @@ import sqlalchemy as sa
 from rq import get_current_job
 import ckan.plugins.toolkit as tk
 
-from datapusher.config import config
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.db as db
-
+from ckanext.datapusher_plus.config import config
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
