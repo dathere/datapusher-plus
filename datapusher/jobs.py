@@ -635,7 +635,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         else:
             logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(format))
         try:
-            qsv_input = subprocess.run(
+            subprocess.run(
                 [
                     qsv_bin,
                     "input",
@@ -659,10 +659,10 @@ def push_to_datastore(task_id, input, dry_run=False):
     # Run an RFC4180 check with `qsv validate` against the normalized, UTF-8 encoded CSV file.
     # Even excel exported CSVs can be potentially invalid, as it allows the export of "flexible"
     # CSVs - i.e. rows may have different column counts.
-    # If it passes validation, we can handle it with confidence downstream as a "normal" CSV.
+    # If it passes validation, we can handle it with confidence downstream as a "normalized" CSV.
     logger.info("Validating CSV...")
     try:
-        qsv_validate = subprocess.run(
+        subprocess.run(
             [qsv_bin, "validate", tmp.name], check=True, capture_output=True, text=True
         )
     except subprocess.CalledProcessError as e:
@@ -859,7 +859,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         qsv_stats_cmd.append(summary_stats_options)
 
     try:
-        qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
+        subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
         raise util.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
@@ -992,7 +992,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
             qsv_slice_csv = tempfile.NamedTemporaryFile(suffix=".csv")
             try:
-                qsv_slice = subprocess.run(
+                subprocess.run(
                     [
                         qsv_bin,
                         "slice",
@@ -1037,7 +1037,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             )
         )
         try:
-            qsv_applydp = subprocess.run(qsv_applydp_cmd, check=True)
+            subprocess.run(qsv_applydp_cmd, check=True)
         except subprocess.CalledProcessError as e:
             raise util.JobError("Applydp error: {}".format(e))
         tmp = qsv_applydp_csv
