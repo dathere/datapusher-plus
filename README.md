@@ -143,9 +143,9 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
     it to the appropriate directory, e.g. for Linux:
 
     ```bash
-    wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    rm qsv-0.87.1-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.99.0/qsv-0.99.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-0.99.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-0.99.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
     ```
 
@@ -206,9 +206,9 @@ There are two ways to deploy Datapusher+:
     sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file
 
     # Install qsv, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
-    unzip /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -d /tmp
-    rm /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/jqnatividad/qsv/releases/download/0.99.0/qsv-0.99.0-x86_64-unknown-linux-gnu.zip -P /tmp
+    unzip /tmp/qsv-0.99.0-x86_64-unknown-linux-gnu.zip -d /tmp
+    rm /tmp/qsv-0.99.0-x86_64-unknown-linux-gnu.zip
     sudo mv /tmp/qsv* /usr/local/bin
 
     # if qsv is already installed, be sure to update it to the latest release
@@ -217,7 +217,7 @@ There are two ways to deploy Datapusher+:
     # if you get a glibc error when running `qsvdp --update`
     # you're on an old distro (e.g. Ubuntu 18.04) without the required version of the glibc libraries.
     # If so, use the statically linked MUSL version instead
-    # https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-musl.zip
+    # https://github.com/jqnatividad/qsv/releases/download/0.99.0/qsv-0.99.0-x86_64-unknown-linux-musl.zip
 
     # find out the locale settings
     locale

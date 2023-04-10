@@ -34,7 +34,7 @@ ENV DATAPUSHER_CONFIG=/etc/ckan/datapusher
 RUN useradd -r -u 900 -m -c "ckan account" -d $DATAPUSHER_HOME -s /bin/false ckan
 
 # Install qsv
-ENV QSV_RELEASE=0.87.1
+ENV QSV_RELEASE=0.99.0
 ENV QSV_ARCHIVE=qsv-$QSV_RELEASE-x86_64-unknown-linux-gnu.zip
 RUN cd /tmp && \
     wget https://github.com/jqnatividad/qsv/releases/download/$QSV_RELEASE/$QSV_ARCHIVE && \
