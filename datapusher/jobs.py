@@ -667,7 +667,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         )
     except subprocess.CalledProcessError as e:
         # return as we can't push an invalid CSV file
-        validate_error_msg = qsv_validate.stderr
+        validate_error_msg = e.stderr
         logger.error("Invalid CSV! Job aborted: {}.".format(validate_error_msg))
         return
     logger.info("Well-formed, valid CSV file confirmed...")
