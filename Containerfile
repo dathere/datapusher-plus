@@ -29,6 +29,7 @@ ENV DATAPUSHER_HOME=/usr/lib/ckan/datapusher
 ENV DATAPUSHER_CODE=$DATAPUSHER_HOME/code
 ENV DATAPUSHER_VENV=$DATAPUSHER_HOME/venv
 ENV DATAPUSHER_CONFIG=/etc/ckan/datapusher
+ENV JOB_CONFIG=$DATAPUSHER_CODE/datapusher/settings.py
 
 # Create ckan user
 RUN useradd -r -u 900 -m -c "ckan account" -d $DATAPUSHER_HOME -s /bin/false ckan
