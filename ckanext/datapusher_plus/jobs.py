@@ -845,7 +845,7 @@ def push_to_datastore(input, task_id, dry_run=False):
     ]
     prefer_dmy = config.get("PREFER_DMY")
     if prefer_dmy:
-        qsv_stats_cmd.append("--prefer_dmy")
+        qsv_stats_cmd.append("--prefer-dmy")
     auto_index_threshold = config.get("AUTO_INDEX_THRESHOLD")
     if auto_index_threshold:
         qsv_stats_cmd.append("--cardinality")
@@ -1025,7 +1025,7 @@ def push_to_datastore(input, task_id, dry_run=False):
             qsv_applydp_csv.name,
         ]
         if prefer_dmy:
-            qsv_applydp_cmd.append("--prefer_dmy")
+            qsv_applydp_cmd.append("--prefer-dmy")
         logger.info(
             'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
                 datecols, prefer_dmy
