@@ -21,6 +21,7 @@ RUN apt-get -q -y update \
         postgresql-client \
         unzip \
         wget \
+        file \
     && apt-get -q clean \
     && rm -rf /var/lib/apt/lists/*
 
