@@ -470,6 +470,8 @@ def push_to_datastore(input, task_id, dry_run=False):
                         preview_rows, DataSize(int(cl))
                     )
                 )
+            else:
+                logger.info("Downloading only first {:,} row preview of file of unknown size...".format(preview_rows))
 
             curr_line = 0
             for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
@@ -489,6 +491,8 @@ def push_to_datastore(input, task_id, dry_run=False):
             # the end without downloading the entire file
             if cl:
                 logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+            else:
+                logger.info("Downloading file of unknown size...")
 
             for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
                 length += len(chunk)
