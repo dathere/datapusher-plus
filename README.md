@@ -37,6 +37,22 @@ It features:
   But unlike xloader, we load everything using the proper data types and not as text, so there's
   no need to reload the data again after adjusting the Data Dictionary, as you would with xloader.
 
+* **Far more efficient Datastore storage AND far more Performant Datastore with easier to compose SQL queries**
+
+  As we create the Datastore tables using the most efficient PostgreSQL data type for each column
+  using qsv's guaranteed type inferences - the Datastore is not only more storage efficient, it is
+  also far more more performant for loading AND querying.
+  
+  With its "smartint" data type (with qsv inferring the most efficient integer data type for the range of
+  values in the column); comprehensive date format inferencing (supporting [19 date formats](https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats), with each
+  format having several variants & with configurable DMY/MDY preference parsing) & auto-formatting dates to
+  RFC3339 format so they are stored as Postgres timestamps; cardinality-aware, configurable auto-indexing;
+  automatic sanitization of column names to valid PostgreSQL column identifiers; auto PostgreSQL vacuuming &
+  analysis of resources after loading; and more - DP+ enables the Datastore to tap into PostgreSQL's full power.
+
+  Configurable auto-aliasing of resources also makes it easier to compose SQL queries, as the you can
+  use more intuitive resource names instead of the cryptic resource IDs.
+
 * **Production-ready Robustness**
 
   In production, the number one source of support issues is Datapusher - primarily, because of
