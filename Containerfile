@@ -1,4 +1,4 @@
-FROM ubuntu:20.04
+FROM ubuntu:22.04
 
 # Set timezone
 ENV TZ=UTC
@@ -21,6 +21,7 @@ RUN apt-get -q -y update \
         postgresql-client \
         unzip \
         wget \
+        file \
     && apt-get -q clean \
     && rm -rf /var/lib/apt/lists/*
 
