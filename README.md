@@ -37,7 +37,7 @@ It features:
   But unlike xloader, we load everything using the proper data types and not as text, so there's
   no need to reload the data again after adjusting the Data Dictionary, as you would with xloader.
 
-* **Far more efficient Datastore storage AND far more Performant Datastore with easier to compose SQL queries**
+* **Far more Storage Efficient AND Performant Datastore with easier to compose SQL queries**
 
   As we create the Datastore tables using the most efficient PostgreSQL data type for each column
   using qsv's guaranteed type inferences - the Datastore is not only more storage efficient, it is
@@ -50,8 +50,8 @@ It features:
   automatic sanitization of column names to valid PostgreSQL column identifiers; auto PostgreSQL vacuuming &
   analysis of resources after loading; and more - DP+ enables the Datastore to tap into PostgreSQL's full power.
 
-  Configurable auto-aliasing of resources also makes it easier to compose SQL queries, as the you can
-  use more intuitive resource names instead of the cryptic resource IDs.
+  Configurable auto-aliasing of resources also makes it easier to compose SQL queries, as you can
+  use more intuitive resource aliases instead of the cryptic resource IDs.
 
 * **Production-ready Robustness**
 
