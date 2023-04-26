@@ -179,7 +179,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
     nano .env
     ```
 
-8. Run Datapusher+.
+8. Run Datapusher+ in the `dpplus_venv` virtual environment.
 
     ```bash
     python main.py config.py
