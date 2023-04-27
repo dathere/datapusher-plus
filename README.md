@@ -51,7 +51,7 @@ It features:
   analysis of resources after loading; and more - DP+ enables the Datastore to tap into PostgreSQL's full power.
 
   Configurable auto-aliasing of resources also makes it easier to compose SQL queries, as you can
-  use more intuitive resource aliases instead of the cryptic resource IDs.
+  use more intuitive resource aliases instead of cryptic resource IDs.
 
 * **Production-ready Robustness**
 
