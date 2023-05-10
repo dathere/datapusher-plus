@@ -1318,7 +1318,7 @@ def push_to_datastore(input, task_id, dry_run=False):
 
     copied_count = 0
     try:
-        raw_connection = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
+        raw_connection = psycopg2.connect(tk.config.get("ckan.datastore.write_url"))
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
