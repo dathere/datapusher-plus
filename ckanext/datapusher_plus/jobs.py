@@ -27,11 +27,10 @@ import sqlalchemy as sa
 from rq import get_current_job
 import ckan.plugins.toolkit as tk
 
-from datapusher.config import config
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.db as db
-
+from ckanext.datapusher_plus.config import config
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
@@ -1319,7 +1318,7 @@ def push_to_datastore(input, task_id, dry_run=False):
 
     copied_count = 0
     try:
-        raw_connection = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
+        raw_connection = psycopg2.connect(tk.config.get("ckan.datastore.write_url"))
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:

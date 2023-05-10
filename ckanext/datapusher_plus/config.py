@@ -3,11 +3,11 @@ import uuid
 
 from collections.abc import MutableMapping
 from typing import get_type_hints, Union
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 
 
 env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
-load_dotenv(env_file)
+# load_dotenv(env_file)
 
 _DATABASE_URI = "postgresql://ckan_default:pass@localhost/ckan_default"
 _WRITE_ENGINE_URL = "postgresql://datapusher:YOURPASSWORD@localhost/datastore_default"
@@ -48,7 +48,7 @@ class DataPusherPlusConfig(MutableMapping):
     KEEP_JOBS_AGE: int = 60
 
     MAX_CONTENT_LENGTH: str = "25600000"
-    IGNORE_FILE_HASH: bool = False
+    IGNORE_FILE_HASH: bool = True
     CHUNK_SIZE: str = "16384"
     DOWNLOAD_TIMEOUT: int = 30
     SSL_VERIFY: bool = False

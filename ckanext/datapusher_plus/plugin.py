@@ -42,16 +42,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         p.toolkit.add_public_directory(config, "public")
         p.toolkit.add_resource("assets", "datapusher_plus")
 
-    def configure(self, config: CKANConfig):
-        self.config = config
-
-        if not config.get("ckan.site_url"):
-            raise Exception(
-                "Config option `{0}` must be set to use the DataPusher.".format(
-                    "ckan.site_url"
-                )
-            )
-
+    
     # IResourceUrlChange
 
     def notify(self, resource: model.Resource):
