@@ -962,7 +962,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             header_type = header["type"]
         if header_type == "timestamp":
             datetimecols_list.append(header["id"])
-        info_dict = dict(label=original_header_dict.get(idx, 'Unnamed Column'))
+        info_dict = dict(label=original_header_dict.get(idx, "Unnamed Column"))
         headers_dicts.append(dict(id=header["id"], type=header_type, info=info_dict))
 
     # Maintain data dictionaries from matching column names
