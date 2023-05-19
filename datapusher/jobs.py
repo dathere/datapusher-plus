@@ -1626,6 +1626,10 @@ def push_to_datastore(task_id, input, dry_run=False):
         resource["preview"] = True
         resource["preview_rows"] = copied_count
         resource["partial_download"] = download_preview_only
+    else:
+        resource["preview"] = False
+        resource["preview_rows"] = None
+        resource["partial_download"] = False
     update_resource(resource, ckan_url, api_key)
 
     # tell CKAN to calculate_record_count and set alias if set
