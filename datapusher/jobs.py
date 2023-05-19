@@ -19,6 +19,7 @@ import semver
 from pathlib import Path
 from datasize import DataSize
 from psycopg2 import sql
+from dateutil.parser import parse as parsedate
 
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
@@ -482,7 +483,11 @@ def push_to_datastore(task_id, input, dry_run=False):
                     )
                 )
             else:
-                logger.info("Downloading only first {:,} row preview of file of unknown size...".format(preview_rows))
+                logger.info(
+                    "Downloading only first {:,} row preview of file of unknown size...".format(
+                        preview_rows
+                    )
+                )
 
             curr_line = 0
             for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
@@ -533,10 +538,23 @@ def push_to_datastore(task_id, input, dry_run=False):
     file_hash = m.hexdigest()
     tmp.seek(0)
 
+    # check if the resource metadata (like data dictionary data types)
+    # has been updated since the last fetch
+    resource_updated = False
+    resource_last_modified = resource.get("last_modified")
+    if resource_last_modified:
+        resource_last_modified = parsedate(resource_last_modified)
+        file_last_modified = response.headers.get("last-modified")
+        if file_last_modified:
+            file_last_modified = parsedate(file_last_modified)
+            if file_last_modified < resource_last_modified:
+                resource_updated = True
+
     if (
         resource.get("hash") == file_hash
         and not data.get("ignore_hash")
         and not config.get("IGNORE_FILE_HASH")
+        and not resource_updated
     ):
         logger.warning(
             "Upload skipped as the file hash hasn't changed: {hash}.".format(
