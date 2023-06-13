@@ -50,7 +50,7 @@ class DataPusherPlusConfig(MutableMapping):
     MAX_CONTENT_LENGTH: str = "25600000"
     IGNORE_FILE_HASH: bool = True
     CHUNK_SIZE: str = "16384"
-    DOWNLOAD_TIMEOUT: int = 30
+    DOWNLOAD_TIMEOUT: int = 300
     SSL_VERIFY: bool = False
     DOWNLOAD_PROXY: str = ""
 
