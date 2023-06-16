@@ -782,6 +782,8 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     # now, ensure our column/header names identifiers are "safe names"
     # i.e. valid postgres/CKAN Datastore identifiers
+    unsafe_prefix = config.get("UNSAFE_PREFIX", "unsafe_")
+    reserved_colnames = config.get("RESERVED_COLNAMES", "_id")
     qsv_safenames_csv = tempfile.NamedTemporaryFile(suffix=".csv")
     logger.info('Checking for "database-safe" header names...')
     try:
@@ -792,6 +794,10 @@ def push_to_datastore(task_id, input, dry_run=False):
                 tmp.name,
                 "--mode",
                 "json",
+                "--prefix",
+                unsafe_prefix,
+                "--reserved",
+                reserved_colnames,
             ],
             capture_output=True,
             text=True,
@@ -815,6 +821,10 @@ def push_to_datastore(task_id, input, dry_run=False):
                 tmp.name,
                 "--mode",
                 "conditional",
+                "--prefix",
+                unsafe_prefix,
+                "--reserved",
+                reserved_colnames,
                 "--output",
                 qsv_safenames_csv.name,
             ],
