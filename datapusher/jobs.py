@@ -14,6 +14,7 @@ import tempfile
 import subprocess
 import csv
 import os
+import mimetypes
 import pytz
 import psycopg2
 import semver
@@ -470,7 +471,20 @@ def push_to_datastore(task_id, input, dry_run=False):
         except ValueError:
             pass
 
-        tmp = tempfile.NamedTemporaryFile(suffix="." + resource.get("format").lower())
+        file_extension = resource.get("format").lower()
+        # check if we have a file extension or a mime type
+        if "." in file_extension:
+            # if we have a file extension, use it as is
+            file_extension = file_extension.split(".")[-1]
+        else:
+            # if we have a mime type, get the file extension from the response headers
+            content_type = response.headers.get("content-type")
+            if content_type:
+                file_extension = mimetypes.guess_extension(content_type.split(";")[0])
+            else:
+                raise util.JobError("Cannot determine file extension from mime type.")
+
+        tmp = tempfile.NamedTemporaryFile(suffix="." + file_extension)
         length = 0
         m = hashlib.md5()
 
