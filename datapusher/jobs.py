@@ -14,6 +14,7 @@ import tempfile
 import subprocess
 import csv
 import os
+import pytz
 import psycopg2
 import semver
 from pathlib import Path
@@ -547,6 +548,10 @@ def push_to_datastore(task_id, input, dry_run=False):
         file_last_modified = response.headers.get("last-modified")
         if file_last_modified:
             file_last_modified = parsedate(file_last_modified)
+            if file_last_modified.tzinfo is None:
+                file_last_modified = file_last_modified.replace(tzinfo=pytz.UTC)
+            if resource_last_modified.tzinfo is None:
+                resource_last_modified = resource_last_modified.replace(tzinfo=pytz.UTC)
             if file_last_modified < resource_last_modified:
                 resource_updated = True
 
