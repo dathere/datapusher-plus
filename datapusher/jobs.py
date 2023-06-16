@@ -945,6 +945,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     # min/max values of the column we got from qsv stats.
     # We also set the Data Dictionary Label to original column names in case we made
     # the names "db-safe" as the labels are used by DataTables_view to label columns
+    # we also add an empty "unit" field so data can be annotated with units
     # we also take note of datetime/timestamp fields, so we can normalize them
     # to RFC3339 format, which is Postgres COPY ready
     datetimecols_list = []
@@ -968,7 +969,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         if header_type == "timestamp":
             datetimecols_list.append(header["id"])
         info_dict = dict(label=original_header_dict.get(idx, "Unnamed Column"))
-        headers_dicts.append(dict(id=header["id"], type=header_type, info=info_dict))
+        headers_dicts.append(
+            dict(id=header["id"], type=header_type, info=info_dict, unit="")
+        )
 
     # Maintain data dictionaries from matching column names
     # if data dictionary already exists for this resource as
