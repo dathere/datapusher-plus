@@ -672,6 +672,11 @@ def push_to_datastore(task_id, input, dry_run=False):
         # Note that we only change the workfile, the resource file itself is unchanged.
 
         # ------------------- Normalize to CSV ---------------------
+        sniff_delimiter = config.get("SNIFF_DELIMITER")
+        if sniff_delimiter:
+            env_sniff_delimiter = None
+        else:
+            env_sniff_delimiter = "QSV_SNIFF_DELIMITER=1"
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix=".csv")
         if format.upper() == "CSV":
             logger.info("Normalizing/UTF-8 transcoding {}...".format(format))
@@ -688,6 +693,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                     qsv_input_csv.name,
                 ],
                 check=True,
+                env=env_sniff_delimiter,
             )
         except subprocess.CalledProcessError as e:
             # return as we can't push an invalid CSV file

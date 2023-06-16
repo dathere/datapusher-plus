@@ -81,6 +81,8 @@ class DataPusherPlusConfig(MutableMapping):
     UNSAFE_PREFIX: str = "unsafe_"
     RESERVED_COLNAMES: str = "_id"
     
+    SNIFF_DELIMITER: bool = False
+    
     ADD_SUMMARY_STATS_RESOURCE: bool = False
     SUMMARY_STATS_WITH_PREVIEW: bool = False
     SUMMARY_STATS_OPTIONS: str = ""
