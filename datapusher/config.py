@@ -78,6 +78,9 @@ class DataPusherPlusConfig(MutableMapping):
     DEDUP: bool = False
     DEFAULT_EXCEL_SHEET: int = 0
     
+    UNSAFE_PREFIX: str = "unsafe_"
+    RESERVED_COLNAMES: str = "_id"
+    
     ADD_SUMMARY_STATS_RESOURCE: bool = False
     SUMMARY_STATS_WITH_PREVIEW: bool = False
     SUMMARY_STATS_OPTIONS: str = ""
