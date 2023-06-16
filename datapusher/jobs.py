@@ -676,7 +676,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         if sniff_delimiter:
             env_sniff_delimiter = None
         else:
-            env_sniff_delimiter = "QSV_SNIFF_DELIMITER=1"
+            env_sniff_delimiter = os.environ.copy()
+            env_sniff_delimiter["QSV_SNIFF_DELIMITER"] = "1"
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix=".csv")
         if format.upper() == "CSV":
             logger.info("Normalizing/UTF-8 transcoding {}...".format(format))
