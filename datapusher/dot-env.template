@@ -102,6 +102,9 @@ SORT_AND_DUPE_CHECK = True
 # sorts the CSV.
 DEDUP = False
 
+# Should QSV attempt to sniff the CSV delimiter automatically?
+SNIFF_DELIMITER = False
+
 # --------- COLUMN HEADER NAME SAFENAMES SETTINGS --------
 # unsafe prefix to use if a column name is found to be "unsafe"
 UNSAFE_PREFIX = unsafe_
