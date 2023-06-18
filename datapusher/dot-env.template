@@ -168,6 +168,11 @@ PII_SHOW_CANDIDATES = True
 # The resource ID/alias of a Text file that has the 
 # regex patterns to use for PII scanning.
 # If this is not specified, the default PII scanning rules in
-# default_pii_regexes.txt are used
+# default_pii_regexes.txt are used.
+# Note that Rust regex syntax is used, NOT Python, as we use the
+# qsv searchset command which can scan for MULTIPLE regex patterns in
+# one pass, and is at least an order of magnitude faster than Python
+# https://docs.rs/regex/latest/regex/index.html#syntax
+# You can test your regex at https://regex101.com using the Rust Flavor
 PII_REGEX_RESOURCE_ID_OR_ALIAS = ''
 
