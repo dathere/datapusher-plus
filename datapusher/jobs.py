@@ -1,30 +1,31 @@
 # -*- coding: utf-8 -*-
 
-import json
-import requests
-
-from urllib.parse import urlsplit
-import datetime
-import locale
-import logging
-import decimal
-import hashlib
-import time
-import tempfile
-import subprocess
+# Standard library imports
 import csv
-import os
+import datetime
+import hashlib
+import locale
 import mimetypes
-import pytz
-import psycopg2
-import semver
-from pathlib import Path
-from datasize import DataSize
-from psycopg2 import sql
-from dateutil.parser import parse as parsedate
+import os
+import subprocess
+import tempfile
+import time
+from urllib.parse import urlsplit
 
+# Third-party imports
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
+import psycopg2
+from datasize import DataSize
+from dateutil.parser import parse as parsedate
+import json
+import pytz
+import requests
+import semver
+from pathlib import Path
+from psycopg2 import sql
+
+# CKAN-related imports
 from ckanserviceprovider import web
 from datapusher.config import config
 
@@ -424,8 +425,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         return
 
     # check scheme
-    url = resource.get("url")
-    scheme = urlsplit(url).scheme
+    resource_url = resource.get("url")
+    scheme = urlsplit(resource_url).scheme
     if scheme not in ("http", "https", "ftp"):
         raise util.JobError("Only http, https, and ftp resources may be fetched.")
 
@@ -435,7 +436,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     timer_start = time.perf_counter()
 
     # fetch the resource data
-    logger.info("Fetching from: {0}...".format(url))
+    logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
     preview_rows = int(config.get("PREVIEW_ROWS"))
     download_preview_only = config.get("DOWNLOAD_PREVIEW_ONLY")
@@ -452,102 +453,105 @@ def push_to_datastore(task_id, input, dry_run=False):
         }
         if USE_PROXY:
             kwargs["proxies"] = {"http": DOWNLOAD_PROXY, "https": DOWNLOAD_PROXY}
-        response = requests.get(url, **kwargs)
-        response.raise_for_status()
+        with requests.get(resource_url, **kwargs) as response:
+            response.raise_for_status()
 
-        cl = response.headers.get("content-length")
-        max_content_length = int(config.get("MAX_CONTENT_LENGTH"))
-        try:
-            if (
-                cl
-                and int(cl) > max_content_length
-                and (preview_rows > 0 and not download_preview_only)
-            ):
-                raise util.JobError(
-                    "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
-                        cl=DataSize(int(cl)), max_cl=DataSize(int(max_content_length))
-                    )
-                )
-        except ValueError:
-            pass
+            cl = response.headers.get("content-length")
+            max_content_length = int(config.get("MAX_CONTENT_LENGTH"))
+            ct = response.headers.get("content-type")
 
-        file_extension = resource.get("format").lower()
-        # check if we have a file extension or a mime type
-        if "." in file_extension:
-            # if we have a file extension, use it as is
-            file_extension = file_extension.split(".")[-1]
-        else:
-            # if we have a mime type, get the file extension from the response headers
-            content_type = response.headers.get("content-type")
-            if content_type:
-                file_extension = mimetypes.guess_extension(content_type.split(";")[0])
-            else:
-                raise util.JobError("Cannot determine file extension from mime type.")
-
-        tmp = tempfile.NamedTemporaryFile(suffix="." + file_extension)
-        length = 0
-        m = hashlib.md5()
-
-        if download_preview_only and preview_rows > 0:
-            # if download_preview_only and preview_rows is greater than zero
-            # we're downloading the preview rows only, not the whole file
-            if cl:
-                logger.info(
-                    "Downloading only first {:,} row preview from {:.2MB} file...".format(
-                        preview_rows, DataSize(int(cl))
-                    )
-                )
-            else:
-                logger.info(
-                    "Downloading only first {:,} row preview of file of unknown size...".format(
-                        preview_rows
-                    )
-                )
-
-            curr_line = 0
-            for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
-                curr_line += 1
-                # add back the linefeed as iter_lines removes it
-                line = line + "\n".encode("ascii")
-                length += len(line)
-
-                tmp.write(line)
-                m.update(line)
-                if curr_line > preview_rows:
-                    break
-        else:
-            # download the entire file otherwise
-            # TODO: handle when preview_rows is negative (get the preview from the
-            # end of the file) so we can use http range request to get the preview from
-            # the end without downloading the entire file
-            if cl:
-                logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
-            else:
-                logger.info("Downloading file of unknown size...")
-
-            for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
-                length += len(chunk)
-                if length > max_content_length and not preview_rows:
+            try:
+                if (
+                    cl
+                    and int(cl) > max_content_length
+                    and (preview_rows > 0 and not download_preview_only)
+                ):
                     raise util.JobError(
-                        "Resource too large to process: {cl} > max ({max_cl}).".format(
-                            cl=length, max_cl=max_content_length
+                        "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
+                            cl=DataSize(int(cl)),
+                            max_cl=DataSize(int(max_content_length)),
                         )
                     )
-                tmp.write(chunk)
-                m.update(chunk)
+            except ValueError:
+                pass
 
-        ct = response.headers.get("content-type", "").split(";", 1)[0]
+            file_extension = resource.get("format").lower()
+            # check if we have a file extension or a mime type
+            if "." in file_extension:
+                # if we have a file extension, use it as is
+                file_extension = file_extension.split(".")[-1]
+            else:
+                # if we have a mime type, get the file extension from the response headers
+                if ct:
+                    file_extension = mimetypes.guess_extension(ct.split(";")[0])
+                else:
+                    raise util.JobError(
+                        "Cannot determine file extension from mime type."
+                    )
+
+            tmp = tempfile.NamedTemporaryFile(suffix="." + file_extension)
+            length = 0
+            m = hashlib.md5()
+
+            if download_preview_only and preview_rows > 0:
+                # if download_preview_only and preview_rows is greater than zero
+                # we're downloading the preview rows only, not the whole file
+                if cl:
+                    logger.info(
+                        "Downloading only first {:,} row preview from {:.2MB} file...".format(
+                            preview_rows, DataSize(int(cl))
+                        )
+                    )
+                else:
+                    logger.info(
+                        "Downloading only first {:,} row preview of file of unknown size...".format(
+                            preview_rows
+                        )
+                    )
+
+                curr_line = 0
+                for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
+                    curr_line += 1
+                    # add back the linefeed as iter_lines removes it
+                    line = line + "\n".encode("ascii")
+                    length += len(line)
+
+                    tmp.write(line)
+                    m.update(line)
+                    if curr_line > preview_rows:
+                        break
+            else:
+                # download the entire file otherwise
+                # TODO: handle when preview_rows is negative (get the preview from the
+                # end of the file) so we can use http range request to get the preview from
+                # the end without downloading the entire file
+                if cl:
+                    logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+                else:
+                    logger.info("Downloading file of unknown size...")
+
+                for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
+                    length += len(chunk)
+                    if length > max_content_length and not preview_rows:
+                        raise util.JobError(
+                            "Resource too large to process: {cl} > max ({max_cl}).".format(
+                                cl=length, max_cl=max_content_length
+                            )
+                        )
+                    tmp.write(chunk)
+                    m.update(chunk)
+
     except requests.HTTPError as e:
         raise HTTPError(
             "DataPusher+ received a bad HTTP response when trying to download "
             "the data file",
             status_code=e.response.status_code,
-            request_url=url,
+            request_url=resource_url,
             response=e.response.content,
         )
     except requests.RequestException as e:
         raise HTTPError(
-            message=str(e), status_code=None, request_url=url, response=None
+            message=str(e), status_code=None, request_url=resource_url, response=None
         )
 
     file_hash = m.hexdigest()
