@@ -1128,10 +1128,15 @@ def push_to_datastore(task_id, input, dry_run=False):
         pii_found_abort = config.get("PII_FOUND_ABORT")
 
         # DP+ comes with default regex patterns for PII (SSN, credit cards,
-        # email, bank account numbers, & phone number). The DP+ admin can
-        # use a custom set of regex patterns by pointing to a resource with
-        # a text file, with each line having a regex pattern, and an optional
-        # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
+        # email, bank account numbers, & phone number). The default regexes
+        # can be found in default-pii-regexes.txt
+        # The DP+ admin can also use a custom set of regex patterns by using
+        # a CKAN resource with a text file, with each line having a regex pattern,
+        # and an optional label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
+        # NOTE: the regex patterns must be in Rust regex format, NOT Python
+        # https://docs.rs/regex/latest/regex/index.html#syntax
+        # You can test your regexes at https://regex101.com/. Be sure to set Rust flavor.
+        
         pii_regex_resource_id = config.get("PII_REGEX_RESOURCE_ID_OR_ALIAS")
         if pii_regex_resource_id:
             pii_regex_resource_exist = datastore_resource_exists(
