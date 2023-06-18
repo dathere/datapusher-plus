@@ -1035,7 +1035,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             logger.info("Preparing {:,}-row preview...".format(preview_rows))
             qsv_slice_csv = tempfile.NamedTemporaryFile(suffix=".csv")
             try:
-                qsv_slice = subprocess.run(
+                subprocess.run(
                     [
                         qsv_bin,
                         "slice",
@@ -1532,7 +1532,6 @@ def push_to_datastore(task_id, input, dry_run=False):
     if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
         download_preview_only and config.get("SUMMARY_STATS_WITH_PREVIEW")
     ):
-
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -1727,7 +1726,6 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         index_count = 0
         for idx, cardinality in enumerate(headers_cardinality):
-
             curr_col = headers[idx]
             if auto_index_threshold > 0 or auto_index_dates or auto_unique_index:
                 if cardinality == record_count and auto_unique_index:
