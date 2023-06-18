@@ -425,8 +425,8 @@ def push_to_datastore(task_id, input, dry_run=False):
         return
 
     # check scheme
-    url = resource.get("url")
-    scheme = urlsplit(url).scheme
+    resource_url = resource.get("url")
+    scheme = urlsplit(resource_url).scheme
     if scheme not in ("http", "https", "ftp"):
         raise util.JobError("Only http, https, and ftp resources may be fetched.")
 
@@ -436,7 +436,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     timer_start = time.perf_counter()
 
     # fetch the resource data
-    logger.info("Fetching from: {0}...".format(url))
+    logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
     preview_rows = int(config.get("PREVIEW_ROWS"))
     download_preview_only = config.get("DOWNLOAD_PREVIEW_ONLY")
@@ -453,7 +453,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         }
         if USE_PROXY:
             kwargs["proxies"] = {"http": DOWNLOAD_PROXY, "https": DOWNLOAD_PROXY}
-        response = requests.get(url, **kwargs)
+        response = requests.get(resource_url, **kwargs)
         response.raise_for_status()
 
         cl = response.headers.get("content-length")
@@ -543,12 +543,12 @@ def push_to_datastore(task_id, input, dry_run=False):
             "DataPusher+ received a bad HTTP response when trying to download "
             "the data file",
             status_code=e.response.status_code,
-            request_url=url,
+            request_url=resource_url,
             response=e.response.content,
         )
     except requests.RequestException as e:
         raise HTTPError(
-            message=str(e), status_code=None, request_url=url, response=None
+            message=str(e), status_code=None, request_url=resource_url, response=None
         )
 
     file_hash = m.hexdigest()
