@@ -458,6 +458,8 @@ def push_to_datastore(task_id, input, dry_run=False):
 
             cl = response.headers.get("content-length")
             max_content_length = int(config.get("MAX_CONTENT_LENGTH"))
+            ct = response.headers.get("content-type")
+
             try:
                 if (
                     cl
@@ -466,7 +468,8 @@ def push_to_datastore(task_id, input, dry_run=False):
                 ):
                     raise util.JobError(
                         "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
-                            cl=DataSize(int(cl)), max_cl=DataSize(int(max_content_length))
+                            cl=DataSize(int(cl)),
+                            max_cl=DataSize(int(max_content_length)),
                         )
                     )
             except ValueError:
@@ -479,11 +482,12 @@ def push_to_datastore(task_id, input, dry_run=False):
                 file_extension = file_extension.split(".")[-1]
             else:
                 # if we have a mime type, get the file extension from the response headers
-                content_type = response.headers.get("content-type")
-                if content_type:
-                    file_extension = mimetypes.guess_extension(content_type.split(";")[0])
+                if ct:
+                    file_extension = mimetypes.guess_extension(ct.split(";")[0])
                 else:
-                    raise util.JobError("Cannot determine file extension from mime type.")
+                    raise util.JobError(
+                        "Cannot determine file extension from mime type."
+                    )
 
             tmp = tempfile.NamedTemporaryFile(suffix="." + file_extension)
             length = 0
@@ -537,7 +541,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                     tmp.write(chunk)
                     m.update(chunk)
 
-            ct = response.headers.get("content-type", "").split(";", 1)[0]
     except requests.HTTPError as e:
         raise HTTPError(
             "DataPusher+ received a bad HTTP response when trying to download "
