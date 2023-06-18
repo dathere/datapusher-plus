@@ -1,30 +1,31 @@
 # -*- coding: utf-8 -*-
 
-import json
-import requests
-
-from urllib.parse import urlsplit
-import datetime
-import locale
-import logging
-import decimal
-import hashlib
-import time
-import tempfile
-import subprocess
+# Standard library imports
 import csv
-import os
+import datetime
+import hashlib
+import locale
 import mimetypes
-import pytz
-import psycopg2
-import semver
-from pathlib import Path
-from datasize import DataSize
-from psycopg2 import sql
-from dateutil.parser import parse as parsedate
+import os
+import subprocess
+import tempfile
+import time
+from urllib.parse import urlsplit
 
+# Third-party imports
 import ckanserviceprovider.job as job
 import ckanserviceprovider.util as util
+import psycopg2
+from datasize import DataSize
+from dateutil.parser import parse as parsedate
+import json
+import pytz
+import requests
+import semver
+from pathlib import Path
+from psycopg2 import sql
+
+# CKAN-related imports
 from ckanserviceprovider import web
 from datapusher.config import config
 
