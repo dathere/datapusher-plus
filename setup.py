@@ -67,7 +67,7 @@ setup(
         'pytz',
         'semver',
         'uwsgi',
-        'tzdata==2023.3',
+        'tzdata',
     ],
 
     # If there are data files included in your packages that need to be
