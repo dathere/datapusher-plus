@@ -63,6 +63,8 @@ setup(
         'requests',
         "psycopg2-binary",
         'datasize',
+        'python-dateutil',
+        'pytz',
         'semver',
         'uwsgi',
     ],
