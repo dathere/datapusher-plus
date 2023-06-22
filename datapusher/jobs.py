@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import time
 from urllib.parse import urlsplit
+import logging
 
 # Third-party imports
 import ckanserviceprovider.job as job
