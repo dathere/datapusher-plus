@@ -476,21 +476,28 @@ def push_to_datastore(task_id, input, dry_run=False):
             except ValueError:
                 pass
 
-            file_extension = resource.get("format").lower()
-            # check if we have a file extension or a mime type
-            if "." in file_extension:
-                # if we have a file extension, use it as is
-                file_extension = file_extension.split(".")[-1]
-            else:
-                # if we have a mime type, get the file extension from the response headers
+            resource_format = resource.get("format").lower()
+
+            # if format was not specified, try to get it from mime type
+            if not resource_format:
+                logger.info("File format: NOT SPECIFIED")
+                # if we have a mime type, get the file extension from the response header
                 if ct:
-                    file_extension = mimetypes.guess_extension(ct.split(";")[0])
+                    resource_format = mimetypes.guess_extension(ct.split(";")[0])
+
+                    if resource_format is None:
+                        raise util.JobError(
+                            "Cannot determine format from mime type. Please specify format."
+                        )
+                    logger.info("Inferred file format: {}".format(resource_format))
                 else:
                     raise util.JobError(
-                        "Cannot determine file extension from mime type."
+                        "Server did not return content-type. Please specify format."
                     )
+            else:
+                logger.info("File format: {}".format(resource_format))
 
-            tmp = tempfile.NamedTemporaryFile(suffix="." + file_extension)
+            tmp = tempfile.NamedTemporaryFile(suffix="." + resource_format)
             length = 0
             m = hashlib.md5()
 
@@ -693,7 +700,7 @@ def push_to_datastore(task_id, input, dry_run=False):
                 [
                     qsv_bin,
                     "input",
-                    tmp.name,
+                    "'{}'".format(tmp.name),
                     "--trim-headers",
                     "--output",
                     qsv_input_csv.name,
@@ -1137,7 +1144,7 @@ def push_to_datastore(task_id, input, dry_run=False):
         # NOTE: the regex patterns must be in Rust regex format, NOT Python
         # https://docs.rs/regex/latest/regex/index.html#syntax
         # You can test your regexes at https://regex101.com/. Be sure to set Rust flavor.
-        
+
         pii_regex_resource_id = config.get("PII_REGEX_RESOURCE_ID_OR_ALIAS")
         if pii_regex_resource_id:
             pii_regex_resource_exist = datastore_resource_exists(
