@@ -696,23 +696,23 @@ def push_to_datastore(task_id, input, dry_run=False):
             logger.info("Normalizing/UTF-8 transcoding {}...".format(format))
         else:
             logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(format))
-        try:
-            subprocess.run(
-                [
-                    qsv_bin,
-                    "input",
-                    tmp.name,
-                    "--trim-headers",
-                    "--output",
-                    qsv_input_csv.name,
-                ],
-                check=True,
-                env=env_sniff_delimiter,
-            )
-        except subprocess.CalledProcessError as e:
+        qsv_input = subprocess.run(
+            [
+                qsv_bin,
+                "input",
+                tmp.name,
+                "--trim-headers",
+                "--output",
+                qsv_input_csv.name,
+            ],
+            env=env_sniff_delimiter,
+        )
+        if qsv_input.returncode != 0:
             # return as we can't push an invalid CSV file
             logger.error(
-                "Job aborted as the file cannot be normalized/transcoded: {}.".format(e)
+                "Job aborted as the file cannot be normalized/transcoded: {}-{}.".format(
+                    qsv_input.returncode, qsv_input.stderr
+                )
             )
             return
         tmp = qsv_input_csv
