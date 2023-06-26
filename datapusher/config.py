@@ -68,7 +68,6 @@ class DataPusherPlusConfig(MutableMapping):
 
     PREFER_DMY: bool = False
     PREVIEW_ROWS: int = 0
-    DOWNLOAD_PREVIEW_ONLY: bool = False
     
     AUTO_INDEX_THRESHOLD: int = 3
     AUTO_UNIQUE_INDEX:bool = True
@@ -82,7 +81,6 @@ class DataPusherPlusConfig(MutableMapping):
     RESERVED_COLNAMES: str = "_id"
         
     ADD_SUMMARY_STATS_RESOURCE: bool = False
-    SUMMARY_STATS_WITH_PREVIEW: bool = False
     SUMMARY_STATS_OPTIONS: str = ""
     
     AUTO_ALIAS: bool = True
