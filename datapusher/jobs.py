@@ -620,7 +620,9 @@ def push_to_datastore(task_id, input, dry_run=False):
         # if so, export spreadsheet as a CSV file
         default_excel_sheet = config.get("DEFAULT_EXCEL_SHEET")
         logger.info(
-            "Converting {} sheet {} to CSV...".format(resource_format, default_excel_sheet)
+            "Converting {} sheet {} to CSV...".format(
+                resource_format, default_excel_sheet
+            )
         )
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove it
@@ -689,7 +691,9 @@ def push_to_datastore(task_id, input, dry_run=False):
             logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
         else:
             # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
-            logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format))
+            logger.info(
+                "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
+            )
         try:
             subprocess.run(
                 [
