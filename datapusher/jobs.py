@@ -700,7 +700,6 @@ def push_to_datastore(task_id, input, dry_run=False):
                     qsv_input_csv.name,
                 ],
                 check=True,
-                env=env_sniff_delimiter,
             )
         except subprocess.CalledProcessError as e:
             # return as we can't push an invalid CSV file
