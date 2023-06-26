@@ -476,7 +476,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             except ValueError:
                 pass
 
-            resource_format = resource.get("format").lower()
+            resource_format = resource.get("format").upper()
 
             # if format was not specified, try to get it from mime type
             if not resource_format:
@@ -616,17 +616,16 @@ def push_to_datastore(task_id, input, dry_run=False):
     # ----------------- is it a spreadsheet? ---------------
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
-    format = resource.get("format").upper()
-    if format in spreadsheet_extensions:
+    if resource_format in spreadsheet_extensions:
         # if so, export spreadsheet as a CSV file
         default_excel_sheet = config.get("DEFAULT_EXCEL_SHEET")
         logger.info(
-            "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
+            "Converting {} sheet {} to CSV...".format(resource_format, default_excel_sheet)
         )
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove it
         # and create a hardlink to the file we got from CKAN
-        qsv_spreadsheet = tempfile.NamedTemporaryFile(suffix="." + format)
+        qsv_spreadsheet = tempfile.NamedTemporaryFile(suffix="." + resource_format)
         os.remove(qsv_spreadsheet.name)
         os.link(tmp.name, qsv_spreadsheet.name)
 
@@ -685,10 +684,12 @@ def push_to_datastore(task_id, input, dry_run=False):
 
         # ------------------- Normalize to CSV ---------------------
         qsv_input_csv = tempfile.NamedTemporaryFile(suffix=".csv")
-        if format.upper() == "CSV":
-            logger.info("Normalizing/UTF-8 transcoding {}...".format(format))
+        # if resource_format is CSV we don't need to normalize
+        if resource_format.upper() == "CSV":
+            logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
         else:
-            logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(format))
+            # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
+            logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format))
         try:
             subprocess.run(
                 [
