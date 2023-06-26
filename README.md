@@ -172,7 +172,8 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
 
     Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
     (This will be the case when running Ubuntu 18.04 or older).
-    If so, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+    If so, use the `qsvdp_glibc-2.31` binary as its linked to an older version of glibc. If that still fails, the use the
+    `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
 
     If you already have qsv, update it to the latest release by using the --update option.
 
