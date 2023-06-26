@@ -440,7 +440,6 @@ def push_to_datastore(task_id, input, dry_run=False):
     logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
     preview_rows = int(config.get("PREVIEW_ROWS"))
-    download_preview_only = config.get("DOWNLOAD_PREVIEW_ONLY")
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
@@ -462,11 +461,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             ct = response.headers.get("content-type")
 
             try:
-                if (
-                    cl
-                    and int(cl) > max_content_length
-                    and (preview_rows > 0 and not download_preview_only)
-                ):
+                if cl and int(cl) > max_content_length and preview_rows > 0:
                     raise util.JobError(
                         "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
                             cl=DataSize(int(cl)),
@@ -501,53 +496,22 @@ def push_to_datastore(task_id, input, dry_run=False):
             length = 0
             m = hashlib.md5()
 
-            if download_preview_only and preview_rows > 0:
-                # if download_preview_only and preview_rows is greater than zero
-                # we're downloading the preview rows only, not the whole file
-                if cl:
-                    logger.info(
-                        "Downloading only first {:,} row preview from {:.2MB} file...".format(
-                            preview_rows, DataSize(int(cl))
-                        )
-                    )
-                else:
-                    logger.info(
-                        "Downloading only first {:,} row preview of file of unknown size...".format(
-                            preview_rows
-                        )
-                    )
-
-                curr_line = 0
-                for line in response.iter_lines(int(config.get("CHUNK_SIZE"))):
-                    curr_line += 1
-                    # add back the linefeed as iter_lines removes it
-                    line = line + "\n".encode("ascii")
-                    length += len(line)
-
-                    tmp.write(line)
-                    m.update(line)
-                    if curr_line > preview_rows:
-                        break
+            # download the file
+            if cl:
+                logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
             else:
-                # download the entire file otherwise
-                # TODO: handle when preview_rows is negative (get the preview from the
-                # end of the file) so we can use http range request to get the preview from
-                # the end without downloading the entire file
-                if cl:
-                    logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
-                else:
-                    logger.info("Downloading file of unknown size...")
+                logger.info("Downloading file of unknown size...")
 
-                for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
-                    length += len(chunk)
-                    if length > max_content_length and not preview_rows:
-                        raise util.JobError(
-                            "Resource too large to process: {cl} > max ({max_cl}).".format(
-                                cl=length, max_cl=max_content_length
-                            )
+            for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
+                length += len(chunk)
+                if length > max_content_length and not preview_rows:
+                    raise util.JobError(
+                        "Resource too large to process: {cl} > max ({max_cl}).".format(
+                            cl=length, max_cl=max_content_length
                         )
-                    tmp.write(chunk)
-                    m.update(chunk)
+                    )
+                tmp.write(chunk)
+                m.update(chunk)
 
     except requests.HTTPError as e:
         raise HTTPError(
@@ -1537,12 +1501,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             alias = None
 
     # -------- should we ADD_SUMMARY_STATS_RESOURCE? -------------
-    # by default, we only add summary stats if we're not doing a partial download
-    # (otherwise, you're summarizing the preview, not the whole file)
-    # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
-    if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
-        download_preview_only and config.get("SUMMARY_STATS_WITH_PREVIEW")
-    ):
+    if config.get("ADD_SUMMARY_STATS_RESOURCE"):
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -1675,14 +1634,12 @@ def push_to_datastore(task_id, input, dry_run=False):
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
-    if preview_rows < record_count or (preview_rows > 0 and download_preview_only):
+    if preview_rows < record_count:
         resource["preview"] = True
         resource["preview_rows"] = copied_count
-        resource["partial_download"] = download_preview_only
     else:
         resource["preview"] = False
         resource["preview_rows"] = None
-        resource["partial_download"] = False
     update_resource(resource, ckan_url, api_key)
 
     # tell CKAN to calculate_record_count and set alias if set
