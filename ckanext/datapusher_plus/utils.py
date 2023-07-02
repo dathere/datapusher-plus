@@ -101,7 +101,7 @@ def check_response(
     """
     if not response.status_code:
         raise HTTPError(
-            "Xloader received an HTTP response with no status code",
+            "DP+ received an HTTP response with no status code",
             status_code=None,
             request_url=request_url,
             response=response.text,
