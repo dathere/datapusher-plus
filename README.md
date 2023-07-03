@@ -390,6 +390,11 @@ On CKAN<=2.8:
 
     paster --plugin=ckan datapusher submit <pkgname> -c /etc/ckan/default/ckan.ini
 
+### Testing
+To test Datapusher-plus, you can use the following test script available on GitHub: [test script](https://github.com/dathere/testing-datapusher-plus).
+
+
+
 ### Uninstalling Datapusher+
 
 Should you need to remove Datapusher+, and you followed either the Development or Production Installation procedures above:
