@@ -19,6 +19,7 @@ import semver
 import sys
 import traceback
 
+import sqlalchemy as sa
 from pathlib import Path
 from datasize import DataSize
 from psycopg2 import sql
@@ -535,7 +536,6 @@ def push_to_datastore(input, task_id, dry_run=False):
         file_last_modified = response.headers.get("last-modified")
         if file_last_modified:
             file_last_modified = parsedate(file_last_modified).replace(tzinfo=None)
-            breakpoint()
             if file_last_modified < resource_last_modified:
                 resource_updated = True
 
