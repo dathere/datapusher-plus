@@ -1578,6 +1578,7 @@ def push_to_datastore(task_id, input, dry_run=False):
             for idx, ele in enumerate(stats_stats.splitlines()[1:], 1)
         ]
 
+        resource_name = resource.get("name")
         stats_resource = {
             "package_id": resource["package_id"],
             "name": resource_name + " - Summary Statistics",
