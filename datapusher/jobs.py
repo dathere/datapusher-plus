@@ -664,12 +664,51 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info(
                 "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
             )
+
+        qsv_input_utf_8_encoded_csv = tempfile.NamedTemporaryFile(suffix=".csv")
+        # using uchardet to determine encoding
+        file_encoding = subprocess.run(
+                        [
+                            "uchardet", 
+                            tmp.name
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+        logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
+
+        # using iconv to re-encode in UTF-8
+        if file_encoding.stdout != "UTF-8":
+            logger.info("File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
+                file_encoding.stdout)
+                )
+            try:
+                subprocess.run(
+                    [
+                        "iconv",
+                        "-f",
+                        file_encoding.stdout,
+                        "-t",
+                        "UTF-8",
+                        tmp.name,
+                        "--output",
+                        qsv_input_utf_8_encoded_csv.name,
+                    ],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                # return as we can't push a non UTF-8 CSV
+                logger.error(
+                    "Job aborted as the file cannot be re-encoded to UTF-8: {}.".format(e)
+                )
+                return
         try:
             subprocess.run(
                 [
                     qsv_bin,
                     "input",
-                    tmp,
+                    qsv_input_utf_8_encoded_csv.name,
                     "--trim-headers",
                     "--output",
                     qsv_input_csv,

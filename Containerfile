@@ -14,11 +14,12 @@ RUN update-locale LANG=${LC_ALL}
 # Install required system packages
 RUN apt-get -q -y update \
     && DEBIAN_FRONTEND=noninteractive apt-get -q -y upgrade \
-    && apt-get -q -y install \
+    && DEBIAN_FRONTEND=noninteractive apt-get -q -y install \
         python3 \
         pip \
         virtualenv \
         postgresql-client \
+        uchardet \
         unzip \
         wget \
         file \
