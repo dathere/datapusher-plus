@@ -15,8 +15,6 @@ from urllib.parse import urlsplit
 import logging
 
 # Third-party imports
-import ckanserviceprovider.job as job
-import ckanserviceprovider.util as util
 import psycopg2
 from datasize import DataSize
 from dateutil.parser import parse as parsedate
@@ -423,10 +421,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         return
 
     # check scheme
-    url = resource.get("url")
-    scheme = urlsplit(url).scheme
+    resource_url = resource.get("url")
+    scheme = urlsplit(resource_url).scheme
     if scheme not in ("http", "https", "ftp"):
-        raise utils.JobError("Only http, https, and ftp resources may be fetched.")
+        raise util.JobError("Only http, https, and ftp resources may be fetched.")
 
     # ==========================================================================
     # DOWNLOAD
@@ -434,77 +432,66 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     timer_start = time.perf_counter()
 
     # fetch the resource data
-    logger.info("Fetching from: {0}...".format(url))
+    logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
     preview_rows = int(config.get("PREVIEW_ROWS"))
-    download_preview_only = config.get("DOWNLOAD_PREVIEW_ONLY")
-
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
         headers["Authorization"] = api_key
-
     try:
         kwargs = {
             "headers": headers,
             "timeout": config.get("DOWNLOAD_TIMEOUT"),
-            "verify": SSL_VERIFY,
+            "verify": config.get("SSL_VERIFY"),
             "stream": True,
         }
         if USE_PROXY:
             kwargs["proxies"] = {"http": DOWNLOAD_PROXY, "https": DOWNLOAD_PROXY}
-        response = requests.get(url, **kwargs)
-        response.raise_for_status()
+        with requests.get(resource_url, **kwargs) as response:
+            response.raise_for_status()
 
-        cl = response.headers.get("content-length")
-        max_content_length = int(MAX_CONTENT_LENGTH)
-        try:
-            if (
-                cl
-                and int(cl) > max_content_length
-                and (preview_rows > 0 and not download_preview_only)
-            ):
-                raise utils.JobError(
-                    "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
-                        cl=DataSize(int(cl)), max_cl=DataSize(int(max_content_length))
+            cl = response.headers.get("content-length")
+            max_content_length = int(config.get("MAX_CONTENT_LENGTH"))
+            ct = response.headers.get("content-type")
+
+            try:
+                if cl and int(cl) > max_content_length and preview_rows > 0:
+                    raise util.JobError(
+                        "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
+                            cl=DataSize(int(cl)),
+                            max_cl=DataSize(int(max_content_length)),
+                        )
                     )
-                )
-        except ValueError:
-            pass
+            except ValueError:
+                pass
 
-        tmp = tempfile.NamedTemporaryFile(suffix="." + resource.get("format").lower())
-        length = 0
-        m = hashlib.md5()
+            resource_format = resource.get("format").upper()
 
-        if download_preview_only and preview_rows > 0:
-            # if download_preview_only and preview_rows is greater than zero
-            # we're downloading the preview rows only, not the whole file
-            if cl:
-                logger.info(
-                    "Downloading only first {:,} row preview from {:.2MB} file...".format(
-                        preview_rows, DataSize(int(cl))
+            # if format was not specified, try to get it from mime type
+            if not resource_format:
+                logger.info("File format: NOT SPECIFIED")
+                # if we have a mime type, get the file extension from the response header
+                if ct:
+                    resource_format = mimetypes.guess_extension(ct.split(";")[0])
+
+                    if resource_format is None:
+                        raise util.JobError(
+                            "Cannot determine format from mime type. Please specify format."
+                        )
+                    logger.info("Inferred file format: {}".format(resource_format))
+                else:
+                    raise util.JobError(
+                        "Server did not return content-type. Please specify format."
                     )
-                )
             else:
-                logger.info(
-                    "Downloading only first {:,} row preview of file of unknown size...".format(
-                        preview_rows
-                    )
-                )
+                logger.info("File format: {}".format(resource_format))
 
             tmp = os.path.join(temp_dir, 'tmp.' + resource_format)
             length = 0
             m = hashlib.md5()
 
-                tmp.write(line)
-                m.update(line)
-                if curr_line > preview_rows:
-                    break
-        else:
-            # download the entire file otherwise
-            # TODO: handle when preview_rows is negative (get the preview from the
-            # end of the file) so we can use http range request to get the preview from
-            # the end without downloading the entire file
+            # download the file
             if cl:
                 logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
             else:
@@ -522,18 +509,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     tmp_file.write(chunk)
                     m.update(chunk)
 
-        ct = response.headers.get("content-type", "").split(";", 1)[0]
     except requests.HTTPError as e:
-        raise utils.HTTPError(
+        raise HTTPError(
             "DataPusher+ received a bad HTTP response when trying to download "
             "the data file",
             status_code=e.response.status_code,
-            request_url=url,
+            request_url=resource_url,
             response=e.response.content,
         )
     except requests.RequestException as e:
-        raise utils.HTTPError(
-            message=str(e), status_code=None, request_url=url, response=None
+        raise HTTPError(
+            message=str(e), status_code=None, request_url=resource_url, response=None
         )
 
     file_hash = m.hexdigest()
