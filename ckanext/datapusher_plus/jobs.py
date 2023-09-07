@@ -359,7 +359,7 @@ def push_to_datastore(input, task_id, dry_run=False):
 
     
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
-    handler = util.StoringHandler(task_id, input)
+    handler = utils.StoringHandler(task_id, input)
     logger = logging.getLogger(task_id)
     logger.addHandler(handler)
     # also show logs on stderr
@@ -424,7 +424,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     resource_url = resource.get("url")
     scheme = urlsplit(resource_url).scheme
     if scheme not in ("http", "https", "ftp"):
-        raise util.JobError("Only http, https, and ftp resources may be fetched.")
+        raise utils.JobError("Only http, https, and ftp resources may be fetched.")
 
     # ==========================================================================
     # DOWNLOAD
@@ -457,7 +457,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             try:
                 if cl and int(cl) > max_content_length and preview_rows > 0:
-                    raise util.JobError(
+                    raise utils.JobError(
                         "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
                             cl=DataSize(int(cl)),
                             max_cl=DataSize(int(max_content_length)),
@@ -476,12 +476,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     resource_format = mimetypes.guess_extension(ct.split(";")[0])
 
                     if resource_format is None:
-                        raise util.JobError(
+                        raise utils.JobError(
                             "Cannot determine format from mime type. Please specify format."
                         )
                     logger.info("Inferred file format: {}".format(resource_format))
                 else:
-                    raise util.JobError(
+                    raise utils.JobError(
                         "Server did not return content-type. Please specify format."
                     )
             else:
@@ -501,7 +501,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
                     length += len(chunk)
                     if length > max_content_length and not preview_rows:
-                        raise util.JobError(
+                        raise utils.JobError(
                             "Resource too large to process: {cl} > max ({max_cl}).".format(
                                 cl=length, max_cl=max_content_length
                             )

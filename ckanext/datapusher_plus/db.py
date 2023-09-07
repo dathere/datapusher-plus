@@ -157,7 +157,6 @@ def get_job(job_id, limit=None, use_aps_id=False):
     # warnings.
     if job_id:
         job_id = str(job_id)
-
     if use_aps_id:
         result = ENGINE.execute(
             JOBS_TABLE.select().where(JOBS_TABLE.c.aps_job_id == job_id)
