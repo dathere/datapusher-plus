@@ -16,6 +16,7 @@ import logging
 
 # Third-party imports
 import psycopg2
+from ckanext.datapusher_plus.job_exceptions import HTTPError
 from datasize import DataSize
 from dateutil.parser import parse as parsedate
 import json
@@ -48,7 +49,7 @@ import ckan.plugins.toolkit as tk
 
 
 import ckanext.datapusher_plus.utils as utils
-import ckanext.datapusher_plus.db as db
+import ckanext.datapusher_plus.helpers as dph
 from ckanext.datapusher_plus.config import config
 
 if locale.getdefaultlocale()[0]:
@@ -313,16 +314,16 @@ def datapusher_plus_to_datastore(input):
     try:
         push_to_datastore(input, job_id)
         job_dict["status"] = "complete"
-        db.mark_job_as_completed(job_id, job_dict)
+        dph.mark_job_as_completed(job_id, job_dict)
     except utils.JobError as e:
-        db.mark_job_as_errored(job_id, str(e))
+        dph.mark_job_as_errored(job_id, str(e))
         job_dict["status"] = "error"
         job_dict["error"] = str(e)
         log = logging.getLogger(__name__)
         log.error("Datapusher Plus error: {0}, {1}".format(e, traceback.format_exc()))
         errored = True
     except Exception as e:
-        db.mark_job_as_errored(
+        dph.mark_job_as_errored(
             job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e)
         )
         job_dict["status"] = "error"
@@ -359,6 +360,13 @@ def push_to_datastore(input, task_id, dry_run=False):
 
     
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
+
+    breakpoint()
+    #add job to dn  (datapusher_plus_jobs table)
+    try:
+        dph.add_pending_job(task_id, **input)
+    except sa.exc.IntegrityError:
+        raise utils.JobError("Job already exists.")
     handler = utils.StoringHandler(task_id, input)
     logger = logging.getLogger(task_id)
     logger.addHandler(handler)

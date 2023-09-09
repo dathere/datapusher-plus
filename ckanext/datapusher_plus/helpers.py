@@ -2,13 +2,20 @@
 from __future__ import annotations
 
 
-import json 
+import json
+import logging
 import datetime
 from typing import Any
+from sqlalchemy.orm import Query
 
 import ckan.plugins.toolkit as toolkit
+from ckan import model as ckan_model
 
-import ckanext.datapusher_plus.model as model
+from ckanext.datapusher_plus.model import Jobs, Metadata, Logs
+import ckanext.datapusher_plus.job_exceptions as jex
+
+
+log = logging.getLogger(__name__)
 
 def datapusher_status(resource_id: str):
     try:
@@ -95,9 +102,9 @@ def get_job(job_id, limit=None, use_aps_id=False):
     if job_id:
         job_id = str(job_id)
     if use_aps_id:
-        result = model.Jobs.get_by_aps_id(use_aps_id).first()
+        result = Jobs.get_by_aps_id(use_aps_id)
     else:
-        result = model.Jobs.get(job_id).first()
+        result = Jobs.get(job_id)
 
     if not result:
         return None
@@ -115,8 +122,8 @@ def get_job(job_id, limit=None, use_aps_id=False):
         else:
             result_dict[field] = str(value)
 
-    result_dict["metadata"] = model.Metadata.get(job_id)
-    result_dict["logs"] = model.Logs.get_with_limit(job_id, limit=limit)
+    result_dict["metadata"] = Metadata.get(job_id)
+    result_dict["logs"] = Logs.get_with_limit(job_id, limit=limit)
 
     return result_dict
 
@@ -181,5 +188,181 @@ def add_pending_job(
     if not metadata:
         metadata = {}
     
-    job = model.Jobs(job_id, job_type, "pending", data, None, None, None, None, None, result_url, api_key, job_key)
+    import pdb; pdb.set_trace()
+    job = Jobs(job_id, job_type, "pending", data, None, None, None, None, None, result_url, api_key, job_key)
+    try:
+        job.save()
+    except Exception as e:
+        raise e
+
+    inserts = {}
+    for key, value in metadata.items():
+        type_ = "string"
+        if not isinstance(value, str):
+            value = json.dumps(value)
+            type_ = "json"
+
+        # Turn strings into unicode to stop SQLAlchemy
+        # "Unicode type received non-unicode bind param value" warnings.
+        key = str(key)
+        value = str(value)
+
+        inserts.update({"job_id": job_id, "key": key, "value": value, "type": type_})
+        if inserts:
+            md = Metadata(**inserts)
+            md.save()
+
+
+def validate_error(error):
+    """Validate and return the given error object.
+
+    Based on the given error object, return either None or a dict with a
+    "message" key whose value is a string (the dict may also have any other
+    keys that it wants).
+
+    The given "error" object can be:
+
+    - None, in which case None is returned
+
+    - A string, in which case a dict like this will be returned:
+      {"message": error_string}
+
+    - A dict with a "message" key whose value is a string, in which case the
+      dict will be returned unchanged
+
+    :param error: the error object to validate
+
+    :raises InvalidErrorObjectError: If the error object doesn't match any of
+        the allowed types
+
+    """
+    if error is None:
+        return None
+    elif isinstance(error, str):
+        return {"message": error}
+    else:
+        try:
+            message = error["message"]
+            if isinstance(message, str):
+                return error
+            else:
+                raise jex.InvalidErrorObjectError("error['message'] must be a string")
+        except (TypeError, KeyError):
+            raise jex.InvalidErrorObjectError(
+                "error must be either a string or a dict with a message key"
+            )
+
+def update_job(job_id, job_dict):
+    """Update the database row for the given job_id with the given job_dict.
+
+    All functions that update rows in the jobs table do it by calling this
+    helper function.
+
+    job_dict is a dict with values corresponding to the database columns that
+    should be updated, e.g.:
+
+      {"status": "complete", "data": ...}
+
+    """
+    # Avoid SQLAlchemy "Unicode type received non-unicode bind param value"
+    # warnings.
+    if job_id:
+        job_id = str(job_id)
+
+    if "error" in job_dict:
+        job_dict["error"] = validate_error(job_dict["error"])
+        job_dict["error"] = json.dumps(job_dict["error"])
+        # Avoid SQLAlchemy "Unicode type received non-unicode bind param value"
+        # warnings.
+        job_dict["error"] = str(job_dict["error"])
+
+    # Avoid SQLAlchemy "Unicode type received non-unicode bind param value"
+    # warnings.
+    if "data" in job_dict:
+        job_dict["data"] = str(job_dict["data"])
+
+    
+    try:
+        job = Jobs.get(job_id)
+        if not job:
+            raise Exception("Job not found")
+        job.update(job_dict)
+    except Exception as e:
+        log.error("Failed to update job %s: %s", job_id, e)
+        raise e
+
+
+def mark_job_as_completed(job_id, data=None):
+    """Mark a job as completed successfully.
+
+    :param job_id: the job_id of the job to be updated
+    :type job_id: unicode
+
+    :param data: the output data returned by the job
+    :type data: any JSON-serializable type (including None)
+
+    """
+    update_dict = {
+        "status": "complete",
+        "data": json.dumps(data),
+        "finished_timestamp": datetime.datetime.now(),
+    }
+    update_job(job_id, update_dict)
+
+
+def mark_job_as_errored(job_id, error_object):
+    """Mark a job as failed with an error.
+
+    :param job_id: the job_id of the job to be updated
+    :type job_id: unicode
+
+    :param error_object: the error returned by the job
+    :type error_object: either a string or a dict with a "message" key whose
+        value is a string
+
+    """
+    update_dict = {
+        "status": "error",
+        "error": error_object,
+        "finished_timestamp": datetime.datetime.now(),
+    }
+    update_job(job_id, update_dict)
+
+
+def mark_job_as_failed_to_post_result(job_id):
+    """Mark a job as 'failed to post result'.
+
+    This happens when a job completes (either successfully or with an error)
+    then trying to post the job result back to the job's callback URL fails.
+
+    FIXME: This overwrites any error from the job itself!
+
+    :param job_id: the job_id of the job to be updated
+    :type job_id: unicode
+
+    """
+    update_dict = {
+        "error": "Process completed but unable to post to result_url",
+    }
+    update_job(job_id, update_dict)
+
+
+def delete_api_key(job_id):
+    """Delete the given job's API key from the database.
+
+    The API key is used when posting the job's result to the client's callback
+    URL. This function should be called to delete the API key after the result
+    has been posted - the API key is no longer needed.
+
+    """
+    update_job(job_id, {"api_key": None})
+
+
+def set_aps_job_id(job_id, aps_job_id):
+
+    update_job(job_id, {"aps_job_id": aps_job_id})
+
+
+
+
 

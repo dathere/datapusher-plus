@@ -48,6 +48,7 @@ logs_table = Table(
         "job_id",
         ForeignKey("jobs.job_id", ondelete="CASCADE"),
         nullable=False,
+        primary_key=True,
     ),
     Column("timestamp", types.DateTime),
     Column("message", types.UnicodeText),
@@ -141,3 +142,8 @@ class Logs(DomainObject):
             return None
 
         return meta.Session.query(cls).filter(cls.job_id == job_id).order_by(cls.timestamp.desc()).limit(limit).all()
+    
+
+meta.mapper(Jobs, jobs_table)
+meta.mapper(Metadata, metadata_table)
+meta.mapper(Logs, logs_table)
