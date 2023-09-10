@@ -289,11 +289,10 @@ def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
         if not job:
             raise Exception("Job not found")
         #dicticize the job
-        breakpoint()
         jobs_dict = job.as_dict()
         jobs_dict.update(job_dict)
 
-        Jobs.save(jobs_dict)
+        Jobs.update(jobs_dict)
         
     except Exception as e:
         log.error("Failed to update job %s: %s", job_id, e)

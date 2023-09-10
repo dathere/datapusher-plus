@@ -73,6 +73,22 @@ class Jobs(DomainObject):
         self.api_key = api_key
         self.job_key = job_key
 
+    def as_dict(self):
+        return {
+            'job_id': self.job_id,
+            'job_type': self.job_type,
+            'status': self.status,
+            'data': self.data,
+            'error': self.error,
+            'requested_timestamp': self.requested_timestamp,
+            'finished_timestamp': self.finished_timestamp,
+            'sent_data': self.sent_data,
+            'aps_job_id': self.aps_job_id,
+            'result_url': self.result_url,
+            'api_key': self.api_key,
+            'job_key': self.job_key
+        }
+
     @classmethod
     def get(cls, job_id):
         if not job_id:
@@ -94,6 +110,17 @@ class Jobs(DomainObject):
             return None
 
         return meta.Session.query(cls).filter(cls.status == status).all()
+
+    @classmethod
+    def update(cls, job_dict):
+        job = cls.get(job_dict['job_id'])
+        if job:
+            for key, value in job_dict.items():
+                setattr(job, key, value)
+            # Assuming meta.Session has a commit method to save changes to the DB
+            meta.Session.commit()
+        else:
+            raise Exception("Job not found")
     
 
 class Metadata(DomainObject):
