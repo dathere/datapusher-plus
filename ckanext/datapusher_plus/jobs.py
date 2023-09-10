@@ -360,8 +360,6 @@ def push_to_datastore(input, task_id, dry_run=False):
 
     
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
-
-    breakpoint()
     #add job to dn  (datapusher_plus_jobs table)
     try:
         dph.add_pending_job(task_id, **input)
@@ -1483,9 +1481,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # by default, we only add summary stats if we're not doing a partial download
     # (otherwise, you're summarizing the preview, not the whole file)
     # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
-    if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
-        download_preview_only and config.get("SUMMARY_STATS_WITH_PREVIEW")
-    ):
+    if (config.get("ADD_SUMMARY_STATS_RESOURCE")) or (config.get("SUMMARY_STATS_WITH_PREVIEW")):
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -1619,10 +1615,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
-    if preview_rows < record_count or (preview_rows > 0 and download_preview_only):
+    if preview_rows < record_count or (preview_rows > 0):
         resource["preview"] = True
         resource["preview_rows"] = copied_count
-        resource["partial_download"] = download_preview_only
     else:
         resource["preview"] = False
         resource["preview_rows"] = None

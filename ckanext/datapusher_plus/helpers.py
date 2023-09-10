@@ -188,7 +188,6 @@ def add_pending_job(
     if not metadata:
         metadata = {}
     
-    import pdb; pdb.set_trace()
     job = Jobs(job_id, job_type, "pending", data, None, None, None, None, None, result_url, api_key, job_key)
     try:
         job.save()
@@ -210,7 +209,10 @@ def add_pending_job(
         inserts.update({"job_id": job_id, "key": key, "value": value, "type": type_})
         if inserts:
             md = Metadata(**inserts)
-            md.save()
+            try:
+                md.save()
+            except Exception as e:
+                raise e
 
 
 def validate_error(error):
@@ -252,7 +254,7 @@ def validate_error(error):
                 "error must be either a string or a dict with a message key"
             )
 
-def update_job(job_id, job_dict):
+def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
     """Update the database row for the given job_id with the given job_dict.
 
     All functions that update rows in the jobs table do it by calling this
@@ -286,7 +288,13 @@ def update_job(job_id, job_dict):
         job = Jobs.get(job_id)
         if not job:
             raise Exception("Job not found")
-        job.update(job_dict)
+        #dicticize the job
+        breakpoint()
+        jobs_dict = job.as_dict()
+        jobs_dict.update(job_dict)
+
+        Jobs.save(jobs_dict)
+        
     except Exception as e:
         log.error("Failed to update job %s: %s", job_id, e)
         raise e
