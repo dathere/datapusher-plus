@@ -11,6 +11,7 @@ import ckanext.datapusher_plus.views as views
 import ckanext.datapusher_plus.helpers as helpers
 import ckanext.datapusher_plus.logic.action as action
 import ckanext.datapusher_plus.logic.auth as auth
+import ckanext.datapusher_plus.cli as cli
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
     p.implements(p.IResourceController, inherit=True)
     p.implements(p.ITemplateHelpers)
     p.implements(p.IBlueprint)
+    p.implements(p.IClick)
 
     legacy_mode = False
     resource_show_action = None
@@ -140,3 +142,8 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
     def get_blueprint(self):
         return views.get_blueprints()
+
+
+    # IClick
+    def get_commands(self):
+        return [cli.init_db]

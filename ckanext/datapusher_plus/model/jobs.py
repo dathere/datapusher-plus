@@ -44,11 +44,11 @@ metadata_table = Table(
 logs_table = Table(
     "logs",
     meta.metadata,
+    Column("id", types.Integer, primary_key=True, autoincrement=True),
     Column(
         "job_id",
         ForeignKey("jobs.job_id", ondelete="CASCADE"),
         nullable=False,
-        primary_key=True,
     ),
     Column("timestamp", types.DateTime),
     Column("message", types.UnicodeText),
@@ -174,3 +174,7 @@ class Logs(DomainObject):
 meta.mapper(Jobs, jobs_table)
 meta.mapper(Metadata, metadata_table)
 meta.mapper(Logs, logs_table)
+
+
+def init_tables():
+    meta.metadata.create_all(meta.engine)
