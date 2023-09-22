@@ -45,3 +45,6 @@ class LoaderError(JobError):
     """Exception that's raised if a load fails"""
 
     pass
+
+class InvalidErrorObjectError(Exception):
+    pass

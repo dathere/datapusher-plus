@@ -14,7 +14,7 @@ WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_def
 SQLALCHEMY_DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
 
 # =============== DOWNLOAD SETTINGS ==============
-# 25mb, this is ignored if either PREVIEW_ROWS > 0 or DOWNLOAD_PREVIEW_ONLY is True
+# 25mb, this is ignored if either PREVIEW_ROWS > 0
 MAX_CONTENT_LENGTH = 25600000
 
 # A Datapusher+ job is triggered automatically everytime a resource is modified (even just its metadata)
@@ -38,7 +38,6 @@ SSL_VERIFY = False
 PREVIEW_ROWS = 0
 
 # If this is True, only the first n PREVIEW_ROWS are downloaded, and not the whole file
-DOWNLOAD_PREVIEW_ONLY = False
 
 DOWNLOAD_PROXY = ''
 

@@ -16,6 +16,7 @@ import logging
 
 # Third-party imports
 import psycopg2
+from ckanext.datapusher_plus.job_exceptions import HTTPError
 from datasize import DataSize
 from dateutil.parser import parse as parsedate
 import json
@@ -48,7 +49,7 @@ import ckan.plugins.toolkit as tk
 
 
 import ckanext.datapusher_plus.utils as utils
-import ckanext.datapusher_plus.db as db
+import ckanext.datapusher_plus.helpers as dph
 from ckanext.datapusher_plus.config import config
 
 if locale.getdefaultlocale()[0]:
@@ -313,16 +314,16 @@ def datapusher_plus_to_datastore(input):
     try:
         push_to_datastore(input, job_id)
         job_dict["status"] = "complete"
-        db.mark_job_as_completed(job_id, job_dict)
+        dph.mark_job_as_completed(job_id, job_dict)
     except utils.JobError as e:
-        db.mark_job_as_errored(job_id, str(e))
+        dph.mark_job_as_errored(job_id, str(e))
         job_dict["status"] = "error"
         job_dict["error"] = str(e)
         log = logging.getLogger(__name__)
         log.error("Datapusher Plus error: {0}, {1}".format(e, traceback.format_exc()))
         errored = True
     except Exception as e:
-        db.mark_job_as_errored(
+        dph.mark_job_as_errored(
             job_id, traceback.format_tb(sys.exc_info()[2])[-1] + repr(e)
         )
         job_dict["status"] = "error"
@@ -359,6 +360,11 @@ def push_to_datastore(input, task_id, dry_run=False):
 
     
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
+    #add job to dn  (datapusher_plus_jobs table)
+    try:
+        dph.add_pending_job(task_id, **input)
+    except sa.exc.IntegrityError:
+        raise utils.JobError("Job already exists.")
     handler = utils.StoringHandler(task_id, input)
     logger = logging.getLogger(task_id)
     logger.addHandler(handler)
@@ -1475,9 +1481,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # by default, we only add summary stats if we're not doing a partial download
     # (otherwise, you're summarizing the preview, not the whole file)
     # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
-    if (config.get("ADD_SUMMARY_STATS_RESOURCE") and not download_preview_only) or (
-        download_preview_only and config.get("SUMMARY_STATS_WITH_PREVIEW")
-    ):
+    if (config.get("ADD_SUMMARY_STATS_RESOURCE")) or (config.get("SUMMARY_STATS_WITH_PREVIEW")):
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -1611,10 +1615,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
-    if preview_rows < record_count or (preview_rows > 0 and download_preview_only):
+    if preview_rows < record_count or (preview_rows > 0):
         resource["preview"] = True
         resource["preview_rows"] = copied_count
-        resource["partial_download"] = download_preview_only
     else:
         resource["preview"] = False
         resource["preview_rows"] = None

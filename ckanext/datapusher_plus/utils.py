@@ -8,6 +8,7 @@ from six import text_type as str
 
 import ckanext.datapusher_plus.db as db
 import ckan.plugins.toolkit as tk
+from ckanext.datapusher_plus.model import Logs
 
 from .job_exceptions import HTTPError
 
@@ -21,28 +22,20 @@ class StoringHandler(logging.Handler):
         self.input = input
 
     def emit(self, record):
-        conn = db.ENGINE.connect()
-        try:
-            # Turn strings into unicode to stop SQLAlchemy
-            # "Unicode type received non-unicode bind param value" warnings.
-            message = str(record.getMessage())
-            level = str(record.levelname)
-            module = str(record.module)
-            funcName = str(record.funcName)
-
-            conn.execute(
-                db.LOGS_TABLE.insert().values(
-                    job_id=self.task_id,
-                    timestamp=datetime.datetime.utcnow(),
-                    message=message,
-                    level=level,
-                    module=module,
-                    funcName=funcName,
-                    lineno=record.lineno,
-                )
-            )
-        finally:
-            conn.close()
+        message = str(record.getMessage())
+        level = str(record.levelname)
+        module = str(record.module)
+        funcName = str(record.funcName)
+        job_log = Logs(
+            job_id=self.task_id,
+            timestamp=datetime.datetime.now(),
+            message=message,
+            level=level,
+            module=module,
+            funcName=funcName,
+            lineno=record.lineno
+        )
+        job_log.save()
 
 
 class DatetimeJsonEncoder(json.JSONEncoder):
