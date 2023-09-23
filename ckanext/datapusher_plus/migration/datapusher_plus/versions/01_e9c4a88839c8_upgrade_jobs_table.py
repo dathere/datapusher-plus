@@ -25,7 +25,16 @@ def upgrade():
             sa.UnicodeText),
     )
     
+    #upgrade logs table
+    op.add_column(
+        'logs',
+        sa.Column(
+            'id',
+            sa.Integer,
+            primary_key=True,
+            autoincrement=True),
+    )
 
-
+    
 def downgrade():
     pass
