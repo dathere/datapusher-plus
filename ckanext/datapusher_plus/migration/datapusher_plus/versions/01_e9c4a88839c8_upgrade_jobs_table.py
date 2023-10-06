@@ -19,12 +19,12 @@ depends_on = None
 def upgrade():
     #upgrade jobs table if it not exists
     
-    # op.add_column(
-    #     u'jobs',
-    #     sa.Column(
-    #         'aps_job_id',
-    #         sa.UnicodeText),
-    # )
+    op.add_column(
+        u'jobs',
+        sa.Column(
+            'aps_job_id',
+            sa.UnicodeText),
+    )
     
     #upgrade logs table
     op.add_column(
