@@ -11,6 +11,7 @@ from dateutil.parser import parse as parse_date
 from six.moves.urllib.parse import urljoin
 
 import ckan.lib.helpers as h
+import ckan.lib.api_token as api_token
 import ckan.lib.navl.dictization_functions
 import ckan.logic as logic
 import ckan.plugins as p
@@ -159,7 +160,6 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
     timeout = config.get('ckan.requests.timeout')
     # This setting is checked on startup
     api_token = utils.get_dp_plus_user_apitoken()
-
     data = {
         'api_key': api_token,
         'job_type': 'push_to_datastore',

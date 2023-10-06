@@ -90,8 +90,8 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
                 context,
                 {
                     "entity_id": resource_dict["id"],
-                    "task_type": "datapusher",
-                    "key": "datapusher",
+                    "task_type": "datapusher_plus",
+                    "key": "datapusher_plus",
                 },
             )
 
@@ -99,7 +99,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
                 # There already is a pending DataPusher submission,
                 # skip this one ...
                 log.debug(
-                    "Skipping DataPusher submission for "
+                    "Skipping DataPusher Plus submission for "
                     "resource {0}".format(resource_dict["id"])
                 )
                 return
@@ -108,7 +108,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
         try:
             log.debug(
-                "Submitting resource {0}".format(resource_dict["id"]) + " to DataPusher"
+                "Submitting resource {0}".format(resource_dict["id"]) + " to DataPusher Plus"
             )
             p.toolkit.get_action("datapusher_submit")(
                 context, {"resource_id": resource_dict["id"]}

@@ -17,7 +17,8 @@ depends_on = None
 
 
 def upgrade():
-    #upgrade jobs table
+    #upgrade jobs table if it not exists
+    
     op.add_column(
         u'jobs',
         sa.Column(
