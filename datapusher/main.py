@@ -1,7 +1,7 @@
 import os
 import ckanserviceprovider.web as web
 
-import .jobs
+from . import jobs
 from .config import config
 
 # check whether jobs have been imported properly
