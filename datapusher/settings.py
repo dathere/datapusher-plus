@@ -1,1 +1,1 @@
-from datapusher.config import *
+from .config import *
