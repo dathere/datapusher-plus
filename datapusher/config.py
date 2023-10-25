@@ -68,21 +68,21 @@ class DataPusherPlusConfig(MutableMapping):
 
     PREFER_DMY: bool = False
     PREVIEW_ROWS: int = 0
-    
+
     AUTO_INDEX_THRESHOLD: int = 3
     AUTO_UNIQUE_INDEX:bool = True
     AUTO_INDEX_DATES: bool = True
-    
+
     SORT_AND_DUPE_CHECK: bool = True
     DEDUP: bool = False
     DEFAULT_EXCEL_SHEET: int = 0
-    
+
     UNSAFE_PREFIX: str = "unsafe_"
     RESERVED_COLNAMES: str = "_id"
-        
+
     ADD_SUMMARY_STATS_RESOURCE: bool = False
     SUMMARY_STATS_OPTIONS: str = ""
-    
+
     AUTO_ALIAS: bool = True
     AUTO_ALIAS_UNIQUE: bool = False
 

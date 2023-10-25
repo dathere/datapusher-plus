@@ -29,7 +29,7 @@ from psycopg2 import sql
 
 # CKAN-related imports
 from ckanserviceprovider import web
-from datapusher.config import config
+from .config import config
 
 
 if locale.getdefaultlocale()[0]:
@@ -372,7 +372,7 @@ def push_to_datastore(task_id, input, dry_run=False):
     with tempfile.TemporaryDirectory() as temp_dir:
         return _push_to_datastore(task_id, input, dry_run=dry_run, temp_dir=temp_dir)
 
-    
+
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     handler = util.StoringHandler(task_id, input)
     logger = logging.getLogger(task_id)
@@ -669,7 +669,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # using uchardet to determine encoding
         file_encoding = subprocess.run(
                         [
-                            "uchardet", 
+                            "uchardet",
                             tmp.name
                         ],
                         check=True,
