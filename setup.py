@@ -82,7 +82,7 @@ setup(
     # pip to create the appropriate form of executable for the target platform.
     entry_points='''
         [ckan.plugins]
-        datapusher_plus=ckanext.datapusher_plus.plugin:DatapusherPlusPlugin
+        datapusher=ckanext.datapusher_plus.plugin:DatapusherPlusPlugin
 
         [babel.extractors]
         ckan = ckan.lib.extract:extract_ckan
