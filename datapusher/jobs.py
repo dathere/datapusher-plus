@@ -1720,6 +1720,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
     auto_index_dates = config.get("AUTO_INDEX_DATES")
     auto_unique_index = config.get("AUTO_UNIQUE_INDEX")
+    index_elapsed = 0.0
     if (
         auto_index_threshold
         or (auto_index_dates and datetimecols_list)
