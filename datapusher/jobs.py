@@ -665,12 +665,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
             )
 
-        qsv_input_utf_8_encoded_csv = tempfile.NamedTemporaryFile(suffix=".csv")
+        qsv_input_utf_8_encoded_csv = os.path.join(temp_dir, 'qsv_input_utf_8_encoded.csv')
+
         # using uchardet to determine encoding
         file_encoding = subprocess.run(
                         [
                             "uchardet",
-                            tmp.name
+                            tmp
                         ],
                         check=True,
                         capture_output=True,
@@ -691,9 +692,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         file_encoding.stdout,
                         "-t",
                         "UTF-8",
-                        tmp.name,
+                        tmp,
                         "--output",
-                        qsv_input_utf_8_encoded_csv.name,
+                        qsv_input_utf_8_encoded_csv,
                     ],
                     check=True,
                 )
@@ -708,7 +709,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 [
                     qsv_bin,
                     "input",
-                    qsv_input_utf_8_encoded_csv.name,
+                    qsv_input_utf_8_encoded_csv,
                     "--trim-headers",
                     "--output",
                     qsv_input_csv,
