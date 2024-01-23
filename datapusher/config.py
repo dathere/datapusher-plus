@@ -35,6 +35,7 @@ class DataPusherPlusConfig(MutableMapping):
     # ckan_service_provider settings
     SQLALCHEMY_DATABASE_URI: str = _DATABASE_URI
     WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
+    COPY_READBUFFER_SIZE: int = 1048576
     DEBUG: bool = False
     TESTING: bool = False
     SECRET_KEY: str = str(uuid.uuid4())
