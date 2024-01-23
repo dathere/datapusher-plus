@@ -1407,6 +1407,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
+        copy_readbuffer_size = config.get("COPY_READBUFFER_SIZE")
         cur = raw_connection.cursor()
         """
         truncate table to use copy freeze option and further increase
@@ -1431,7 +1432,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             sql.Identifier(resource_id),
             column_names,
         )
-        with open(tmp, "rb") as f:
+        # specify a 1MB buffer size for COPY read from disk
+        with open(tmp, "rb", copy_readbuffer_size) as f:
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
