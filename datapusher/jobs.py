@@ -1441,7 +1441,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             sql.Identifier(resource_id),
             column_names,
         )
-        with open(tmp, "rb") as f:
+        with open(tmp, "rb", 8192) as f:
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
