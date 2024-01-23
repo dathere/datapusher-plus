@@ -13,6 +13,10 @@ WRITE_ENGINE_URL = 'postgresql://datapusher:YOURPASSWORD@localhost/datastore_def
 # The connect string of the Datapusher+ Job database
 SQLALCHEMY_DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/datapusher_jobs'
 
+# READ BUFFER SIZE IN BYTES WHEN READING CSV FILE WHEN USING POSTGRES COPY
+# default 1mb = 1048576
+COPY_READBUFFER_SIZE = 1048576
+
 # =============== DOWNLOAD SETTINGS ==============
 # 25mb, this is ignored if either PREVIEW_ROWS > 0
 MAX_CONTENT_LENGTH = 25600000
