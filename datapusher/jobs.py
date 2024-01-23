@@ -1445,7 +1445,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # specify a 1MB buffer size for COPY read from disk
         with open(tmp, "rb", copy_readbuffer_size) as f:
             try:
-                cur.copy_expert(copy_sql, f)
+                cur.copy_expert(copy_sql, f, size=copy_readbuffer_size)
             except psycopg2.Error as e:
                 raise util.JobError("Postgres COPY failed: {}".format(e))
             else:
