@@ -677,6 +677,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         text=True,
                     )
         logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
+        
+        # trim the encoding string
+        file_encoding.stdout = file_encoding.stdout.strip()
 
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
