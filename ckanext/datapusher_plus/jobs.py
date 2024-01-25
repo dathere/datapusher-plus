@@ -659,7 +659,55 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if resource_format.upper() == "CSV":
             logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
         else:
-            logger.info("Normalizing/UTF-8 transcoding {} to CSV...".format(format))
+            # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
+            logger.info(
+                "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
+            )
+
+        qsv_input_utf_8_encoded_csv = os.path.join(temp_dir, 'qsv_input_utf_8_encoded.csv')
+
+        # using uchardet to determine encoding
+        file_encoding = subprocess.run(
+                        [
+                            "uchardet",
+                            tmp
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+        logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
+
+        # trim the encoding string
+        file_encoding.stdout = file_encoding.stdout.strip()
+
+        # using iconv to re-encode in UTF-8
+        if file_encoding.stdout != "UTF-8":
+            logger.info("File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
+                file_encoding.stdout)
+                )
+            try:
+                subprocess.run(
+                    [
+                        "iconv",
+                        "-f",
+                        file_encoding.stdout,
+                        "-t",
+                        "UTF-8",
+                        tmp,
+                        "--output",
+                        qsv_input_utf_8_encoded_csv,
+                    ],
+                    check=True,
+                )
+            except subprocess.CalledProcessError as e:
+                # return as we can't push a non UTF-8 CSV
+                logger.error(
+                    "Job aborted as the file cannot be re-encoded to UTF-8: {}.".format(e)
+                )
+                return
+        else:
+            qsv_input_utf_8_encoded_csv = tmp
         try:
             qsv_input = subprocess.run(
                 [
