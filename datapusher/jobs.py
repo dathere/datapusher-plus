@@ -707,6 +707,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     "Job aborted as the file cannot be re-encoded to UTF-8: {}.".format(e)
                 )
                 return
+        else:
+            qsv_input_utf_8_encoded_csv = tmp
         try:
             subprocess.run(
                 [
