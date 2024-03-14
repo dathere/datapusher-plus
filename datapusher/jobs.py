@@ -688,19 +688,19 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 file_encoding.stdout)
                 )
             try:
-                subprocess.run(
-                    [
-                        "iconv",
-                        "-f",
-                        file_encoding.stdout,
-                        "-t",
-                        "UTF-8",
-                        tmp,
-                        "--output",
-                        qsv_input_utf_8_encoded_csv,
-                    ],
-                    check=True,
-                )
+                with open(qsv_input_utf_8_encoded_csv, 'w') as fd:
+                    subprocess.run(
+                        [
+                            "iconv",
+                            "-f",
+                            file_encoding.stdout,
+                            "-t",
+                            "UTF-8",
+                            tmp,
+                        ],
+                        check=True,
+                        stdout=fd
+                    )
             except subprocess.CalledProcessError as e:
                 # return as we can't push a non UTF-8 CSV
                 logger.error(
