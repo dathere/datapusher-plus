@@ -696,10 +696,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         "-t",
                         "UTF-8",
                         tmp,
-                        "--output",
-                        qsv_input_utf_8_encoded_csv,
                     ],
                     check=True,
+                    stdout=qsv_input_utf_8_encoded_csv
                 )
             except subprocess.CalledProcessError as e:
                 # return as we can't push a non UTF-8 CSV
