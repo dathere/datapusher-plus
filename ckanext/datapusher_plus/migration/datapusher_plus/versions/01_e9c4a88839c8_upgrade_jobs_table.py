@@ -18,7 +18,6 @@ depends_on = None
 
 def upgrade():
     #upgrade jobs table if it not exists
-    
     op.add_column(
         u'jobs',
         sa.Column(
@@ -26,16 +25,5 @@ def upgrade():
             sa.UnicodeText),
     )
     
-    #upgrade logs table
-    op.add_column(
-        'logs',
-        sa.Column(
-            'id',
-            sa.Integer,
-            primary_key=True,
-            autoincrement=True),
-    )
-
-    
 def downgrade():
-    pass
+    op.drop_column(u'jobs', 'aps_job_id')

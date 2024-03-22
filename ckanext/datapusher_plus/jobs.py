@@ -52,6 +52,7 @@ import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
 from ckanext.datapusher_plus.config import config
 
+
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
@@ -102,70 +103,41 @@ class DatastoreEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-def delete_datastore_resource(resource_id, api_key, ckan_url):
+
+def delete_datastore_resource(resource_id):   
     try:
-        delete_url = get_url("datastore_delete", ckan_url)
-        response = requests.post(
-            delete_url,
-            verify=SSL_VERIFY,
-            data=json.dumps({"id": resource_id, "force": True}),
-            headers={"Content-Type": "application/json", "Authorization": api_key},
-        )
-        utils.check_response(
-            response,
-            delete_url,
-            "CKAN",
-            good_status=(201, 200, 404),
-            ignore_no_success=True,
-        )
-    except requests.exceptions.RequestException:
+        tk.get_action("datastore_delete")(
+                {"ignore_auth": True}, {"resource_id": resource_id, "force": True})
+    except tk.ObjectNotFound:
         raise utils.JobError("Deleting existing datastore failed.")
 
 
 def delete_resource(resource_id, api_key, ckan_url):
+    if not tk.user:
+        raise utils.JobError("No user found.")
     try:
-        delete_url = get_url("resource_delete", ckan_url)
-        response = requests.post(
-            delete_url,
-            verify=SSL_VERIFY,
-            data=json.dumps({"id": resource_id, "force": True}),
-            headers={"Content-Type": "application/json", "Authorization": api_key},
-        )
-        utils.check_response(
-            response,
-            delete_url,
-            "CKAN",
-            good_status=(201, 200, 404),
-            ignore_no_success=True,
-        )
-    except requests.exceptions.RequestException:
+        tk.get_action("resource_delete")({"user": tk.user}, {"id": resource_id, "force": True})
+    except tk.ObjectNotFound:
         raise utils.JobError("Deleting existing resource failed.")
 
 
 def datastore_resource_exists(resource_id, api_key, ckan_url):
-    from ckanext.datapusher_plus.job_exceptions import HTTPError, JobError
+    from ckanext.datapusher_plus.job_exceptions import JobError
+
+    data_dict = {
+        "resource_id": resource_id,
+        "limit": 0,
+        "include_total": False,
+    }
+
+    context = {'ignore_auth': True }
 
     try:
-        search_url = get_url("datastore_search", ckan_url)
-        response = requests.post(
-            search_url,
-            verify=SSL_VERIFY,
-            data=json.dumps({"id": resource_id, "limit": 0}),
-            headers={"Content-Type": "application/json", "Authorization": api_key},
-        )
-        if response.status_code == 404:
-            return False
-        elif response.status_code == 200:
-            return response.json().get("result", {"fields": []})
-        else:
-            raise HTTPError(
-                "Error getting datastore resource.",
-                response.status_code,
-                search_url,
-                response,
-            )
-    except requests.exceptions.RequestException as e:
-        raise JobError("Error getting datastore resource ({!s}).".format(e))
+        result = tk.get_action("datastore_search")(context, data_dict)
+        return result
+    except tk.ObjectNotFound:
+        return False
+  
 
 
 def send_resource_to_datastore(
@@ -201,28 +173,23 @@ def send_resource_to_datastore(
             "aliases": aliases,
             "calculate_record_count": calculate_record_count,
         }
-
-    url = get_url("datastore_create", ckan_url)
-    r = requests.post(
-        url,
-        verify=SSL_VERIFY,
-        data=json.dumps(request, cls=DatastoreEncoder),
-        headers={"Content-Type": "application/json", "Authorization": api_key},
-    )
-    utils.check_response(r, url, "CKAN DataStore")
-    return r.json()
+    try:
+        resource_dict = tk.get_action("datastore_create")({"ignore_auth": True}, request)
+        return resource_dict
+    except Exception as e:
+        raise utils.JobError("Error sending data to datastore ({!s}).".format(e))
 
 
 def update_resource(resource, ckan_url, api_key):
-    url = get_url("resource_update", ckan_url)
-    r = requests.post(
-        url,
-        verify=SSL_VERIFY,
-        data=json.dumps(resource),
-        headers={"Content-Type": "application/json", "Authorization": api_key},
-    )
-
-    utils.check_response(r, url, "CKAN")
+    """
+    Updates resource in CKAN
+    """
+    try:
+        tk.get_action("resource_update")(
+            {"ignore_auth": True}, resource
+        )
+    except tk.ObjectNotFound:
+        raise utils.JobError("Updating existing resource failed.")
 
 
 def get_resource(resource_id, ckan_url, api_key):
@@ -918,7 +885,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 res_id=resource_id
             )
         )
-        delete_datastore_resource(resource_id, api_key, ckan_url)
+        delete_datastore_resource(resource_id)
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
@@ -1204,7 +1171,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if pii_alias_result:
                     existing_pii_alias_of = pii_alias_result[0]
 
-                    delete_datastore_resource(existing_pii_alias_of, api_key, ckan_url)
+                    delete_datastore_resource(existing_pii_alias_of)
                     delete_resource(existing_pii_alias_of, api_key, ckan_url)
 
             pii_alias = [pii_resource_id]
@@ -1500,7 +1467,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if stats_alias_result:
                 existing_stats_alias_of = stats_alias_result[0]
 
-                delete_datastore_resource(existing_stats_alias_of, api_key, ckan_url)
+                delete_datastore_resource(existing_stats_alias_of)
                 delete_resource(existing_stats_alias_of, api_key, ckan_url)
 
         stats_aliases = [stats_resource_id]
@@ -1530,9 +1497,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if result:
                     existing_stats_alias_of = result[0]
 
-                    delete_datastore_resource(
-                        existing_stats_alias_of, api_key, ckan_url
-                    )
+                    delete_datastore_resource(existing_stats_alias_of)
                     delete_resource(existing_stats_alias_of, api_key, ckan_url)
 
         # run stats on stats CSV to get header names and infer data types
