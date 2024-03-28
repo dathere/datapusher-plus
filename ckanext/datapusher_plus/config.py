@@ -47,7 +47,7 @@ class DataPusherPlusConfig(MutableMapping):
     STDERR: bool = True
     KEEP_JOBS_AGE: int = 60
 
-    MAX_CONTENT_LENGTH: str = "125600000"
+    MAX_CONTENT_LENGTH: str = "1256000000000"
     IGNORE_FILE_HASH: bool = True
     CHUNK_SIZE: str = "16384"
     DOWNLOAD_TIMEOUT: int = 300
