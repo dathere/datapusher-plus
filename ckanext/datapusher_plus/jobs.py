@@ -12,6 +12,7 @@ import tempfile
 import time
 import decimal
 from urllib.parse import urlsplit
+from urllib.parse import urlparse
 import logging
 
 # Third-party imports
@@ -445,6 +446,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
         headers["Authorization"] = api_key
+
+        # If the ckan_url differs from this url, rewrite this url to the ckan
+        # url. This can be useful if ckan is behind a firewall.
+        if not resource_url.startswith(ckan_url):
+            new_url = urlparse(resource_url)
+            rewrite_url = urlparse(ckan_url)
+            new_url = new_url._replace(scheme=rewrite_url.scheme, netloc=rewrite_url.netloc)
+            resource_url = new_url.geturl()
+            logger.info('Rewrote resource url to: {0}'.format(resource_url))
+
     try:
         kwargs = {
             "headers": headers,
