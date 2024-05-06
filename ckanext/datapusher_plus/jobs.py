@@ -1356,7 +1356,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     copied_count = 0
     try:
         raw_connection = psycopg2.connect(tk.config.get("ckan.datastore.write_url"))
-        connection_string = tk.config.get("ckan.datastore.write_url")
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
@@ -1386,16 +1385,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         )
         with open(tmp, "rb") as f:
             try:
-                # cur.copy_expert(copy_sql, f)
-                subprocess.run(
-                    [
-                        "psql",
-                        "-Atx",
-                        connection_string,
-                        "-c",
-                        f"COPY '{resource_id}' FROM \'" + tmp + "' CSV HEADER",
-                    ],
-                )
+                cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
                 raise utils.JobError("Postgres COPY failed: {}".format(e))
             else:
