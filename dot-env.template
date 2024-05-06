@@ -15,7 +15,7 @@ SQLALCHEMY_DATABASE_URI = 'postgresql://datapusher_jobs:YOURPASSWORD@localhost/d
 
 # =============== DOWNLOAD SETTINGS ==============
 # 25mb, this is ignored if either PREVIEW_ROWS > 0
-MAX_CONTENT_LENGTH = 25600000
+MAX_CONTENT_LENGTH = 1256000000
 
 # A Datapusher+ job is triggered automatically everytime a resource is modified (even just its metadata)
 # if its mimetype is one of the supported datapusher.formats. 
