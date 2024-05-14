@@ -44,9 +44,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         p.toolkit.add_public_directory(config, "public")
         p.toolkit.add_resource("assets", "datapusher_plus")
 
-    
     # IResourceUrlChange
-
     def notify(self, resource: model.Resource):
         context = {
             "model": model,
@@ -142,7 +140,6 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
     def get_blueprint(self):
         return views.get_blueprints()
-
 
     # IClick
     def get_commands(self):

@@ -35,6 +35,7 @@ class DataPusherPlusConfig(MutableMapping):
     # ckan_service_provider settings
     SQLALCHEMY_DATABASE_URI: str = _DATABASE_URI
     WRITE_ENGINE_URL: str = _WRITE_ENGINE_URL
+    COPY_READBUFFER_SIZE: int = 1048576
     DEBUG: bool = False
     TESTING: bool = False
     SECRET_KEY: str = str(uuid.uuid4())
@@ -47,7 +48,7 @@ class DataPusherPlusConfig(MutableMapping):
     STDERR: bool = True
     KEEP_JOBS_AGE: int = 60
 
-    MAX_CONTENT_LENGTH: str = "25600000"
+    MAX_CONTENT_LENGTH: str = "1256000000000"
     IGNORE_FILE_HASH: bool = True
     CHUNK_SIZE: str = "16384"
     DOWNLOAD_TIMEOUT: int = 300
