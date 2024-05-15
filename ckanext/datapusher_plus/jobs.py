@@ -104,7 +104,6 @@ class DatastoreEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-
 def delete_datastore_resource(resource_id):   
     try:
         tk.get_action("datastore_delete")(
@@ -138,7 +137,6 @@ def datastore_resource_exists(resource_id, api_key, ckan_url):
         return result
     except tk.ObjectNotFound:
         return False
-  
 
 
 def send_resource_to_datastore(
@@ -181,48 +179,40 @@ def send_resource_to_datastore(
         raise utils.JobError("Error sending data to datastore ({!s}).".format(e))
 
 
-def update_resource(resource, ckan_url, api_key):
+def update_resource(resource):
     """
-    Updates resource in CKAN
+    Updates resource metadata
     """
+    site_user = tk.get_action('get_site_user')({'ignore_auth': True}, {})
+    context = {
+        'ignore_auth': True,
+        'user': site_user['name'],
+        'auth_user_obj': None
+    }
     try:
-        tk.get_action("resource_update")(
-            {"ignore_auth": True}, resource
-        )
+        tk.get_action("resource_update")(context, resource)
     except tk.ObjectNotFound:
         raise utils.JobError("Updating existing resource failed.")
 
 
-def get_resource(resource_id, ckan_url, api_key):
+def get_resource(resource_id):
     """
     Gets available information about the resource from CKAN
     """
-    url = get_url("resource_show", ckan_url)
-    r = requests.post(
-        url,
-        verify=SSL_VERIFY,
-        data=json.dumps({"id": resource_id}),
-        headers={"Content-Type": "application/json", "Authorization": api_key},
-    )
-    utils.check_response(r, url, "CKAN")
+    resource_dict = tk.get_action('resource_show')({'ignore_auth': True},
+                                                   {'id': resource_id})
 
-    return r.json()["result"]
+    return resource_dict
 
 
-def get_package(package_id, ckan_url, api_key):
+def get_package(package_id):
     """
     Gets available information about a package from CKAN
     """
-    url = get_url("package_show", ckan_url)
-    r = requests.post(
-        url,
-        verify=SSL_VERIFY,
-        data=json.dumps({"id": package_id}),
-        headers={"Content-Type": "application/json", "Authorization": api_key},
-    )
-    utils.check_response(r, url, "CKAN")
+    dataset_dict = tk.get_action('package_show')({'ignore_auth': True},
+                                                 {'id': package_id})
 
-    return r.json()["result"]
+    return dataset_dict
 
 
 def validate_input(input):
@@ -326,9 +316,9 @@ def push_to_datastore(input, task_id, dry_run=False):
     with tempfile.TemporaryDirectory() as temp_dir:
         return _push_to_datastore(task_id, input, dry_run=dry_run, temp_dir=temp_dir)
 
-    
+
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
-    #add job to dn  (datapusher_plus_jobs table)
+    # add job to dn  (datapusher_plus_jobs table)
     try:
         dph.add_pending_job(task_id, **input)
     except sa.exc.IntegrityError:
@@ -362,8 +352,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         raise utils.JobError("qsv version check error: {}".format(e))
     qsv_version_info = str(qsv_version.stdout)
     qsv_semver = qsv_version_info[
-        qsv_version_info.find(" ") : qsv_version_info.find("-")
-    ].lstrip()
+        qsv_version_info.find(" "): qsv_version_info.find("-")].lstrip()
     try:
         if semver.compare(qsv_semver, MINIMUM_QSV_VERSION) < 0:
             raise utils.JobError(
@@ -383,11 +372,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     api_key = input.get("api_key")
 
     try:
-        resource = get_resource(resource_id, ckan_url, api_key)
+        resource = get_resource(resource_id)
     except utils.JobError:
         # try again in 5 seconds just incase CKAN is slow at adding resource
         time.sleep(5)
-        resource = get_resource(resource_id, ckan_url, api_key)
+        resource = get_resource(resource_id)
 
     # check if the resource url_type is a datastore
     if resource.get("url_type") == "datastore":
@@ -1313,7 +1302,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             pii_resource["pii_preview"] = True
             pii_resource["pii_of_resource"] = resource_id
             pii_resource["total_record_count"] = pii_rows_with_matches
-            update_resource(pii_resource, ckan_url, api_key)
+            update_resource(pii_resource)
 
             pii_msg = (
                 "{} PII candidate/s in {} row/s are available at {} for review".format(
@@ -1634,7 +1623,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         stats_resource["id"] = new_stats_resource_id
         stats_resource["summary_statistics"] = True
         stats_resource["summary_of_resource"] = resource_id
-        update_resource(stats_resource, ckan_url, api_key)
+        update_resource(stats_resource)
 
     cur.close()
     raw_connection.commit()
@@ -1648,7 +1637,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         resource["preview"] = False
         resource["preview_rows"] = None
         resource["partial_download"] = False
-    update_resource(resource, ckan_url, api_key)
+    update_resource(resource)
 
     # tell CKAN to calculate_record_count and set alias if set
     send_resource_to_datastore(
