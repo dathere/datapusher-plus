@@ -1434,7 +1434,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             "AUTO-ALIASING. Auto-alias-unique: {} ...".format(auto_alias_unique)
         )
         # get package info, so we can construct the alias
-        package = get_package(resource["package_id"], ckan_url, api_key)
+        package = get_package(resource["package_id"])
 
         resource_name = resource.get("name")
         package_name = package.get("name")
