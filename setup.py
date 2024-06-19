@@ -59,7 +59,6 @@ setup(
     install_requires=[
         "APScheduler == 3.9.1.post1",
         "python-dotenv",
-        'ckanserviceprovider == 1.2.0',
         'requests',
         "psycopg2-binary",
         'datasize',
