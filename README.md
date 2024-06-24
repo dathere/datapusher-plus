@@ -104,7 +104,7 @@ Without an index, it takes 1.3 seconds.
 
 ## Development Installation
 
-Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same way.
+Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN, and will be available as a CKAN plugin. This will allow for easier integration with CKAN and other CKAN extensions.
 
 1. Install the required packages.
 
@@ -112,45 +112,25 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
     sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file
     ```
 
-2. Create a virtual environment for Datapusher+ using at least python 3.8.
+2. Activate the CKAN virtual environment using atleast python 3.8.
 
     ```bash
-    cd /usr/lib/ckan
-    sudo python3.8 -m venv dpplus_venv
-    sudo chown -R $(whoami) dpplus_venv
-    . dpplus_venv/bin/activate
-    cd dpplus_venv
+    . /usr/lib/ckan/default/bin/activate
     ```
 
     > ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.7/3.8
     > to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
-    > If you're using Ubuntu 18.04 or earlier, follow the procedure below to install python 3.8:
-    >
-    > ```bash
-    > sudo add-apt-repository ppa:deadsnakes/ppa
-    > # we use 3.8 here, but you can get a higher version by changing the version suffix of the packages below
-    > sudo apt install python3.8 python3.8-venv python3.8-dev
-    > # install additional dependencies
-    > sudo apt install build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev
-    > ```
-    >
-    > Note that DP+ still works with CKAN<=2.8, which uses older versions of python.
 
-3. Get the code.
+3. Install the extension using following commands:
 
     ```bash
-    mkdir src
-    cd src
-    git clone --branch 0.10.1 https://github.com/datHere/datapusher-plus
-    cd datapusher-plus
+   pip install -e "git+https://github.com/dathere/datapusher-plus.git@1.0.1#egg=datapusher-plus"
     ```
 
 4. Install the dependencies.
 
     ```bash
-    pip install wheel
-    pip install -r requirements-dev.txt
-    pip install -e .
+    pip install -r requirements.txt
     ```
 
 5. Install [qsv](https://github.com/jqnatividad/qsv).
@@ -186,112 +166,7 @@ Datapusher+ is a drop-in replacement for Datapusher, so it's installed the same 
    Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database
    (see [DataPusher+ Database Setup](#datapusher-database-setup)).
 
-7. Copy the `datapusher/dot-env.template` to `datapusher/.env` and [modify your configuration](#datapusher-configuration).
-
-    ```bash
-    cd /usr/lib/ckan/dpplus_env/src/datapusher-plus/datapusher
-    cp dot-env.template .env
-    # configure your installation as required
-    nano .env
-    ```
-
-8. Run Datapusher+.
-
-    ```bash
-    python main.py config.py
-    ```
-
-    By default, DP+ should be running at the following port:
-
-    http://localhost:8800/
-
-## Production Deployment
-
-There are two ways to deploy Datapusher+:
-
-1. Manual Deployment
-
-    These instructions set up the DataPusher web service on
-    [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) running on port 8800, but
-    can be easily adapted to other WSGI servers like Gunicorn. You'll probably need
-    to set up Nginx as a reverse proxy in front of it and something like Supervisor
-    to keep the process up.
-
-    ```bash
-    # Install requirements for DataPusher+. Be sure to have at least Python 3.8
-    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file
-
-    # Install qsv, if required
-    wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -P /tmp
-    unzip /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip -d /tmp
-    rm /tmp/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    sudo mv /tmp/qsv* /usr/local/bin
-
-    # if qsv is already installed, be sure to update it to the latest release
-    sudo qsvdp --update
-
-    # if you get a glibc error when running `qsvdp --update`
-    # you're on an old distro (e.g. Ubuntu 18.04) without the required version of the glibc libraries.
-    # If so, use the statically linked MUSL version instead
-    # https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-musl.zip
-
-    # find out the locale settings
-    locale
-
-    # ONLY IF LANG is not "en_US.UTF-8", set locale
-    export LC_ALL="en_US.UTF-8"
-    export LC_CTYPE="en_US.UTF-8"
-    sudo dpkg-reconfigure locales
-
-    # Create a virtualenv for DataPusher+. DP+ requires at least python 3.8.
-    sudo python3.8 -m venv /usr/lib/ckan/dpplus_venv
-    sudo chown -R $(whoami) dpplus_venv
-
-    # install datapusher-plus in the virtual environment
-    . /usr/lib/ckan/dpplus_venv/bin/activate
-    pip install wheel
-    pip install datapusher-plus
-
-    # create an .env file and tune DP+ settings. Tune the uwsgi.ini file as well
-    sudo mkdir -p /etc/ckan/datapusher-plus
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/datapusher/dot-env.template -o /etc/ckan/datapusher-plus/.env
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.ini -o /etc/ckan/datapusher-plus/uwsgi.ini
-
-    # Be sure to initialize the database if required. (See Database Setup section below)
-    # Be sure to edit the .env file and set the right database connect strings!
-
-    # Create a user to run the web service (if necessary)
-    sudo addgroup www-data
-    sudo adduser -G www-data www-data
-    ```
-
-    At this point you can run DataPusher+ with the following command:
-
-    ```bash
-    /usr/lib/ckan/dpplus_venv/bin/uwsgi --enable-threads -i /etc/ckan/datapusher-plus/uwsgi.ini
-    ```
-
-    You might need to change the `uid` and `guid` in the `uwsgi.ini` file when using a different user.
-
-    To deploy it using supervisor:
-
-    ```bash
-    sudo curl https://raw.githubusercontent.com/dathere/datapusher-plus/master/deployment/datapusher-uwsgi.conf -o /etc/supervisor/conf.d/datapusher-uwsgi.conf
-    sudo service supervisor restart
-    ```
-
-2. Dockerized Deployment
-
-    As Datapusher+ is quite involved as evinced by the above procedure, a containerized installation
-    will make it far easier not only to deploy DP+ to production, but also to experiment with.
-
-    Instructions to set up the DP+ Docker instance can be found [here](https://github.com/dathere/datapusher-plus-docker).
-
-    The DP+ Docker will also expose additional features and administrative interface to manage
-    not only Datapusher+ jobs, but also to manage the CKAN Datastore.
-
 ## Configuring
-
 
 ### CKAN Configuration
 
@@ -302,15 +177,6 @@ Add `datapusher` to the plugins in your CKAN configuration file
 ckan.plugins = <other plugins> datapusher
 ```
 
-In order to tell CKAN where this webservice is located, the following must be
-added to the `[app:main]` section of your CKAN configuration file :
-
-```ini
-ckan.datapusher.url = http://127.0.0.1:8800/
-```
-
-There are other CKAN configuration options that allow to customize the CKAN - DataPusher
-integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/latest/maintaining/configuration.html#datapusher-settings) section in the CKAN documentation for more details.
 
 > ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - `xlsm` and `xlsb` for Excel Spreadsheets,
 > and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
@@ -325,40 +191,14 @@ integration. Please refer to the [DataPusher Settings](https://docs.ckan.org/en/
 > ["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
 >```
 
-
-### DataPusher+ Configuration
-
-The DataPusher+ instance is configured in the `.env` file located in the working directory of DP+
-(`/etc/ckan/datapusher-plus` when running a production deployment. The `datapusher-plus/datapusher`
-source directory when running a development installation.)
-
-See [dot-env.template](datapusher/dot-env.template) for a summary of configuration options available.
-
-
 ### DataPusher+ Database Setup
 
-DP+ requires a dedicated PostgreSQL account named `datapusher` to connect to the CKAN Datastore.
-
-To create the `datapusher` user and give it the required privileges to the `datastore_default` database:
+DP+ tables will be created with the command:
 
 ```bash
-su - postgres
-psql -d datastore_default
-CREATE ROLE datapusher LOGIN PASSWORD 'YOURPASSWORD';
-GRANT CREATE, CONNECT, TEMPORARY, SUPERUSER ON DATABASE datastore_default TO datapusher;
-GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA public TO datapusher;
-\q
+ckan -c /etc/ckan/default/ckan.ini datapushers db-init
 ```
 
-DP+ also requires its own job_store database to keep track of all the DP+ jobs. In the original Datapusher,
-this was a sqlite database by default. Though DP+ can still use a sqlite database, we are discouraging its use.
-
-To setup the `datapusher_jobs` database and its user:
-
-```bash
-sudo -u postgres createuser -S -D -R -P datapusher_jobs
-sudo -u postgres createdb -O datapusher_jobs datapusher_jobs -E utf-8
-```
 
 ## Usage
 
@@ -374,79 +214,15 @@ You can also manually trigger resources to be resubmitted. When editing a resour
 
 Run the following command to submit all resources to datapusher, although it will skip files whose hash of the data file has not changed:
 
+``` bash
     ckan -c /etc/ckan/default/ckan.ini datapusher resubmit
-
-On CKAN<=2.8:
-
-    paster --plugin=ckan datapusher resubmit -c /etc/ckan/default/ckan.ini
-
-To Resubmit a specific resource, whether or not the hash of the data file has changed::
-
-    ckan -c /etc/ckan/default/ckan.ini datapusher submit {dataset_id}
-
-On CKAN<=2.8:
-
-    paster --plugin=ckan datapusher submit <pkgname> -c /etc/ckan/default/ckan.ini
-
-### Uninstalling Datapusher+
-
-Should you need to remove Datapusher+, and you followed either the Development or Production Installation procedures above:
-
-```bash
-# if you're running inside the dpplus_venv virtual environment, deactivate it first
-deactivate
-
-# remove the DP+ python virtual environment
-sudo rm -rf /usr/lib/ckan/dpplus_venv
-
-# remove the supervisor DP+ configuration
-sudo rm -rf /etc/supervisor/conf.d/datapusher-uwsgi.conf
-
-# remove the DP+ production deployment directory
-sudo rm -rf /etc/ckan/datapusher-plus
-
-# remove qsv binary variants
-sudo rm /usr/local/bin/qsv /usr/local/bin/qsvdp /usr/local/bin/qsvlite /usr/local/bin/qsv_nightly /usr/local/bin/qsvdp_nightly /usr/local/bin/qsvlite_nightly
-
-# restart the supervisor, without the Datapusher+ service
-sudo service supervisor reload
-
-# ========= DATABASE objects ============
-# OPTIONAL: backup the datapusher_jobs database first if 
-# you want to retain the DP+ job history
-sudo -u postgres pg_dump --format=custom -d datapusher_jobs > datapusher_jobs.dump
-
-# to remove the Datapusher+ job database and the datapusher_jobs user/role
-sudo -u postgres dropdb datapusher_jobs
-sudo -u postgres dropuser datapusher_jobs
-
-# to drop the datapusher user which DP+ uses to write to the CKAN Datastore
-sudo -u postgres dropuser datapusher
 ```
 
-To ensure the Datapusher+ service is not automatically invoked when tabular resources are uploaded, remove `datapusher` from `ckan.plugins` in your `ckan.ini` file.
+To Resubmit a specific resource, whether or not the hash of the data file has changed:
 
-Also remove/comment out the following `ckan.datapusher` entries in your `ckan.ini`:
-
-* `ckan.datapusher.formats`
-* `ckan.datapusher.url`
-* `ckan.datapusher.callback_url_base`
-* `ckan.datapusher.assume_task_stale_after`
-
-Note that resources which has been pushed previously will still be available on the CKAN Datastore.
-You will have to delete these resources separately using the UI or the CKAN [resource_delete](https://docs.ckan.org/en/2.9/api/index.html#ckan.logic.action.delete.resource_delete) API.
-
-If you're no longer using the CKAN Datastore:
-
-* Edit your `ckan.ini` and remove/comment `datastore` from `ckan.plugins`.
-* Remove/comment out the `ckan.datastore.write_url` and `ckan.datastore.read_url` entries.
-
-To confirm the uninstallation is successful, upload a new tabular resource and check if:
-
-* tabular Resource Views (e.g. datatables_view, recline_view, etc.) are no longer available
-* the **Datastore** and **Data Dictionary** tabs are no longer available
-* the **Download** button on the resource page will no longer offer alternate download formats (CSV, TSV, JSON, XML)
-* the **Datastore API** button will no longer display on tabular resources
+``` bash
+    ckan -c /etc/ckan/default/ckan.ini datapusher submit {dataset_id}
+```
 
 ## License
 
