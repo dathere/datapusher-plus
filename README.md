@@ -182,7 +182,35 @@ ckan.plugins = <other plugins> datapusher
 > and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
 >
 >```ini
-> ckan.datapusher.formats = csv xls xlsx xlsm xlsb tsv tab application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet ods application/vnd.oasis.opendocument.spreadsheet
+> ckanext.datapusher_plus.copy_readbuffer_size = 1048576
+> ckanext.datapusher_plus.max_content_length = 1256000000000
+> ckanext.datapusher_plus.ignore_file_hash = true
+> ckanext.datapusher_plus.chunk_size = 16384
+> ckanext.datapusher_plus.download_timeout = 300
+> ckanext.datapusher_plus.ssl_verify = false
+> ckanext.datapusher_plus.download_proxy =
+> ckanext.datapusher_plus.types = csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+> ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}
+> ckanext.datapusher_plus.pii_screening = false
+> ckanext.datapusher_plus.pii_quick_screen = false
+> ckanext.datapusher_plus.pii_found_abort = false
+> ckanext.datapusher_plus.pii_show_candidates = false
+> ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
+> ckanext.datapusher_plus.qsv_bin =  /usr/local/bin/qsvdp
+> ckanext.datapusher_plus.file_bin = /usr/bin/file
+> ckanext.datapusher_plus.prefer_dmy = false
+> ckanext.datapusher_plus.preview_rows = 100
+> ckanext.datapusher_plus.auto_index_threshold = 3
+> ckanext.datapusher_plus.auto_unique_index = true
+> ckanext.datapusher_plus.auto_index_dates = true
+> ckanext.datapusher_plus.sort_and_dupe_check = true
+> ckanext.datapusher_plus.dedup = false
+> ckanext.datapusher_plus.default_excel_sheet = 0
+> ckanext.datapusher_plus.add_summary_stats_resource = false
+> ckanext.datapusher_plus.summary_stats_options =
+> ckanext.datapusher_plus.auto_alias = true
+> ckanext.datapusher_plus.auto_alias_unique = false
+> ckanext.datapusher_plus.api_token = 
 >```
 >
 >and add this entry to your CKAN's `resource_formats.json` file.
@@ -198,7 +226,6 @@ DP+ tables will be created with the command:
 ```bash
 ckan -c /etc/ckan/default/ckan.ini datapushers db-init
 ```
-
 
 ## Usage
 
