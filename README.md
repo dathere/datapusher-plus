@@ -174,7 +174,7 @@ Add `datapusher` to the plugins in your CKAN configuration file
 (generally located at `/etc/ckan/default/ckan.ini`):
 
 ```ini
-ckan.plugins = <other plugins> datapusher
+ckan.plugins = <other plugins> datapusher_plus
 ```
 
 
