@@ -15,6 +15,13 @@ import ckanext.datapusher_plus.cli as cli
 
 log = logging.getLogger(__name__)
 
+try:
+    config_declarations = p.toolkit.blanket.config_declarations
+except AttributeError:
+    # CKAN 2.9 does not have config_declarations.
+    # Remove when dropping support.
+    def config_declarations(cls):
+        return cls
 
 # Get ready for CKAN 2.10 upgrade
 if p.toolkit.check_ckan_version("2.10"):
@@ -25,6 +32,7 @@ class DatastoreException(Exception):
     pass
 
 
+@config_declarations
 class DatapusherPlusPlugin(p.SingletonPlugin):
     p.implements(p.IConfigurer, inherit=True)
     p.implements(p.IConfigurable, inherit=True)

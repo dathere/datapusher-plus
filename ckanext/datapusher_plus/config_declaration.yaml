@@ -1,0 +1,187 @@
+version: 1
+groups:
+  - annotation: ckanext-datapusher-plus settings
+    options:
+      - key: ckanext.datapusher_plus.copy_readbuffer_size
+        type: int
+        editable: true
+        default: 1048576
+        description: |
+          Copy read buffer size in bytes
+ 
+      - key: ckanext.datapusher_plus.max_content_length
+        editable: true
+        default: 1256000000000
+        description: |
+          Maximum content length in bytes
+
+      - key: ckanext.datapusher_plus.ignore_file_hash
+        type: bool
+        editable: true
+        default: true
+        description: |
+          Ignore file hash
+
+      - key: ckanext.datapusher_plus.chunk_size
+        editable: true
+        default: 16384
+        description: |
+          Chunk size in bytes
+      
+      - key: ckanext.datapusher_plus.download_timeout
+        type: int
+        editable: true
+        default: 300
+        description: |
+          Download timeout in seconds
+
+      - key: ckanext.datapusher_plus.ssl_verify
+        type: bool
+        editable: true
+        default: false
+        description: |
+          SSL verify
+
+      - key: ckanext.datapusher_plus.download_proxy
+        editable: true
+        default: ""
+        description: |
+          Download proxy
+
+      - key: ckanext.datapusher_plus.types
+        description: |
+          Types of files to be processed
+
+      - key: ckanext.datapusher_plus.type_mapping
+        example: {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}
+        description: |
+          Mapping of file types to their respective processors
+
+      - key: ckanext.datapusher_plus.pii_screening
+        type: bool
+        editable: true
+        default: false
+        description: |
+          PII screening
+
+      - key: ckanext.datapusher_plus.pii_quick_screen
+        type: bool
+        editable: true
+        default: false
+        description: |
+          PII quick screen
+
+      - key: ckanext.datapusher_plus.pii_found_abort
+        type: bool
+        editable: true
+        default: false
+        description: |
+          PII found abort
+
+      - key: ckanext.datapusher_plus.pii_show_candidates
+        type: bool
+        editable: true
+        default: false
+        description: |
+          PII show candidates
+
+      - key: ckanext.datapusher_plus.pii_regex_resource_id_or_alias
+        editable: true
+        default: ""
+        description: |
+          PII regex resource id or alias
+    
+      - key: ckanext.datapusher_plus.qsv_bin
+        example: /usr/local/bin/qsvdp
+        description: |
+          QSV binary path
+
+      - key: ckanext.datapusher_plus.file_bin
+        example: /usr/bin/file
+        description: |
+          File binary path
+
+      - key: ckanext.datapusher_plus.prefer_dmy
+        type: bool
+        editable: true
+        default: false
+        description: |
+          Prefer DMY
+
+      - key: ckanext.datapusher_plus.preview_rows
+        type: int
+        editable: true
+        default: 0
+        description: |
+          Number of rows to preview
+
+      - key: ckanext.datapusher_plus.auto_index_threshold
+        type: int
+        editable: true
+        default: 3
+        description: |
+          Auto index threshold
+
+      - key: ckanext.datapusher_plus.auto_unique_index
+        type: bool
+        editable: true
+        default: true
+        description: |
+          Auto unique index
+
+      - key: ckanext.datapusher_plus.auto_index_dates
+        type: bool
+        editable: true
+        default: true
+        description: |
+          Auto index dates
+
+      - key: ckanext.datapusher_plus.sort_and_dupe_check
+        type: bool
+        editable: true
+        default: true
+        description: |
+          Sort and dupe check
+
+      - key: ckanext.datapusher_plus.dedup
+        type: bool
+        editable: true
+        default: false
+        description: |
+          Dedup
+
+      - key: ckanext.datapusher_plus.default_excel_sheet
+        type: int
+        editable: true
+        default: 0
+        description: |
+          Default excel sheet
+
+      - key: ckanext.datapusher_plus.add_summary_stats_resource
+        type: bool
+        editable: true
+        default: false
+        description: |
+          Add summary stats resource
+
+      - key: ckanext.datapusher_plus.summary_stats_options
+        editable: true
+        default: ""
+        description: |
+          Summary stats options
+
+      - key: ckanext.datapusher_plus.auto_alias
+        type: bool
+        editable: true
+        default: true
+        description: |
+          Auto alias
+      
+      - key: ckanext.datapusher_plus.auto_alias_unique
+        type: bool
+        editable: true
+        default: false
+        description: |
+          Auto alias unique
+       
+

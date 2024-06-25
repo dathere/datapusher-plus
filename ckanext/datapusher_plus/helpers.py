@@ -17,6 +17,7 @@ import ckanext.datapusher_plus.job_exceptions as jex
 
 log = logging.getLogger(__name__)
 
+
 def datapusher_status(resource_id: str):
     try:
         return toolkit.get_action('datapusher_status')(
