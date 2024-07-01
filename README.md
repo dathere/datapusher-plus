@@ -224,7 +224,15 @@ ckan.plugins = <other plugins> datapusher_plus
 DP+ tables will be created with the command:
 
 ```bash
-ckan -c /etc/ckan/default/ckan.ini datapushers db-init
+ckan -c /etc/ckan/default/ckan.ini datapusher db-init
+```
+
+**NOTE:** If you are upgrading from a previous version of Datapusher, you will need to run the following command to upgrade the database:
+
+```bash
+
+ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
+
 ```
 
 ## Usage
