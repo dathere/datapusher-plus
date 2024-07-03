@@ -143,4 +143,4 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
     # IClick
     def get_commands(self):
-        return [cli.init_db]
+        return cli.get_commands()
