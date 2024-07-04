@@ -3,28 +3,31 @@ from __future__ import annotations
 
 from ckan.common import CKANConfig
 import logging
-from typing import Any, Callable, cast
+from typing import Any, Callable
 
 import ckan.model as model
 import ckan.plugins as p
 import ckanext.datapusher_plus.views as views
-import ckanext.datapusher_plus.helpers as helpers
+import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.logic.action as action
 import ckanext.datapusher_plus.logic.auth as auth
 import ckanext.datapusher_plus.cli as cli
 
+tk = p.toolkit
+
 log = logging.getLogger(__name__)
 
 try:
-    config_declarations = p.toolkit.blanket.config_declarations
+    config_declarations = tk.blanket.config_declarations
 except AttributeError:
     # CKAN 2.9 does not have config_declarations.
     # Remove when dropping support.
     def config_declarations(cls):
         return cls
 
+
 # Get ready for CKAN 2.10 upgrade
-if p.toolkit.check_ckan_version("2.10"):
+if tk.check_ckan_version("2.10"):
     from ckan.types import Action, AuthFunction, Context
 
 
@@ -48,9 +51,9 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
     resource_show_action = None
 
     def update_config(self, config: CKANConfig):
-        p.toolkit.add_template_directory(config, "templates")
-        p.toolkit.add_public_directory(config, "public")
-        p.toolkit.add_resource("assets", "datapusher_plus")
+        tk.add_template_directory(config, "templates")
+        tk.add_public_directory(config, "public")
+        tk.add_resource("assets", "datapusher_plus")
 
     # IResourceUrlChange
     def notify(self, resource: model.Resource):
@@ -58,7 +61,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
             "model": model,
             "ignore_auth": True,
         }
-        resource_dict = p.toolkit.get_action("resource_show")(
+        resource_dict = tk.get_action("resource_show")(
             context,
             {
                 "id": resource.id,
@@ -71,7 +74,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
     def after_resource_create(self, context, resource_dict: dict[str, Any]):
         self._submit_to_datapusher(resource_dict)
 
-    if not p.toolkit.check_ckan_version("2.10"):
+    if not tk.check_ckan_version("2.10"):
 
         def after_create(self, context, resource_dict):
             self.after_resource_create(context, resource_dict)
@@ -80,7 +83,10 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         context = {"model": model, "ignore_auth": True, "defer_commit": True}
 
         resource_format = resource_dict.get("format")
-        supported_formats = p.toolkit.config.get("ckan.datapusher.formats")
+        supported_formats = tk.config.get(
+            "ckan.datapusher.formats") or tk.config.get(
+                "ckanext.datapusher_plus.formats"
+        )
 
         submit = (
             resource_format
@@ -92,7 +98,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
             return
 
         try:
-            task = p.toolkit.get_action("task_status_show")(
+            task = tk.get_action("task_status_show")(
                 context,
                 {
                     "entity_id": resource_dict["id"],
@@ -109,17 +115,18 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
                     "resource {0}".format(resource_dict["id"])
                 )
                 return
-        except p.toolkit.ObjectNotFound:
+        except tk.ObjectNotFound:
             pass
 
         try:
             log.debug(
-                "Submitting resource {0}".format(resource_dict["id"]) + " to DataPusher Plus"
+                "Submitting resource {0}".format(resource_dict["id"])
+                + " to DataPusher Plus"
             )
-            p.toolkit.get_action("datapusher_submit")(
+            tk.get_action("datapusher_submit")(
                 context, {"resource_id": resource_dict["id"]}
             )
-        except p.toolkit.ValidationError as e:
+        except tk.ValidationError as e:
             # If datapusher is offline want to catch error instead
             # of raising otherwise resource save will fail with 500
             log.critical(e)
@@ -140,8 +147,8 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
     def get_helpers(self) -> dict[str, Callable[..., Any]]:
         return {
-            "datapusher_status": helpers.datapusher_status,
-            "datapusher_status_description": helpers.datapusher_status_description,
+            "datapusher_status": dph.datapusher_status,
+            "datapusher_status_description": dph.datapusher_status_description,
         }
 
     # IBlueprint

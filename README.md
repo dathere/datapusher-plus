@@ -179,7 +179,7 @@ ckan.plugins = <other plugins> datapusher_plus
 
 
 > ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - `xlsm` and `xlsb` for Excel Spreadsheets,
-> and `tab` for TSV files. To process these subformats, set `ckanext.datapusher_plus.formats` as follows in your CKAN.INI file:
+> and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
 >
 >```ini
 > ckanext.datapusher_plus.copy_readbuffer_size = 1048576
