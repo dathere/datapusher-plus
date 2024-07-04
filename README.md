@@ -7,7 +7,7 @@
 DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
 [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
 
-Datapusher+ is built using [CKAN Service Provider][], with [Messytables] replaced by [qsv].
+Datapusher+ is droping usage of [CKAN Service Provider][], with [Messytables] replaced by [qsv].
 
 [TNRIS](https://tnris.org)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
 of Datapusher+, specifically, to support a [Resource-first upload workflow](docs/RESOURCE_FIRST_WORKFLOW.md#Resource-first-Upload-Workflow).
@@ -32,7 +32,7 @@ It features:
 * **Exponentially faster loading speed**
 
   Similar to xloader, we use PostgreSQL COPY to directly pipe the data into the datastore,
-  short-circuiting the additional processing/transformation/API calls used by Datapusher.
+  short-circuiting the additional processing/transformation/API calls used by Datapusher Plus.
 
   But unlike xloader, we load everything using the proper data types and not as text, so there's
   no need to reload the data again after adjusting the Data Dictionary, as you would with xloader.
@@ -170,7 +170,7 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
 ### CKAN Configuration
 
-Add `datapusher` to the plugins in your CKAN configuration file
+Add `datapusher_plus` to the plugins in your CKAN configuration file
 (generally located at `/etc/ckan/default/ckan.ini`):
 
 ```ini
@@ -179,7 +179,7 @@ ckan.plugins = <other plugins> datapusher_plus
 
 
 > ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - `xlsm` and `xlsb` for Excel Spreadsheets,
-> and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
+> and `tab` for TSV files. To process these subformats, set `ckanext.datapusher_plus.formats` as follows in your CKAN.INI file:
 >
 >```ini
 > ckanext.datapusher_plus.copy_readbuffer_size = 1048576
@@ -224,7 +224,7 @@ ckan.plugins = <other plugins> datapusher_plus
 DP+ tables will be created with the command:
 
 ```bash
-ckan -c /etc/ckan/default/ckan.ini datapusher db-init
+ckan -c /etc/ckan/default/ckan.ini datapusher_plus db-init
 ```
 
 **NOTE:** If you are upgrading from a previous version of Datapusher, you will need to run the following command to upgrade the database:
@@ -237,7 +237,7 @@ ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
 
 ## Usage
 
-Any file that has one of the supported formats (defined in [`ckan.datapusher.formats`](https://docs.ckan.org/en/latest/maintaining/configuration.html#ckan-datapusher-formats)) will be attempted to be loaded
+Any file that has one of the supported formats (defined in [`ckanext.datapusher_plus.formats`](https://docs.ckan.org/en/latest/maintaining/configuration.html#ckan-datapusher-formats)) will be attempted to be loaded
 into the DataStore.
 
 You can also manually trigger resources to be resubmitted. When editing a resource in CKAN (clicking the "Manage" button on a resource page), a new tab named "DataStore" will appear. This will contain a log of the last attempted upload and a button to retry the upload. Once a resource has been "pushed" into the Datastore, a "Data Dictionary" tab will also be available where the data pusblisher can fine-tune the inferred data dictionary.
@@ -250,13 +250,13 @@ You can also manually trigger resources to be resubmitted. When editing a resour
 Run the following command to submit all resources to datapusher, although it will skip files whose hash of the data file has not changed:
 
 ``` bash
-    ckan -c /etc/ckan/default/ckan.ini datapusher resubmit
+    ckan -c /etc/ckan/default/ckan.ini datapusher_plus resubmit
 ```
 
 To Resubmit a specific resource, whether or not the hash of the data file has changed:
 
 ``` bash
-    ckan -c /etc/ckan/default/ckan.ini datapusher submit {dataset_id}
+    ckan -c /etc/ckan/default/ckan.ini datapusher_plus submit {dataset_id}
 ```
 
 ## License
