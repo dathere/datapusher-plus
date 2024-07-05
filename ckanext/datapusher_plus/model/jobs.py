@@ -177,4 +177,6 @@ meta.mapper(Logs, logs_table)
 
 
 def init_tables():
-    meta.metadata.create_all(meta.engine)
+    jobs_table.create(meta.engine)
+    metadata_table.create(meta.engine)
+    logs_table.create(meta.engine)
