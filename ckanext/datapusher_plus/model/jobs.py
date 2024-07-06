@@ -1,13 +1,15 @@
-from datetime import datetime
 from sqlalchemy import types, Column, Table, ForeignKey
 
 from ckan.model import meta, DomainObject
 
 
-__all__ = ["Jobs", "jobs_table", "Metadata", "metadata_table", "Logs", "logs_table"]
+__all__ = [
+    "Jobs", "jobs_table", "Metadata", "metadata_table", "Logs", "logs_table"
+]
 
 """Initialise the "jobs" table in the db."""
-jobs_table = Table("jobs",
+jobs_table = Table(
+    "jobs",
     meta.metadata,
     Column("job_id", types.UnicodeText, primary_key=True),
     Column("job_type", types.UnicodeText),
@@ -24,21 +26,21 @@ jobs_table = Table("jobs",
     Column("api_key", types.UnicodeText),
     # Key to administer job:
     Column("job_key", types.UnicodeText),
-)
+    )
 
 metadata_table = Table(
-        "metadata",
-        meta.metadata,
-        Column(
-            "job_id",
-            ForeignKey("jobs.job_id", ondelete="CASCADE"),
-            nullable=False,
-            primary_key=True,
-        ),
-        Column("key", types.UnicodeText, primary_key=True),
-        Column("value", types.UnicodeText, index=True),
-        Column("type", types.UnicodeText),
-    )
+    "metadata",
+    meta.metadata,
+    Column(
+        "job_id",
+        ForeignKey("jobs.job_id", ondelete="CASCADE"),
+        nullable=False,
+        primary_key=True,
+    ),
+    Column("key", types.UnicodeText, primary_key=True),
+    Column("value", types.UnicodeText, index=True),
+    Column("type", types.UnicodeText),
+)
 
 """Initialise the "logs" table in the db."""
 logs_table = Table(
@@ -57,6 +59,7 @@ logs_table = Table(
     Column("funcName", types.UnicodeText),
     Column("lineno", types.Integer),
 )
+
 
 class Jobs(DomainObject):
     def __init__(self, job_id, job_type, status, data, error, requested_timestamp, finished_timestamp, sent_data, aps_job_id, result_url, api_key, job_key):
@@ -103,7 +106,6 @@ class Jobs(DomainObject):
 
         return meta.Session.query(cls).filter(cls.job_key == job_key).first()
 
-
     @classmethod
     def get_by_status(cls, status):
         if not status:
@@ -121,7 +123,7 @@ class Jobs(DomainObject):
             meta.Session.commit()
         else:
             raise Exception("Job not found")
-    
+
 
 class Metadata(DomainObject):
     def __init__(self, job_id, key, value, type):
@@ -134,8 +136,11 @@ class Metadata(DomainObject):
     def get(cls, job_id, key):
         if not job_id:
             return None
-
-        return meta.Session.query(cls).filter(cls.job_id == job_id).filter(cls.key == key).first()
+        result = meta.Session.query(cls) \
+                     .filter(cls.job_id == job_id) \
+                     .filter(cls.key == key)\
+                     .first()
+        return result
 
 
 class Logs(DomainObject):
@@ -154,7 +159,7 @@ class Logs(DomainObject):
             return None
 
         return meta.Session.query(cls).filter(cls.job_id == job_id).all()
-    
+
     # Return any logs for the given job_id from the logs table.
     @classmethod
     def get_logs(cls, job_id):
@@ -162,14 +167,19 @@ class Logs(DomainObject):
             return None
 
         return meta.Session.query(cls).filter(cls.job_id == job_id).all()
-    
+
     @classmethod
     def get_logs_by_limit(cls, job_id, limit):
         if not job_id:
             return None
 
-        return meta.Session.query(cls).filter(cls.job_id == job_id).order_by(cls.timestamp.desc()).limit(limit).all()
-    
+        result = meta.Session.query(cls) \
+                     .filter(cls.job_id == job_id) \
+                     .order_by(cls.timestamp.desc()) \
+                     .limit(limit) \
+                     .all()
+        return result
+
 
 meta.mapper(Jobs, jobs_table)
 meta.mapper(Metadata, metadata_table)
@@ -177,4 +187,6 @@ meta.mapper(Logs, logs_table)
 
 
 def init_tables():
-    meta.metadata.create_all(meta.engine)
+    jobs_table.create(meta.engine)
+    metadata_table.create(meta.engine)
+    logs_table.create(meta.engine)
