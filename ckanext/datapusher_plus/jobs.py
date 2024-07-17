@@ -256,7 +256,7 @@ def datapusher_plus_to_datastore(input):
     """
     job_dict = dict(metadata=input["metadata"], status="running")
     callback_datapusher_hook(
-        result_url=input["result_url"],job_dict=job_dict)
+        result_url=input["result_url"], job_dict=job_dict)
 
     job_id = get_current_job().id
     errored = False

@@ -120,7 +120,7 @@ class Jobs(DomainObject):
             for key, value in job_dict.items():
                 setattr(job, key, value)
             # Assuming meta.Session has a commit method to save changes to the DB
-            meta.Session.commit()
+            job.save()
         else:
             raise Exception("Job not found")
 

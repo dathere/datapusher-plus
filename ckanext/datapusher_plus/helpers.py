@@ -188,7 +188,7 @@ def add_pending_job(
 
     if not metadata:
         metadata = {}
-    
+
     job = Jobs(job_id, job_type, "pending", data, None, None, None, None, None, result_url, api_key, job_key)
     try:
         job.save()
@@ -206,7 +206,6 @@ def add_pending_job(
         # "Unicode type received non-unicode bind param value" warnings.
         key = str(key)
         value = str(value)
-
         inserts.update({"job_id": job_id, "key": key, "value": value, "type": type_})
         if inserts:
             md = Metadata(**inserts)
@@ -289,7 +288,7 @@ def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
         job = Jobs.get(job_id)
         if not job:
             raise Exception("Job not found")
-        #dicticize the job
+        # dicticize the job
         jobs_dict = job.as_dict()
         jobs_dict.update(job_dict)
 
