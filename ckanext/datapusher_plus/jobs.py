@@ -51,7 +51,7 @@ import ckan.plugins.toolkit as tk
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
-from ckanext.datapusher_plus.config import config
+# from ckanext.datapusher_plus.config import config
 
 
 if locale.getdefaultlocale()[0]:
@@ -61,13 +61,13 @@ else:
     locale.setlocale(locale.LC_ALL, "")
 
 
-SSL_VERIFY = tk.asbool(config.get("SSL_VERIFY"))
+SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
 if not SSL_VERIFY:
     requests.packages.urllib3.disable_warnings()
 
-USE_PROXY = "DOWNLOAD_PROXY" in config
+USE_PROXY = "ckaext.datapusher_plus.download_proxy" in tk.config
 if USE_PROXY:
-    DOWNLOAD_PROXY = config.get("DOWNLOAD_PROXY")
+    DOWNLOAD_PROXY = tk.config.get("ckaext.datapusher_plus.download_proxy")
 
 POSTGRES_INT_MAX = 2147483647
 POSTGRES_INT_MIN = -2147483648
@@ -75,7 +75,7 @@ POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
 MINIMUM_QSV_VERSION = "0.87.1"
-MAX_CONTENT_LENGTH = config.get("MAX_CONTENT_LENGTH")
+MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
 
 DATASTORE_URLS = {
     "datastore_delete": "{ckan_url}/api/action/datastore_delete",
@@ -112,7 +112,7 @@ def delete_datastore_resource(resource_id):
         raise utils.JobError("Deleting existing datastore failed.")
 
 
-def delete_resource(resource_id, api_key, ckan_url):
+def delete_resource(resource_id):
     if not tk.user:
         raise utils.JobError("No user found.")
     try:
@@ -121,7 +121,7 @@ def delete_resource(resource_id, api_key, ckan_url):
         raise utils.JobError("Deleting existing resource failed.")
 
 
-def datastore_resource_exists(resource_id, api_key, ckan_url):
+def datastore_resource_exists(resource_id):
     from ckanext.datapusher_plus.job_exceptions import JobError
 
     data_dict = {
@@ -143,8 +143,6 @@ def send_resource_to_datastore(
     resource,
     resource_id,
     headers,
-    api_key,
-    ckan_url,
     records,
     aliases,
     calculate_record_count,
@@ -224,23 +222,17 @@ def validate_input(input):
 
     if "resource_id" not in data:
         raise utils.JobError("No id provided.")
-    if "ckan_url" not in data:
-        raise utils.JobError("No ckan_url provided.")
-    if not input.get("api_key"):
-        raise utils.JobError("No CKAN API key provided")
+    # if "ckan_url" not in data:
+    #     raise utils.JobError("No ckan_url provided.")
+    # if not input.get("api_key"):
+    #     raise utils.JobError("No CKAN API key provided")
 
 
-def callback_datapusher_hook(result_url, api_key, job_dict):
-    api_key_from_job = job_dict.pop("api_key", None)
-    if not api_key:
-        api_key = api_key_from_job
+def callback_datapusher_hook(result_url, job_dict):
+    # api_key_from_job = job_dict.pop("api_key", None)
+    # if not api_key:
+    #     api_key = api_key_from_job
     headers = {"Content-Type": "application/json"}
-    if api_key:
-        if ":" in api_key:
-            header, key = api_key.split(":")
-        else:
-            header, key = "Authorization", api_key
-        headers[header] = key
 
     try:
         result = requests.post(
@@ -264,8 +256,7 @@ def datapusher_plus_to_datastore(input):
     """
     job_dict = dict(metadata=input["metadata"], status="running")
     callback_datapusher_hook(
-        result_url=input["result_url"], api_key=input["api_key"], job_dict=job_dict
-    )
+        result_url=input["result_url"],job_dict=job_dict)
 
     job_id = get_current_job().id
     errored = False
@@ -292,8 +283,7 @@ def datapusher_plus_to_datastore(input):
     finally:
         # job_dict is defined in datapusher_hook's docstring
         is_saved_ok = callback_datapusher_hook(
-            result_url=input["result_url"], api_key=input["api_key"], job_dict=job_dict
-        )
+            result_url=input["result_url"],job_dict=job_dict)
         errored = errored or not is_saved_ok
     return "error" if errored else None
 
@@ -331,11 +321,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.setLevel(logging.DEBUG)
 
     # check if QSV_BIN and FILE_BIN exists
-    qsv_bin = config.get("QSV_BIN")
+    qsv_bin = tk.config.get("ckanext.datapusher_plus.qsv_bin")
     qsv_path = Path(qsv_bin)
     if not qsv_path.is_file():
         raise utils.JobError("{} not found.".format(qsv_bin))
-    file_bin = config.get("FILE_BIN")
+    file_bin = tk.config.get("ckanext.datapusher_plus.file_bin")
 
     file_path = Path(file_bin)
     if not file_path.is_file():
@@ -369,8 +359,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     ckan_url = data["ckan_url"]
     resource_id = data["resource_id"]
-    api_key = input.get("api_key")
-
     try:
         resource = get_resource(resource_id)
     except utils.JobError:
@@ -397,11 +385,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # fetch the resource data
     logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
-    preview_rows = int(config.get("PREVIEW_ROWS"))
+    preview_rows = int(tk.config.get("ckanext.datapusher_plus.preview_rows"))
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
-        headers["Authorization"] = api_key
+        headers["Authorization"] = str(tk.config.get("ckanext.datapusher_plus.api_token"))
 
         # If the ckan_url differs from this url, rewrite this url to the ckan
         # url. This can be useful if ckan is behind a firewall.
@@ -415,8 +403,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     try:
         kwargs = {
             "headers": headers,
-            "timeout": config.get("DOWNLOAD_TIMEOUT"),
-            "verify": config.get("SSL_VERIFY"),
+            "timeout": tk.config.get("ckanext.datapusher_plus.download_timeout"),
+            "verify": tk.config.get("ckanext.datapusher_plus.ssl_verify"),
             "stream": True,
         }
         if USE_PROXY:
@@ -425,7 +413,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             response.raise_for_status()
 
             cl = response.headers.get("content-length")
-            max_content_length = int(config.get("MAX_CONTENT_LENGTH"))
+            max_content_length = int(tk.config.get("ckanext.datapusher_plus.max_content_length"))
             ct = response.headers.get("content-type")
 
             try:
@@ -471,7 +459,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 logger.info("Downloading file of unknown size...")
 
             with open(tmp, 'wb') as tmp_file:
-                for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
+                for chunk in response.iter_content(int(tk.config.get("ckanext.datapusher_plus.chunk_size"))):
                     length += len(chunk)
                     if length > max_content_length and not preview_rows:
                         raise utils.JobError(
@@ -512,7 +500,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if (
         resource.get("hash") == file_hash
         and not data.get("ignore_hash")
-        and not config.get("IGNORE_FILE_HASH")
+        and not tk.config.get("ckaext.datapusher_plus.ignore_file_hash")
         and not resource_updated
     ):
         logger.warning(
@@ -547,7 +535,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     format = resource.get("format").upper()
     if format in spreadsheet_extensions:
         # if so, export spreadsheet as a CSV file
-        default_excel_sheet = config.get("DEFAULT_EXCEL_SHEET")
+        default_excel_sheet = tk.config.get("DEFAULT_EXCEL_SHEET")
         logger.info(
             "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
         )
@@ -706,8 +694,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # if SORT_AND_DUPE_CHECK is True or DEDUP is True
     # check if the file is sorted and if it has duplicates
     # get the record count, unsorted breaks and duplicate count as well
-    sort_and_dupe_check = config.get("SORT_AND_DUPE_CHECK")
-    dedup = config.get("DEDUP")
+    sort_and_dupe_check = tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check")
+    dedup = tk.config.get("ckaext.datapusher_plus.dedup")
 
     if sort_and_dupe_check or dedup:
         logger.info("Checking for duplicates and if the CSV is sorted...")
@@ -783,8 +771,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # now, ensure our column/header names identifiers are "safe names"
     # i.e. valid postgres/CKAN Datastore identifiers
-    unsafe_prefix = config.get("UNSAFE_PREFIX", "unsafe_")
-    reserved_colnames = config.get("RESERVED_COLNAMES", "_id")
+    unsafe_prefix = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
+    reserved_colnames = tk.config.get("ckanext.datapuhser_plus.reserved_colnames", "_id")
     qsv_safenames_csv = os.path.join(temp_dir, 'qsv_safenames.csv')
     logger.info('Checking for "database-safe" header names...')
     try:
@@ -880,13 +868,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         "--output",
         qsv_stats_csv,
     ]
-    prefer_dmy = config.get("PREFER_DMY")
+    prefer_dmy = tk.config.get("ckanext.datapusher_plus.prefer_dmy")
     if prefer_dmy:
         qsv_stats_cmd.append("--prefer-dmy")
-    auto_index_threshold = config.get("AUTO_INDEX_THRESHOLD")
+    auto_index_threshold = tk.config.get("ckanext.datapusher_plus.auto_index_threshold")
     if auto_index_threshold:
         qsv_stats_cmd.append("--cardinality")
-    summary_stats_options = config.get("SUMMARY_STATS_OPTIONS")
+    summary_stats_options = tk.config.get("ckanext.datapusher_plus.summary_stats_options")
     if summary_stats_options:
         qsv_stats_cmd.append(summary_stats_options)
 
@@ -907,7 +895,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if auto_index_threshold:
                 headers_cardinality.append(int(row["cardinality"]))
 
-    existing = datastore_resource_exists(resource_id, api_key, ckan_url)
+    existing = datastore_resource_exists(resource_id)
     existing_info = None
     if existing:
         existing_info = dict(
@@ -937,7 +925,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
-    type_mapping = config.get("TYPE_MAPPING")
+    type_mapping = json.loads(tk.config.get("ckanext.datapusher_plus.type_mapping"))
     temp_headers_dicts = [
         dict(id=field[0], type=type_mapping[str(field[1])])
         for field in zip(headers, types)
@@ -1088,22 +1076,21 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # field in one pass
     piiscreening_start = 0
     piiscreening_elapsed = 0
-    if config.get("PII_SCREENING"):
+    if tk.config.get("ckanext.datastore_plus.pii_screening"):
         piiscreening_start = time.perf_counter()
-        pii_found_abort = config.get("PII_FOUND_ABORT")
+        pii_found_abort = tk.config.get("ckanext.datastore_plus.pii_found_abort")
 
         # DP+ comes with default regex patterns for PII (SSN, credit cards,
         # email, bank account numbers, & phone number). The DP+ admin can
         # use a custom set of regex patterns by pointing to a resource with
         # a text file, with each line having a regex pattern, and an optional
         # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
-        pii_regex_resource_id = config.get("PII_REGEX_RESOURCE_ID_OR_ALIAS")
+        pii_regex_resource_id = tk.config.get("ckanext.datapusher_plus.pii_regex_resource_id_or_alias")
         if pii_regex_resource_id:
             pii_regex_resource_exist = datastore_resource_exists(
-                pii_regex_resource_id, api_key, ckan_url
-            )
+                pii_regex_resource_id)
             if pii_regex_resource_exist:
-                pii_resource = get_resource(pii_regex_resource_id, ckan_url, api_key)
+                pii_resource = get_resource(pii_regex_resource_id)
                 pii_regex_url = pii_resource["url"]
 
                 r = requests.get(pii_regex_url)
@@ -1119,7 +1106,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         pii_found = False
         pii_regex_fname = p.absolute()
 
-        pii_quick_screen = config.get("PII_QUICK_SCREEN")
+        pii_quick_screen = tk.config.get("ckanext.datapusher_plus.pii_quick_screen")
         if pii_quick_screen:
             logger.info("Quickly scanning for PII using {}...".format(pii_regex_file))
             try:
@@ -1170,7 +1157,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if pii_total_matches > 0:
                 pii_found = True
 
-        pii_show_candidates = config.get("PII_SHOW_CANDIDATES")
+        pii_show_candidates = tk.config.get("ckanext.datapusher_plus.pii_show_candidates")
         if pii_found and pii_found_abort and not pii_show_candidates:
             logger.error("PII Candidate/s Found!")
             if pii_quick_screen:
@@ -1196,14 +1183,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             pii_resource_id = resource_id + "-pii"
 
             try:
-                raw_connection_pii = psycopg2.connect(config.get("WRITE_ENGINE_URL"))
+                raw_connection_pii = psycopg2.connect(tk.config.get("ckan.datastore.write_url"))
             except psycopg2.Error as e:
                 raise utils.JobError("Could not connect to the Datastore: {}".format(e))
             else:
                 cur_pii = raw_connection_pii.cursor()
 
             # check if the pii already exist
-            existing_pii = datastore_resource_exists(pii_resource_id, api_key, ckan_url)
+            existing_pii = datastore_resource_exists(pii_resource_id)
 
             # Delete existing pii preview before proceeding.
             if existing_pii:
@@ -1220,7 +1207,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     existing_pii_alias_of = pii_alias_result[0]
 
                     delete_datastore_resource(existing_pii_alias_of)
-                    delete_resource(existing_pii_alias_of, api_key, ckan_url)
+                    delete_resource(existing_pii_alias_of)
 
             pii_alias = [pii_resource_id]
 
@@ -1259,8 +1246,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 pii_resource,
                 resource_id=None,
                 headers=pii_stats_dict,
-                api_key=api_key,
-                ckan_url=ckan_url,
                 records=None,
                 aliases=pii_alias,
                 calculate_record_count=False,
@@ -1350,8 +1335,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         resource=None,
         resource_id=resource["id"],
         headers=headers_dicts,
-        api_key=api_key,
-        ckan_url=ckan_url,
         records=None,
         aliases=None,
         calculate_record_count=False,
@@ -1363,7 +1346,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
-        copy_readbuffer_size = config.get("COPY_READBUFFER_SIZE")
+        copy_readbuffer_size = tk.config.get("ckanext.datapusher_plus.copy_readbuffer_size")
         cur = raw_connection.cursor()
         """
         truncate table to use copy freeze option and further increase
@@ -1426,8 +1409,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # --------------------- AUTO-ALIASING ------------------------
     # aliases are human-readable, and make it easier to use than resource id hash
     # when using the Datastore API and in SQL queries
-    auto_alias = config.get("AUTO_ALIAS")
-    auto_alias_unique = config.get("AUTO_ALIAS_UNIQUE")
+    auto_alias = tk.config.get("ckanext.datapusher_plus.auto_alias")
+    auto_alias_unique = tk.config.get("ckaext.datapusher_plus.auto_alias_unique")
     alias = None
     if auto_alias:
         logger.info(
@@ -1498,11 +1481,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # by default, we only add summary stats if we're not doing a partial download
     # (otherwise, you're summarizing the preview, not the whole file)
     # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
-    if (config.get("ADD_SUMMARY_STATS_RESOURCE")) or (config.get("SUMMARY_STATS_WITH_PREVIEW")):
+    if (tk.config.get("ckanext.datapusher_plus.add_summary_stats_resource")) or (tk.config.get("ckanext.datapusher_plus.summary_stats_with_preview")):
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
-        existing_stats = datastore_resource_exists(stats_resource_id, api_key, ckan_url)
+        existing_stats = datastore_resource_exists(stats_resource_id)
         # Delete existing summary-stats before proceeding.
         if existing_stats:
             logger.info(
@@ -1518,7 +1501,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 existing_stats_alias_of = stats_alias_result[0]
 
                 delete_datastore_resource(existing_stats_alias_of)
-                delete_resource(existing_stats_alias_of, api_key, ckan_url)
+                delete_resource(existing_stats_alias_of)
 
         stats_aliases = [stats_resource_id]
         if auto_alias:
@@ -1529,8 +1512,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # may end up having the same alias if AUTO_ALIAS_UNIQUE is False, so we need to drop the
             # existing summary stats-alias.
             existing_alias_stats = datastore_resource_exists(
-                auto_alias_stats_id, api_key, ckan_url
-            )
+                auto_alias_stats_id)
             # Delete existing auto-aliased summary-stats before proceeding.
             if existing_alias_stats:
                 logger.info(
@@ -1548,7 +1530,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     existing_stats_alias_of = result[0]
 
                     delete_datastore_resource(existing_stats_alias_of)
-                    delete_resource(existing_stats_alias_of, api_key, ckan_url)
+                    delete_resource(existing_stats_alias_of)
 
         # run stats on stats CSV to get header names and infer data types
         # we don't need summary statistics, so use the --typesonly option
@@ -1584,8 +1566,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             stats_resource,
             resource_id=None,
             headers=stats_stats_dict,
-            api_key=api_key,
-            ckan_url=ckan_url,
             records=None,
             aliases=stats_aliases,
             calculate_record_count=False,
@@ -1644,8 +1624,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         resource=None,
         resource_id=resource["id"],
         headers=headers_dicts,
-        api_key=api_key,
-        ckan_url=ckan_url,
         records=None,
         aliases=alias,
         calculate_record_count=True,
@@ -1669,8 +1647,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # For columns w/ cardinality = record_count, it's all unique values, create a unique index
     # If AUTO_INDEX_DATES is true, index all date columns
     # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
-    auto_index_dates = config.get("AUTO_INDEX_DATES")
-    auto_unique_index = config.get("AUTO_UNIQUE_INDEX")
+    auto_index_dates = tk.config.get("ckanext.datastore_plus.auto_index_dates")
+    auto_unique_index = tk.config.get("ckanext.datastore_plus.auto_unique_index")
     if (
         auto_index_threshold
         or (auto_index_dates and datetimecols_list)
