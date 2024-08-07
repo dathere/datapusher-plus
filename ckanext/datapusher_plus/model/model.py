@@ -1,21 +1,21 @@
 import json
-from ckan.model.domain_object import DomainObject
 
-from sqlalchemy import types, Column, Table, func, ForeignKey
+from ckan.model import meta
+from ckan.model.domain_object import DomainObject
+from sqlalchemy import types, Column, ForeignKey
 
 
 try:
     from ckan.plugins.toolkit import BaseModel
 except ImportError:
     # CKAN <= 2.9
-    from ckan.model import meta
     from sqlalchemy.ext.declarative import declarative_base
+    BaseModel = declarative_base(metadata=meta.metadata)
 
 
 class Jobs(DomainObject, BaseModel):
     __tablename__ = 'jobs'
-    id = Column('id', types.Integer, primary_key=True)
-    job_id = Column('job_id',types.UnicodeText)
+    job_id = Column('job_id', types.UnicodeText, primary_key=True)
     job_type = Column('job_type', types.UnicodeText)
     status = Column('status', types.UnicodeText, index=True)
     data = Column('data', types.UnicodeText)
@@ -94,7 +94,8 @@ class Jobs(DomainObject, BaseModel):
 class Metadata(DomainObject, BaseModel):
     __tablename__ = 'metadata'
     id = Column('id', types.Integer, primary_key=True)
-    job_id = Column('job_id', types.UnicodeText, ForeignKey('jobs.job_id', ondelete='CASCADE'))
+    job_id = Column('job_id', types.UnicodeText,
+                    ForeignKey('jobs.job_id', ondelete='CASCADE'))
     key = Column('key', types.UnicodeText)
     value = Column('value', types.UnicodeText)
     type = Column('type', types.UnicodeText)
@@ -104,6 +105,13 @@ class Metadata(DomainObject, BaseModel):
         self.key = key
         self.value = value
         self.type = type
+
+    @classmethod
+    def get(cls, id):
+        if not id:
+            return None
+
+        return meta.Session.query(cls).get(id)
 
     @classmethod
     def get_all(cls, job_id):
@@ -122,10 +130,11 @@ class Metadata(DomainObject, BaseModel):
         return meta.Session.query(cls).filter(cls.key == key).all()
 
 
-class Logs(DomainObject):
+class Logs(DomainObject, BaseModel):
     __tablename__ = 'logs'
     id = Column('id', types.Integer, primary_key=True)
-    job_id = Column('job_id', types.UnicodeText, ForeignKey('jobs.job_id', ondelete='CASCADE'))
+    job_id = Column('job_id', types.UnicodeText,
+                    ForeignKey('jobs.job_id', ondelete='CASCADE'))
     timestamp = Column('timestamp', types.DateTime)
     message = Column('message', types.UnicodeText)
     level = Column('level', types.UnicodeText)
@@ -142,19 +151,31 @@ class Logs(DomainObject):
         self.funcName = funcName
         self.lineno = lineno
 
+    def as_dict(self):
+        return {
+            'job_id': self.job_id,
+            'timestamp': self.timestamp,
+            'message': self.message,
+            'level': self.level,
+            'module': self.module,
+            'funcName': self.funcName,
+            'lineno': self.lineno
+        }
+
     @classmethod
-    def get(cls, job_id):
-        if not job_id:
+    def get(cls, id):
+        if not id:
             return None
 
-        return meta.Session.query(cls).filter(cls.job_id == job_id).all()
+        return meta.Session.query(cls).get(id)
 
     # Return any logs for the given job_id from the logs table.
     @classmethod
     def get_logs(cls, job_id):
         if not job_id:
             return None
-        return meta.Session.query(cls).filter(cls.job_id == job_id).all()
+        result = meta.Session.query(cls).filter(cls.job_id == job_id).all()
+        return result if result else None
 
     @classmethod
     def get_logs_by_limit(cls, job_id, limit):
@@ -204,14 +225,3 @@ def _get_logs(logs):
     for log in logs_list:
         log.pop("job_id")
     return logs_list
-
-
-# meta.mapper(Jobs, jobs_table)
-# meta.mapper(Metadata, metadata_table)
-# meta.mapper(Logs, logs_table)
-
-
-# def init_tables():
-#     jobs_table.create(meta.engine)
-#     metadata_table.create(meta.engine)
-#     logs_table.create(meta.engine)

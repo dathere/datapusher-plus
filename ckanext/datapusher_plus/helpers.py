@@ -30,8 +30,9 @@ def datapusher_status(resource_id: str):
 
 def datapusher_status_description(status: dict[str, Any]):
     _ = toolkit._
-
-    if status.get('status'):
+    
+    job_status = status.get('task_info').get('status')
+    if job_status:
         captions = {
             'complete': _('Complete'),
             'pending': _('Pending'),
@@ -39,7 +40,7 @@ def datapusher_status_description(status: dict[str, Any]):
             'error': _('Error'),
         }
 
-        return captions.get(status['status'], status['status'].capitalize())
+        return captions.get(job_status, job_status.capitalize())
     else:
         return _('Not Uploaded Yet')
 
@@ -254,6 +255,7 @@ def validate_error(error):
             raise jex.InvalidErrorObjectError(
                 "error must be either a string or a dict with a message key"
             )
+
 
 def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
     """Update the database row for the given job_id with the given job_dict.
