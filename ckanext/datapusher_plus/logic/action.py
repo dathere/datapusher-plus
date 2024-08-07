@@ -19,9 +19,9 @@ from ckan.common import config
 import ckanext.datapusher_plus.logic.schema as dpschema
 import ckanext.datapusher_plus.interfaces as interfaces
 import ckanext.datapusher_plus.jobs as jobs
-import ckanext.datapusher_plus.db as db
 import ckanext.datapusher_plus.utils as utils
 
+from ckanext.datapusher_plus.model import get_job_details
 
 log = logging.getLogger(__name__)
 _get_or_bust = logic.get_or_bust
@@ -300,8 +300,9 @@ def datapusher_status(
     job_detail = None
 
     if job_id:
-        db.init(config)
-        job_detail = db.get_job(job_id)
+        # db.init(config)
+        # job_detail = db.get_job(job_id)
+        job_detail = get_job_details(job_id)
 
         if job_detail and job_detail.get('logs'):
             for log in job_detail['logs']:

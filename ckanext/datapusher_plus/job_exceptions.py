@@ -46,5 +46,6 @@ class LoaderError(JobError):
 
     pass
 
+
 class InvalidErrorObjectError(Exception):
     pass
