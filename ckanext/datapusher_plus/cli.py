@@ -14,8 +14,6 @@ import ckan.plugins.toolkit as tk
 import ckanext.datastore.backend as datastore_backend
 from ckan.cli import error_shout
 
-from ckanext.datapusher_plus.model import init_tables
-
 
 log = logging.getLogger(__name__)
 
@@ -43,11 +41,11 @@ def datapusher_plus():
     """
 
 
-@datapusher_plus.command()
-def init_db():
-    """Initialise the Datapusher Plus tables."""
-    init_tables()
-    print("Datapusher Plus tables created")
+# @datapusher_plus.command()
+# def init_db():
+#     """Initialise the Datapusher Plus tables."""
+#     init_tables()
+#     print("Datapusher Plus tables created")
 
 
 @datapusher_plus.command()

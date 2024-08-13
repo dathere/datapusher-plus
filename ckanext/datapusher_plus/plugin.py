@@ -147,8 +147,8 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
     def get_helpers(self) -> dict[str, Callable[..., Any]]:
         return {
-            "datapusher_status": dph.datapusher_status,
-            "datapusher_status_description": dph.datapusher_status_description,
+            "datapusher_plus_status": dph.datapusher_status,
+            "datapusher_plus_status_description": dph.datapusher_status_description,
         }
 
     # IBlueprint

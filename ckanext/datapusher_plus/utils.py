@@ -6,7 +6,6 @@ import json
 import datetime
 from six import text_type as str
 
-import ckanext.datapusher_plus.db as db
 import ckan.plugins.toolkit as tk
 from ckanext.datapusher_plus.model import Logs
 
