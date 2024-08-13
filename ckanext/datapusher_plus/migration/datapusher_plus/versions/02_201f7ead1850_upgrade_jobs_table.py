@@ -1,18 +1,17 @@
-"""Upgrade jobs table
+"""Create tables
 
-Revision ID: e9c4a88839c8
-Revises: 
-Create Date: 2023-09-22 22:14:35.137116
+Revision ID: 201f7ead1850
+Revises: e9c4a88839c8
+Create Date: 2024-08-07 19:49:55.324826
 
 """
-
 from alembic import op
 import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = "e9c4a88839c8"
-down_revision = None
+revision = '201f7ead1850'
+down_revision = 'e9c4a88839c8'
 branch_labels = None
 depends_on = None
 

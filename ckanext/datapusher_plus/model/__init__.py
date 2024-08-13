@@ -1,4 +1,7 @@
-from ckanext.datapusher_plus.model.jobs import (Jobs, 
-                                                Metadata, 
-                                                Logs, 
-                                                init_tables)
+from ckanext.datapusher_plus.model.model import (Jobs,
+                                                 Metadata,
+                                                 Logs,
+                                                 get_job_details)
+
+
+__all__ = ["Jobs", "Metadata", "Logs", "get_job_details"]
