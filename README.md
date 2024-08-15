@@ -135,6 +135,8 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
 5. Install [qsv](https://github.com/jqnatividad/qsv).
 
+    ## Manual Installation
+
     [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
     it to the appropriate directory, e.g. for Linux:
 
@@ -160,6 +162,29 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
     > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
     qsv with the `--update` option and it will check for the latest version and update as required.
+
+    ### Linux Installation
+
+    If you are running Debian based distribution, you can install qsv using the following command:
+
+    Add the qsv repository to your sources list:
+
+      ```bash
+      echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://tino097.github.io/qsv-deb-releases ./" > qsv.list
+      ```
+
+    Import trusted GPG key:
+
+      ```bash
+    wget -O - https://tino097.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
+      ```
+
+    Install qsv:
+
+      ```bash
+      sudo apt update
+      sudo apt install qsv
+      ```
 
 6. Configure the Datapusher+ database.
 
