@@ -1110,7 +1110,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         qsv_applydp_cmd = [
             qsv_bin,
-            "applydp",
             "datefmt",
             datecols,
             tmp,
