@@ -74,7 +74,7 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "0.87.1"
+MINIMUM_QSV_VERSION = "0.123.0"
 MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
 
 DATASTORE_URLS = {
@@ -1042,7 +1042,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         qsv_applydp_cmd = [
             qsv_bin,
-            "applydp",
             "datefmt",
             datecols,
             tmp,
