@@ -50,7 +50,7 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "0.108.0"
+MINIMUM_QSV_VERSION = "0.123.0"
 
 DATASTORE_URLS = {
     "datastore_delete": "{ckan_url}/api/action/datastore_delete",
@@ -1110,7 +1110,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         qsv_applydp_cmd = [
             qsv_bin,
-            "applydp",
             "datefmt",
             datecols,
             tmp,
