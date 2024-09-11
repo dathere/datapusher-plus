@@ -23,6 +23,13 @@ def upgrade():
             "jobs",
             sa.Column("aps_job_id", sa.UnicodeText),
         )
+    # upgrade metadata table if it not exists
+    if not _check_column_exists("metadata", "id"):
+        op.add_column(
+            "metadata",
+            sa.Column("id", sa.UnicodeText),
+        )
+
     # upgrade logs table
     if not _check_column_exists("logs", "id"):
         op.add_column(
@@ -35,6 +42,10 @@ def downgrade():
     # downgrade jobs table
     if _check_column_exists("jobs", "aps_job_id"):
         op.drop_column("jobs", "aps_job_id")
+
+    # downgrade metadata table
+    if _check_column_exists("metadata", "id"):
+        op.drop_column("metadata", "id")
 
     # downgrade logs table
     if _check_column_exists("logs", "id"):
