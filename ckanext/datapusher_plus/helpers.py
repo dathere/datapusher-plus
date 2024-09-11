@@ -14,6 +14,7 @@ from ckan import model as ckan_model
 from ckanext.datapusher_plus.model import Jobs, Metadata, Logs
 import ckanext.datapusher_plus.job_exceptions as jex
 
+_ = toolkit._
 
 log = logging.getLogger(__name__)
 
@@ -29,20 +30,21 @@ def datapusher_status(resource_id: str):
 
 
 def datapusher_status_description(status: dict[str, Any]):
-    _ = toolkit._
-    
-    job_status = status.get('task_info').get('status')
-    if job_status:
-        captions = {
-            'complete': _('Complete'),
-            'pending': _('Pending'),
-            'submitting': _('Submitting'),
-            'error': _('Error'),
-        }
 
-        return captions.get(job_status, job_status.capitalize())
-    else:
-        return _('Not Uploaded Yet')
+    CAPTIONS = {
+        'complete': _('Complete'),
+        'pending': _('Pending'),
+        'submitting': _('Submitting'),
+        'error': _('Error'),
+    }
+
+    DEFAULT_STATUS = _('Not Uploaded Yet')
+
+    try:
+        job_status = status['task_info']['status']
+        return CAPTIONS.get(job_status, job_status.capitalize())
+    except (KeyError, TypeError):
+        return DEFAULT_STATUS
 
 
 def get_job(job_id, limit=None, use_aps_id=False):
