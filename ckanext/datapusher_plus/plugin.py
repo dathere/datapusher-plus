@@ -87,6 +87,11 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
             "ckan.datapusher.formats") or tk.config.get(
                 "ckanext.datapusher_plus.formats"
         )
+        if not supported_formats:
+            log.debug(
+                "No supported formats configured,\
+                    using DataPusher Plus internals")
+            supported_formats = ["csv", "xls", "xlsx", "tsv"]
 
         submit = (
             resource_format
