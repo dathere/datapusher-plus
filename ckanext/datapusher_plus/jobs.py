@@ -74,7 +74,7 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "0.123.0"
+MINIMUM_QSV_VERSION = "0.133.0"
 MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
 
 DATASTORE_URLS = {
@@ -232,7 +232,9 @@ def callback_datapusher_hook(result_url, job_dict):
     # api_key_from_job = job_dict.pop("api_key", None)
     # if not api_key:
     #     api_key = api_key_from_job
-    headers = {"Content-Type": "application/json"}
+    api_token = tk.config.get("ckanext.datapusher_plus.api_token")
+    headers = {"Content-Type": "application/json", "Authorization": api_token}
+
 
     try:
         result = requests.post(
