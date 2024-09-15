@@ -27,7 +27,7 @@ def upgrade():
     if not _check_column_exists("metadata", "id"):
         op.add_column(
             "metadata",
-            sa.Column("id", sa.UnicodeText),
+            sa.Column("id", sa.UnicodeText, primary_key=True, autoincrement=True),
         )
 
     # upgrade logs table
