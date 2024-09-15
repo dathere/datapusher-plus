@@ -324,7 +324,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.setLevel(logging.DEBUG)
 
     # check if QSV_BIN and FILE_BIN exists
-    qsv_bin = tk.config.get("ckanext.datapusher_plus.qsv_bin") QSV_BIN
+    qsv_bin = tk.config.get("ckanext.datapusher_plus.qsv_bin") or QSV_BIN
     qsv_path = Path(qsv_bin)
     if not qsv_path.is_file():
         raise utils.JobError("{} not found.".format(qsv_bin))
