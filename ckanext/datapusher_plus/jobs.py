@@ -75,6 +75,7 @@ POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
 QSV_BIN = '/usr/local/bin/qsv'
+FILE_BIN = '/usr/bin/file'
 MINIMUM_QSV_VERSION = "0.133.0"
 MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
 
@@ -328,7 +329,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_path = Path(qsv_bin)
     if not qsv_path.is_file():
         raise utils.JobError("{} not found.".format(qsv_bin))
-    file_bin = tk.config.get("ckanext.datapusher_plus.file_bin")
+    file_bin = tk.config.get("ckanext.datapusher_plus.file_bin") or FILE_BIN
 
     file_path = Path(file_bin)
     if not file_path.is_file():
