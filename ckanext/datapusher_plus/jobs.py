@@ -74,8 +74,6 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-QSV_BIN = '/usr/local/bin/qsv'
-FILE_BIN = '/usr/bin/file'
 MINIMUM_QSV_VERSION = "0.133.0"
 MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
 

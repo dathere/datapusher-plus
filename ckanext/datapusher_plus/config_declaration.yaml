@@ -54,7 +54,7 @@ groups:
         default: csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 
       - key: ckanext.datapusher_plus.type_mapping
-        example: {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}
+        default: {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}
         description: |
           Mapping of file types to their respective processors
 
@@ -93,12 +93,12 @@ groups:
           PII regex resource id or alias
     
       - key: ckanext.datapusher_plus.qsv_bin
-        example: /usr/local/bin/qsvdp
+        default: /usr/local/bin/qsvdp
         description: |
           QSV binary path
 
       - key: ckanext.datapusher_plus.file_bin
-        example: /usr/bin/file
+        default: /usr/bin/file
         description: |
           File binary path
 
