@@ -61,6 +61,10 @@ else:
     locale.setlocale(locale.LC_ALL, "")
 
 
+SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
+if not SSL_VERIFY:
+    requests.packages.urllib3.disable_warnings()
+
 USE_PROXY = "ckaext.datapusher_plus.download_proxy" in tk.config
 if USE_PROXY:
     DOWNLOAD_PROXY = tk.config.get("ckaext.datapusher_plus.download_proxy")
@@ -236,6 +240,7 @@ def callback_datapusher_hook(result_url, job_dict):
         result = requests.post(
             result_url,
             data=json.dumps(job_dict, cls=utils.DatetimeJsonEncoder),
+            verify=SSL_VERIFY,
             headers=headers,
         )
     except requests.ConnectionError:
@@ -400,7 +405,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     try:
         kwargs = {
             "headers": headers,
-            "timeout": int(tk.config.get("ckanext.datapusher_plus.download_timeout")),
+            "timeout": tk.asint(tk.config.get("ckanext.datapusher_plus.download_timeout")),
+            "veriy": SSL_VERIFY,
             "stream": True,
         }
         if USE_PROXY:
