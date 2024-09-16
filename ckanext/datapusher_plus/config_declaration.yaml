@@ -35,13 +35,6 @@ groups:
         description: |
           Download timeout in seconds
 
-      - key: ckanext.datapusher_plus.ssl_verify
-        type: bool
-        editable: true
-        default: false
-        description: |
-          SSL verify
-
       - key: ckanext.datapusher_plus.download_proxy
         editable: true
         default: ""
