@@ -406,7 +406,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         kwargs = {
             "headers": headers,
             "timeout": tk.asint(tk.config.get("ckanext.datapusher_plus.download_timeout")),
-            "veriy": SSL_VERIFY,
+            "verify": SSL_VERIFY,
             "stream": True,
         }
         if USE_PROXY:
