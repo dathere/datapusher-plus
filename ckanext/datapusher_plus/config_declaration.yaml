@@ -93,7 +93,7 @@ groups:
           PII regex resource id or alias
     
       - key: ckanext.datapusher_plus.qsv_bin
-        default: /usr/local/bin/qsvdp
+        default: /usr/local/bin/qsv
         description: |
           QSV binary path
 
