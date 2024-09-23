@@ -122,7 +122,6 @@ def delete_resource(resource_id):
 
 
 def datastore_resource_exists(resource_id):
-    from ckanext.datapusher_plus.job_exceptions import JobError
 
     data_dict = {
         "resource_id": resource_id,
@@ -130,7 +129,7 @@ def datastore_resource_exists(resource_id):
         "include_total": False,
     }
 
-    context = {'ignore_auth': True }
+    context = {'ignore_auth': True}
 
     try:
         result = tk.get_action("datastore_search")(context, data_dict)
@@ -232,9 +231,8 @@ def callback_datapusher_hook(result_url, job_dict):
     # api_key_from_job = job_dict.pop("api_key", None)
     # if not api_key:
     #     api_key = api_key_from_job
-    api_token = tk.config.get("ckanext.datapusher_plus.api_token")
+    api_token = utils.get_dp_plus_user_apitoken()
     headers = {"Content-Type": "application/json", "Authorization": api_token}
-
 
     try:
         result = requests.post(
@@ -258,7 +256,7 @@ def datapusher_plus_to_datastore(input):
     """
     job_dict = dict(metadata=input["metadata"], status="running")
     callback_datapusher_hook(
-        result_url=input["result_url"],job_dict=job_dict)
+        result_url=input["result_url"], job_dict=job_dict)
 
     job_id = get_current_job().id
     errored = False
@@ -391,7 +389,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
-        headers["Authorization"] = str(tk.config.get("ckanext.datapusher_plus.api_token"))
+        api_token = utils.get_dp_plus_user_apitoken()
+        headers["Authorization"] = api_token
 
         # If the ckan_url differs from this url, rewrite this url to the ckan
         # url. This can be useful if ckan is behind a firewall.
