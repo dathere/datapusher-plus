@@ -65,9 +65,9 @@ SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
 if not SSL_VERIFY:
     requests.packages.urllib3.disable_warnings()
 
-USE_PROXY = "ckaext.datapusher_plus.download_proxy" in tk.config
+USE_PROXY = "ckanext.datapusher_plus.download_proxy" in tk.config
 if USE_PROXY:
-    DOWNLOAD_PROXY = tk.config.get("ckaext.datapusher_plus.download_proxy")
+    DOWNLOAD_PROXY = tk.config.get("ckanext.datapusher_plus.download_proxy")
 
 POSTGRES_INT_MAX = 2147483647
 POSTGRES_INT_MIN = -2147483648
@@ -321,11 +321,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.setLevel(logging.DEBUG)
 
     # check if QSV_BIN and FILE_BIN exists
-    qsv_bin = tk.config.get("ckanext.datapusher_plus.qsv_bin") or QSV_BIN
+    qsv_bin = tk.config.get("ckanext.datapusher_plus.qsv_bin")
     qsv_path = Path(qsv_bin)
     if not qsv_path.is_file():
         raise utils.JobError("{} not found.".format(qsv_bin))
-    file_bin = tk.config.get("ckanext.datapusher_plus.file_bin") or FILE_BIN
+    file_bin = tk.config.get("ckanext.datapusher_plus.file_bin")
 
     file_path = Path(file_bin)
     if not file_path.is_file():
@@ -341,8 +341,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     except subprocess.CalledProcessError as e:
         raise utils.JobError("qsv version check error: {}".format(e))
     qsv_version_info = str(qsv_version.stdout)
+    if not qsv_version_info:
+        """
+        Sample response
+        qsvdp 0.134.0-mimalloc-Luau 0.640;polars-0.42.0-fe04390;...
+        """
+        raise utils.JobError(
+            f"We expect qsv version info to be returned. Command: {qsv_bin} --version. Response: {qsv_version_info}"
+            )
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" "): qsv_version_info.find("-")].lstrip()
+    logger.info("qsv version found: {}".format(qsv_semver))
     try:
         if semver.compare(qsv_semver, MINIMUM_QSV_VERSION) < 0:
             raise utils.JobError(
@@ -632,25 +641,24 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 file_encoding.stdout)
                 )
             try:
-                subprocess.run(
+                cmd = subprocess.run(
                     [
                         "iconv",
-                        "-f",
-                        file_encoding.stdout,
-                        "-t",
-                        "UTF-8",
+                        "-f", file_encoding.stdout,
+                        "-t", "UTF-8",
                         tmp,
-                        "--output",
-                        qsv_input_utf_8_encoded_csv,
                     ],
+                    capture_output=True,
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                # return as we can't push a non UTF-8 CSV
-                logger.error(
-                    "Job aborted as the file cannot be re-encoded to UTF-8: {}.".format(e)
-                )
+                logger.error(f"Job aborted as the file cannot be re-encoded to UTF-8. {e.stderr}")
                 return
+            f = open(qsv_input_utf_8_encoded_csv, "wb")
+            f.write(cmd.stdout)
+            f.close()
+            logger.info("Successfully re-encoded to UTF-8")
+
         else:
             qsv_input_utf_8_encoded_csv = tmp
         try:
