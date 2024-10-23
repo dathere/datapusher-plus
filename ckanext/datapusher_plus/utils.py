@@ -74,8 +74,7 @@ def get_dp_plus_user_apitoken():
     method returns the api_token set in the config file and defaults to the
     site_user.
     """
-
-    api_token = tk.config.get("ckan.datapusher_plus.api_token", None)
+    api_token = tk.config.get("ckanext.datapusher_plus.api_token", None)
     if api_token:
         return api_token
 
