@@ -80,7 +80,7 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
         site_url = h.url_for('/', qualified=True)
         callback_url = h.url_for(
             '/api/3/action/datapusher_hook', qualified=True)
- 
+
     for plugin in p.PluginImplementations(interfaces.IDataPusher):
         upload = plugin.can_upload(res_id)
         if not upload:
@@ -216,7 +216,6 @@ def datapusher_hook(context: Context, data_dict: dict[str, Any]):
     task['last_updated'] = str(datetime.datetime.utcnow())
 
     resubmit = False
-
     if status == 'complete':
         # Create default views for resource if necessary (only the ones that
         # require data to be in the DataStore)
@@ -230,13 +229,16 @@ def datapusher_hook(context: Context, data_dict: dict[str, Any]):
             plugin.after_upload(cast("dict[str, Any]", context),
                                 resource_dict, dataset_dict)
 
-        logic.get_action('resource_create_default_resource_views')(
-            context,
+        try:
+            logic.get_action('resource_create_default_resource_views')(context,
             {
                 'resource': resource_dict,
                 'package': dataset_dict,
                 'create_datastore_views': True,
             })
+        except Exception as e:
+            log.error('Error creating default views for resource %s: %s',
+                      res_id, e)
 
         # Check if the uploaded file has been modified in the meantime
         if (resource_dict.get('last_modified') and
