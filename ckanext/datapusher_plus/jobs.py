@@ -722,7 +722,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # check if the file is sorted and if it has duplicates
     # get the record count, unsorted breaks and duplicate count as well
     sort_and_dupe_check = tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check")
-    dedup = tk.config.get("ckaext.datapusher_plus.dedup")
+    dedup = tk.config.get("ckanext.datapusher_plus.dedup")
 
     if sort_and_dupe_check or dedup:
         logger.info("Checking for duplicates and if the CSV is sorted...")
@@ -1451,7 +1451,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # aliases are human-readable, and make it easier to use than resource id hash
     # when using the Datastore API and in SQL queries
     auto_alias = tk.config.get("ckanext.datapusher_plus.auto_alias")
-    auto_alias_unique = tk.config.get("ckaenxt.datapusher_plus.auto_alias_unique")
+    auto_alias_unique = tk.config.get("ckanext.datapusher_plus.auto_alias_unique")
     alias = None
     if auto_alias:
         logger.info(
