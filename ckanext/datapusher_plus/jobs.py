@@ -523,7 +523,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if (
         resource.get("hash") == file_hash
         and not data.get("ignore_hash")
-        and not tk.config.get("ckaext.datapusher_plus.ignore_file_hash")
+        and not tk.config.get("ckanext.datapusher_plus.ignore_file_hash")
         and not resource_updated
     ):
         logger.warning(
@@ -1451,7 +1451,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # aliases are human-readable, and make it easier to use than resource id hash
     # when using the Datastore API and in SQL queries
     auto_alias = tk.config.get("ckanext.datapusher_plus.auto_alias")
-    auto_alias_unique = tk.config.get("ckaext.datapusher_plus.auto_alias_unique")
+    auto_alias_unique = tk.config.get("ckaenxt.datapusher_plus.auto_alias_unique")
     alias = None
     if auto_alias:
         logger.info(
