@@ -50,7 +50,7 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "0.123.0"
+MINIMUM_QSV_VERSION = "2.1.0"
 
 DATASTORE_URLS = {
     "datastore_delete": "{ckan_url}/api/action/datastore_delete",
@@ -500,7 +500,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             else:
                 logger.info("File format: {}".format(resource_format))
 
-            tmp = os.path.join(temp_dir, 'tmp.' + resource_format)
+            tmp = os.path.join(temp_dir, "tmp." + resource_format)
             length = 0
             m = hashlib.md5()
 
@@ -510,7 +510,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             else:
                 logger.info("Downloading file of unknown size...")
 
-            with open(tmp, 'wb') as tmp_file:
+            with open(tmp, "wb") as tmp_file:
                 for chunk in response.iter_content(int(config.get("CHUNK_SIZE"))):
                     length += len(chunk)
                     if length > max_content_length and not preview_rows:
@@ -599,12 +599,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove it
         # and create a hardlink to the file we got from CKAN
-        qsv_spreadsheet = os.path.join(temp_dir, 'qsv_spreadsheet.' + resource_format)
+        qsv_spreadsheet = os.path.join(temp_dir, "qsv_spreadsheet." + resource_format)
         os.link(tmp, qsv_spreadsheet)
 
         # run `qsv excel` and export it to a CSV
         # use --trim option to trim column names and the data
-        qsv_excel_csv = os.path.join(temp_dir, 'qsv_excel.csv')
+        qsv_excel_csv = os.path.join(temp_dir, "qsv_excel.csv")
         try:
             qsv_excel = subprocess.run(
                 [
@@ -655,7 +655,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # Note that we only change the workfile, the resource file itself is unchanged.
 
         # ------------------- Normalize to CSV ---------------------
-        qsv_input_csv = os.path.join(temp_dir, 'qsv_input.csv')
+        qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
         # if resource_format is CSV we don't need to normalize
         if resource_format.upper() == "CSV":
             logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
@@ -665,30 +665,31 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
             )
 
-        qsv_input_utf_8_encoded_csv = os.path.join(temp_dir, 'qsv_input_utf_8_encoded.csv')
+        qsv_input_utf_8_encoded_csv = os.path.join(
+            temp_dir, "qsv_input_utf_8_encoded.csv"
+        )
 
         # using uchardet to determine encoding
         file_encoding = subprocess.run(
-                        [
-                            "uchardet",
-                            tmp
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
+            ["uchardet", tmp],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
         logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
-        
+
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
 
         # using iconv to re-encode in UTF-8
         if file_encoding.stdout != "UTF-8":
-            logger.info("File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
-                file_encoding.stdout)
+            logger.info(
+                "File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
+                    file_encoding.stdout
                 )
+            )
             try:
-                with open(qsv_input_utf_8_encoded_csv, 'w') as fd:
+                with open(qsv_input_utf_8_encoded_csv, "w") as fd:
                     subprocess.run(
                         [
                             "iconv",
@@ -699,12 +700,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                             tmp,
                         ],
                         check=True,
-                        stdout=fd
+                        stdout=fd,
                     )
             except subprocess.CalledProcessError as e:
                 # return as we can't push a non UTF-8 CSV
                 logger.error(
-                    "Job aborted as the file cannot be re-encoded to UTF-8: {}.".format(e)
+                    "Job aborted as the file cannot be re-encoded to UTF-8: {}.".format(
+                        e
+                    )
                 )
                 return
         else:
@@ -780,7 +783,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # --------------- Do we need to dedup? ------------------
     # note that deduping also ends up creating a sorted CSV
     if dedup and dupe_count > 0:
-        qsv_dedup_csv = os.path.join(temp_dir, 'qsv_dedup.csv')
+        qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
         logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
         qsv_dedup_cmd = [qsv_bin, "dedup", tmp, "--output", qsv_dedup_csv]
 
@@ -830,7 +833,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # i.e. valid postgres/CKAN Datastore identifiers
     unsafe_prefix = config.get("UNSAFE_PREFIX", "unsafe_")
     reserved_colnames = config.get("RESERVED_COLNAMES", "_id")
-    qsv_safenames_csv = os.path.join(temp_dir, 'qsv_safenames.csv')
+    qsv_safenames_csv = os.path.join(temp_dir, "qsv_safenames.csv")
     logger.info('Checking for "database-safe" header names...')
     try:
         qsv_safenames = subprocess.run(
@@ -922,7 +925,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     headers_min = []
     headers_max = []
     headers_cardinality = []
-    qsv_stats_csv = os.path.join(temp_dir, 'qsv_stats.csv')
+    qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
     qsv_stats_cmd = [
         qsv_bin,
         "stats",
@@ -949,6 +952,35 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         raise util.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
+
+    # remove the last four rows. Do this using the qsv slice command
+    qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
+    try:
+        subprocess.run(
+            [
+                qsv_bin,
+                "slice",
+                "--start",
+                "-4",
+                "--invert",
+                qsv_stats_csv,
+                "--output",
+                qsv_slice_csv,
+            ],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise util.JobError("Cannot slice CSV: {}".format(e))
+
+    # read the sliced CSV and remove the qsv__value column (the last column).
+    # Do this using the qsv select command
+    try:
+        subprocess.run(
+            [qsv_bin, "select", "!_", qsv_slice_csv, "--output", qsv_stats_csv],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise util.JobError("Cannot select CSV: {}".format(e))
 
     with open(qsv_stats_csv, mode="r") as inp:
         reader = csv.DictReader(inp)
@@ -1054,7 +1086,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if preview_rows > 0:
             # PREVIEW_ROWS is positive, slice from the beginning
             logger.info("Preparing {:,}-row preview...".format(preview_rows))
-            qsv_slice_csv = os.path.join(temp_dir, 'qsv_slice.csv')
+            qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 subprocess.run(
                     [
@@ -1078,7 +1110,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # to slice from the end
             slice_len = abs(preview_rows)
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
-            qsv_slice_csv = os.path.join(temp_dir, 'qsv_slice.csv')
+            qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 subprocess.run(
                     [
@@ -1105,7 +1137,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # if there are any datetime fields, normalize them to RFC3339 format
     # so we can readily insert them as timestamps into postgresql with COPY
     if datetimecols_list:
-        qsv_applydp_csv = os.path.join(temp_dir, 'qsv_applydp.csv')
+        qsv_applydp_csv = os.path.join(temp_dir, "qsv_applydp.csv")
         datecols = ",".join(datetimecols_list)
 
         qsv_applydp_cmd = [
@@ -1203,7 +1235,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         else:
             logger.info("Scanning for PII using {}...".format(pii_regex_file))
-            qsv_searchset_csv = os.path.join(temp_dir, 'qsv_searchset.csv')
+            qsv_searchset_csv = os.path.join(temp_dir, "qsv_searchset.csv")
             try:
                 qsv_searchset = subprocess.run(
                     [
