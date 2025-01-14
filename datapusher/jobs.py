@@ -539,25 +539,26 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # check if the resource metadata (like data dictionary data types)
     # has been updated since the last fetch
-    resource_updated = False
-    resource_last_modified = resource.get("last_modified")
-    if resource_last_modified:
-        resource_last_modified = parsedate(resource_last_modified)
-        file_last_modified = response.headers.get("last-modified")
-        if file_last_modified:
-            file_last_modified = parsedate(file_last_modified)
-            if file_last_modified.tzinfo is None:
-                file_last_modified = file_last_modified.replace(tzinfo=pytz.UTC)
-            if resource_last_modified.tzinfo is None:
-                resource_last_modified = resource_last_modified.replace(tzinfo=pytz.UTC)
-            if file_last_modified < resource_last_modified:
-                resource_updated = True
+    # DRUF: temporarily disable this and just use the hash
+    # resource_updated = False
+    # resource_last_modified = resource.get("last_modified")
+    # if resource_last_modified:
+    #     resource_last_modified = parsedate(resource_last_modified)
+    #     file_last_modified = response.headers.get("last-modified")
+    #     if file_last_modified:
+    #         file_last_modified = parsedate(file_last_modified)
+    #         if file_last_modified.tzinfo is None:
+    #             file_last_modified = file_last_modified.replace(tzinfo=pytz.UTC)
+    #         if resource_last_modified.tzinfo is None:
+    #             resource_last_modified = resource_last_modified.replace(tzinfo=pytz.UTC)
+    #         if file_last_modified < resource_last_modified:
+    #             resource_updated = True
 
     if (
         resource.get("hash") == file_hash
         and not data.get("ignore_hash")
         and not config.get("IGNORE_FILE_HASH")
-        and not resource_updated
+        # and not resource_updated
     ):
         logger.warning(
             "Upload skipped as the file hash hasn't changed: {hash}.".format(
