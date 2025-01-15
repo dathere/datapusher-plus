@@ -915,7 +915,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
-        
+
     # remove the last four rows. Do this using the qsv slice command
     qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
     try:
@@ -1432,7 +1432,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         except psycopg2.Error as e:
             logger.warning("Could not TRUNCATE: {}".format(e))
 
-        col_names_list = [h["id"] for h in headers_dicts if not h["id"].startswith("qsv_")]
+        col_names_list = [
+            h["id"] for h in headers_dicts if not h["id"].startswith("qsv_")
+        ]
         column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
         copy_sql = sql.SQL(
             "COPY {} ({}) FROM STDIN "
