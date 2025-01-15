@@ -917,6 +917,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         )
 
     # remove the last four rows. Do this using the qsv slice command
+    # the last four rows are qsv__rowcount, qsv__columncount, qsv__filesize_bytes, qsv__fingerprint_hash
+    # they'll be used in later phases of DRUF, but let's remove them for now until then
     qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
     try:
         subprocess.run(
@@ -1432,9 +1434,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         except psycopg2.Error as e:
             logger.warning("Could not TRUNCATE: {}".format(e))
 
-        col_names_list = [
-            h["id"] for h in headers_dicts if not h["id"].startswith("qsv_")
-        ]
+        col_names_list = [h["id"] for h in headers_dicts]
         column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
         copy_sql = sql.SQL(
             "COPY {} ({}) FROM STDIN "
