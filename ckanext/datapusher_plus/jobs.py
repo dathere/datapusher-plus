@@ -75,7 +75,7 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "0.133.0"
+MINIMUM_QSV_VERSION = "2.1.0"
 MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
 
 DATASTORE_URLS = {
@@ -915,6 +915,38 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
+
+    # remove the last four rows. Do this using the qsv slice command
+    # the last four rows are qsv__rowcount, qsv__columncount, qsv__filesize_bytes, qsv__fingerprint_hash
+    # they'll be used in later phases of DRUF, but let's remove them for now until then
+    qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
+    try:
+        subprocess.run(
+            [
+                qsv_bin,
+                "slice",
+                "--start",
+                "-4",
+                "--invert",
+                qsv_stats_csv,
+                "--output",
+                qsv_slice_csv,
+            ],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise utils.JobError("Cannot slice CSV: {}".format(e))
+
+    # read the sliced CSV and remove the qsv__value column (the last column).
+    # Do this using the qsv select command
+    try:
+        subprocess.run(
+            [qsv_bin, "select", "!_", qsv_slice_csv, "--output", qsv_stats_csv],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise utils.JobError("Cannot select CSV: {}".format(e))
+
     with open(qsv_stats_csv, mode="r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
@@ -1402,7 +1434,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         except psycopg2.Error as e:
             logger.warning("Could not TRUNCATE: {}".format(e))
 
-        col_names_list = [h["id"] for h in headers_dicts if not h["id"].startswith("qsv_")]
+        col_names_list = [h["id"] for h in headers_dicts]
         column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
         copy_sql = sql.SQL(
             "COPY {} ({}) FROM STDIN "
