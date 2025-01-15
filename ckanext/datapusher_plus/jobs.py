@@ -915,6 +915,36 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
+        
+    # remove the last four rows. Do this using the qsv slice command
+    qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
+    try:
+        subprocess.run(
+            [
+                qsv_bin,
+                "slice",
+                "--start",
+                "-4",
+                "--invert",
+                qsv_stats_csv,
+                "--output",
+                qsv_slice_csv,
+            ],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise utils.JobError("Cannot slice CSV: {}".format(e))
+
+    # read the sliced CSV and remove the qsv__value column (the last column).
+    # Do this using the qsv select command
+    try:
+        subprocess.run(
+            [qsv_bin, "select", "!_", qsv_slice_csv, "--output", qsv_stats_csv],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise utils.JobError("Cannot select CSV: {}".format(e))
+
     with open(qsv_stats_csv, mode="r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
