@@ -1,6 +1,6 @@
 [CKAN Service Provider]: https://github.com/ckan/ckan-service-provider
 [Messytables]: https://github.com/okfn/messytables
-[qsv]: https://github.com/jqnatividad/qsv#qsv-ultra-fast-csv-data-wrangling-toolkit
+[qsv]: https://github.com/dathere/qsv#qsv-ultra-fast-csv-data-wrangling-toolkit
 
 # DataPusher+
 
@@ -22,11 +22,11 @@ It features:
   a column, [qsv][] scans the entire table so its data type inferences are guaranteed[^1].
 
   Despite this, qsv is still exponentially faster even if it scans the whole file, not
-  only inferring data types, it also calculates [summary statistics](https://github.com/jqnatividad/qsv/blob/b0fbd0e575e2e80f57f94ce916438edf9dc32859/src/cmd/stats.rs#L2-L18) as well. For example,
-  [scanning a 2.7 million row, 124MB CSV file for types and stats took 0.16 seconds](https://github.com/jqnatividad/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour)[^2].
+  only inferring data types, it also calculates [summary statistics](https://github.com/dathere/qsv/blob/b0fbd0e575e2e80f57f94ce916438edf9dc32859/src/cmd/stats.rs#L2-L18) as well. For example,
+  [scanning a 2.7 million row, 124MB CSV file for types and stats took 0.16 seconds](https://github.com/dathere/qsv/blob/master/docs/whirlwind_tour.md#a-whirlwind-tour)[^2].
 
   It is very fast as qsv is written in [Rust](https://www.rust-lang.org/), is multithreaded,
-  and uses all kinds of [performance techniques](https://github.com/jqnatividad/qsv/blob/master/docs/PERFORMANCE.md#performance-tuning)
+  and uses all kinds of [performance techniques](https://github.com/dathere/qsv/blob/master/docs/PERFORMANCE.md#performance-tuning)
   especially designed for data-wrangling.
 
 * **Exponentially faster loading speed**
@@ -95,7 +95,7 @@ It features:
   Ideas, suggestions and your feedback are most welcome!
 
 [^1]: [Why use qsv instead of a "proper" python data analysis library like pandas?](https://github.com/dathere/datapusher-plus/discussions/15)
-[^2]: It takes 0.16 seconds with an index to run `qsv stats` against the [qsv whirlwind tour sample file](https://raw.githubusercontent.com/wiki/jqnatividad/qsv/files/wcp.zip) on a Ryzen 4800H (8 physical/16 logical cores) with 32 gb memory and a 1 TB SSD.
+[^2]: It takes 0.16 seconds with an index to run `qsv stats` against the [qsv whirlwind tour sample file](https://raw.githubusercontent.com/wiki/dathere/qsv/files/wcp.zip) on a Ryzen 4800H (8 physical/16 logical cores) with 32 gb memory and a 1 TB SSD.
 Without an index, it takes 1.3 seconds.
 [^3]: Imagine you have a 1M row CSV, and the last row has an invalid value for a numeric column (e.g. "N/A" instead of a number).
       After spending hours pushing the data very slowly, legacy datapusher will abort on the last row and the ENTIRE job is invalid.
@@ -133,23 +133,23 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     pip install -r requirements.txt
     ```
 
-5. Install [qsv](https://github.com/jqnatividad/qsv).
+5. Install [qsv](https://github.com/dathere/qsv).
 
     ## Manual Installation
 
-    [Download the appropriate precompiled binaries](https://github.com/jqnatividad/qsv/releases/latest) for your platform and copy
+    [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
     it to the appropriate directory, e.g. for Linux:
 
     ```bash
-    wget https://github.com/jqnatividad/qsv/releases/download/0.87.1/qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    unzip qsv-0.87.1-x86_64-unknown-linux-gnu.zip
-    rm qsv-0.87.1-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/dathere/qsv/releases/download/2.22.1/qsv-2.22.1-x86_64-unknown-linux-gnu.zip
+    unzip qsv-2.22.1-x86_64-unknown-linux-gnu.zip
+    rm qsv-2.22.1-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
     ```
 
     Alternatively, if you want to install qsv from source, follow
-    the instructions [here](https://github.com/jqnatividad/qsv#installation). Note that when compiling from source,
-    you may want to look into the [Performance Tuning](https://github.com/jqnatividad/qsv#performance-tuning)
+    the instructions [here](https://github.com/dathere/qsv#installation). Note that when compiling from source,
+    you may want to look into the [Performance Tuning](https://github.com/dathere/qsv#performance-tuning)
     section to squeeze even more performance from qsv.
 
     Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
