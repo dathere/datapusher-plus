@@ -45,7 +45,56 @@ def datapusher_status_description(status: dict[str, Any]):
         return CAPTIONS.get(job_status, job_status.capitalize())
     except (KeyError, TypeError):
         return DEFAULT_STATUS
-
+    
+def datapusher_plus_calculate_field(resource: dict[str, Any], expression: str):
+    """Calculate the field using a Jinja2 expression.
+    The Jinja2 expression is evaluated in the context of the resource.
+    The resource is passed to the Jinja2 template as a dict.
+    The resource dict is the same as the resource dict returned by the
+    get_resource action.
+    
+    To access the value of a field in the resource dict, use the following syntax:
+    {{ resource.field_name }}
+    
+    Further, the resource dict is augmented with the following variables:
+    - stats: a dict of stats for the resource
+    - freq: a dict of frequency for the resource
+    
+    To access the stats or freq dicts, use the following syntax:
+    {{ stats.field_name.stat_name }}
+    {{ freq.field_name.freq_values }}
+    
+    The field_name is the name of the field to calculate the value of.
+    The stat_name is the name of the stat to access.
+    The freq_values is a list of frequency values for the field.
+    Each freq_value is a dict with the following keys:
+    - value: the value of the frequency
+    - count: the count of the frequency
+    - percentage: the percentage of the frequency
+    """
+    from jinja2 import Template, Environment, meta
+    
+    # Create a sandboxed environment
+    env = Environment(autoescape=True)
+    
+    try:
+        # Create template from expression
+        template = env.from_string(expression)
+        
+        # Create context with resource and its augmented data
+        context = {
+            'resource': resource,
+            'stats': resource.get('stats', {}),
+            'freq': resource.get('freq', {})
+        }
+        
+        # Render the template with the context
+        result = template.render(**context)
+        return result
+        
+    except Exception as e:
+        log.error(f"Error calculating field: {str(e)}")
+        return None
 
 def get_job(job_id, limit=None, use_aps_id=False):
     """Return the job with the given job_id as a dict.
