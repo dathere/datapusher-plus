@@ -63,6 +63,7 @@ setup(
         # ``requirements.txt`` file.
         #
         # http://docs.ckan.org/en/latest/extensions/best-practices.html#add-third-party-libraries-to-requirements-txt
+        'jinja2>=3.1.5',
     ],
 
     # If there are data files included in your packages that need to be
