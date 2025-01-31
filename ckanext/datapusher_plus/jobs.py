@@ -216,6 +216,22 @@ def get_package(package_id):
     return dataset_dict
 
 
+def get_scheming_yaml(package_id):
+    """
+    Gets the scheming yaml for a package
+    """
+    package = get_package(package_id)
+    if not package:
+        raise utils.JobError("Package not found")
+    type = package.get("type")
+
+    scheming_yaml = tk.get_action("scheming_dataset_schema_show")(
+        {"ignore_auth": True}, {"type": type}
+    )
+
+    return scheming_yaml
+
+
 def validate_input(input):
     # Especially validate metadata which is provided by the user
     if "metadata" not in input:
@@ -471,7 +487,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             tmp = os.path.join(temp_dir, "tmp." + resource_format)
             length = 0
-            m = hashlib.md5()
+            # using MD5 for file deduplication only
+            # no need for it to be cryptographically secure
+            m = hashlib.md5()  # DevSkim: ignore DS126858
 
             # download the file
             if cl:
@@ -748,34 +766,23 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         logger.info(sortcheck_msg)
 
     # --------------- Do we need to dedup? ------------------
-    # note that deduping also ends up creating a sorted CSV
     if dedup and dupe_count > 0:
         qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
         logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
-        qsv_dedup_cmd = [qsv_bin, "dedup", tmp, "--output", qsv_dedup_csv]
+        qsv_extdedup_cmd = [qsv_bin, "extdedup", tmp, qsv_dedup_csv]
 
-        # if the file is already sorted,
-        # we can save a lot of time by passing the --sorted flag
-        # we also get to "stream" the file and not load it into memory,
-        # as we don't need to sort it first
-        if is_sorted:
-            qsv_dedup_cmd.append("--sorted")
         try:
-            qsv_dedup = subprocess.run(
-                qsv_dedup_cmd,
+            qsv_extdedup = subprocess.run(
+                qsv_extdedup_cmd,
                 capture_output=True,
                 text=True,
             )
         except subprocess.CalledProcessError as e:
             raise utils.JobError("Check for duplicates error: {}".format(e))
-        dupe_count = int(str(qsv_dedup.stderr).strip())
+        dupe_count = int(str(qsv_extdedup.stderr).strip())
         if dupe_count > 0:
             tmp = qsv_dedup_csv
-            logger.warning(
-                "{:,} duplicates found and removed. Note that deduping results in a sorted CSV.".format(
-                    dupe_count
-                )
-            )
+            logger.warning("{:,} duplicates found and removed.".format(dupe_count))
     elif dupe_count > 0:
         logger.warning("{:,} duplicates found but not deduping...".format(dupe_count))
 
@@ -894,6 +901,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         "--infer-dates",
         "--dates-whitelist",
         "all",
+        "--stats-jsonl",
         "--output",
         qsv_stats_csv,
     ]
@@ -1043,6 +1051,116 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.info(
         "Determined headers and types: {headers}...".format(headers=headers_dicts)
     )
+
+    # save stats to the datastore by loading qsv_stats_csv directly using COPY
+    stats_table = sql.Identifier(resource_id + "-stats")
+
+    try:
+        raw_connection_statsfreq = psycopg2.connect(
+            tk.config.get("ckan.datastore.write_url")
+        )
+    except psycopg2.Error as e:
+        raise utils.JobError("Could not connect to the Datastore: {}".format(e))
+    else:
+        cur_statsfreq = raw_connection_statsfreq.cursor()
+
+    # Create stats table based on qsv stats CSV structure
+    cur_statsfreq.execute(
+        sql.SQL(
+            """
+            DROP TABLE IF EXISTS {};
+            CREATE TABLE {} (
+                field TEXT,
+                type TEXT,
+                is_ascii BOOLEAN,
+                sum TEXT,
+                min TEXT,
+                max TEXT,
+                range TEXT,
+                sort_order TEXT,
+                min_length INTEGER,
+                max_length INTEGER,
+                sum_length INTEGER,
+                avg_length FLOAT,
+                stddev_length FLOAT,
+                variance_length FLOAT,
+                cv_length FLOAT,
+                mean FLOAT,
+                sem FLOAT,
+                geometric_mean FLOAT,
+                harmonic_mean FLOAT,
+                stddev FLOAT,
+                variance FLOAT,
+                cv FLOAT,
+                nullcount INTEGER,
+                max_precision INTEGER,
+                sparsity FLOAT,
+                cardinality INTEGER
+            )
+        """
+        ).format(stats_table, stats_table)
+    )
+
+    # Load stats CSV directly using COPY
+    try:
+        with open(qsv_stats_csv, "r") as f:
+            cur_statsfreq.copy_from(f, resource_id + "-stats", sep=",", null="")
+    except IOError as e:
+        raise utils.JobError("Could not open stats CSV file: {}".format(e))
+    except psycopg2.Error as e:
+        raise utils.JobError("Could not copy stats data to database: {}".format(e))
+
+    raw_connection_statsfreq.commit()
+
+    # ----------------------- Frequency Table ---------------------------
+    # compile a frequency table for each column
+    qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
+    qsv_freq_cmd = [
+        qsv_bin,
+        "frequency",
+        "--limit",
+        "0",
+        tmp,
+        "--output",
+        qsv_freq_csv,
+    ]
+    try:
+        qsv_freq = subprocess.run(qsv_freq_cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        raise utils.JobError("Cannot create a frequency table: {}".format(e))
+
+    # save frequency table to the datastore by loading qsv_freq_csv directly using COPY
+    # into the datastore using the resource_id + "-freq" table
+    # first, create the table
+    cur_statsfreq.execute(
+        sql.SQL(
+            """
+            DROP TABLE IF EXISTS {};
+            CREATE TABLE {} (
+                field TEXT,
+                value TEXT,
+                count INTEGER,
+                percentage FLOAT
+            )
+        """
+        ).format(resource_id + "-freq", resource_id + "-freq")
+    )
+
+    freq_table = sql.Identifier(resource_id + "-freq")
+
+    # load the frequency table using COPY
+    try:
+        with open(qsv_freq_csv, "r") as f:
+            cur_statsfreq.copy_from(f, freq_table, sep=",", null="")
+    except IOError as e:
+        raise utils.JobError("Could not open frequency CSV file: {}".format(e))
+    except psycopg2.Error as e:
+        raise utils.JobError("Could not copy frequency data to database: {}".format(e))
+
+    raw_connection_statsfreq.commit()
+
+    cur_statsfreq.close()
+    raw_connection_statsfreq.close()
 
     # ------------------- Do we need to create a Preview?  -----------------------
     # if PREVIEW_ROWS is not zero, create a preview using qsv slice
