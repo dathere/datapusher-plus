@@ -1102,9 +1102,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Load stats CSV directly using COPY
+    copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
+        stats_table
+    )
     try:
         with open(qsv_stats_csv, "r") as f:
-            cur_statsfreq.copy_from(f, resource_id + "-stats", sep=",", null="")
+            cur_statsfreq.copy_expert(copy_sql, f)
     except IOError as e:
         raise utils.JobError("Could not open stats CSV file: {}".format(e))
     except psycopg2.Error as e:
@@ -1132,6 +1135,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # save frequency table to the datastore by loading qsv_freq_csv directly using COPY
     # into the datastore using the resource_id + "-freq" table
     # first, create the table
+    freq_table = sql.Identifier(resource_id + "-freq")
     cur_statsfreq.execute(
         sql.SQL(
             """
@@ -1143,15 +1147,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 percentage FLOAT
             )
         """
-        ).format(resource_id + "-freq", resource_id + "-freq")
+        ).format(freq_table, freq_table)
     )
 
-    freq_table = sql.Identifier(resource_id + "-freq")
-
     # load the frequency table using COPY
+    copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
+        freq_table
+    )
     try:
         with open(qsv_freq_csv, "r") as f:
-            cur_statsfreq.copy_from(f, freq_table, sep=",", null="")
+            cur_statsfreq.copy_expert(copy_sql, f)
     except IOError as e:
         raise utils.JobError("Could not open frequency CSV file: {}".format(e))
     except psycopg2.Error as e:
