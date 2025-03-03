@@ -7,6 +7,7 @@ import hashlib
 import locale
 import mimetypes
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -48,6 +49,7 @@ from dateutil.parser import parse as parsedate
 from rq import get_current_job
 import ckan.plugins.toolkit as tk
 
+from jinja2 import DictLoader, Environment
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
@@ -75,7 +77,7 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "2.1.0"
+MINIMUM_QSV_VERSION = "3.1.1"
 MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
 
 DATASTORE_URLS = {
@@ -226,7 +228,7 @@ def get_scheming_yaml(package_id):
     type = package.get("type")
 
     scheming_yaml = tk.get_action("scheming_dataset_schema_show")(
-        {"ignore_auth": True}, {"type": type}
+        {"ignore_auth": True}, {"type": "dataset"}
     )
 
     return scheming_yaml
@@ -924,48 +926,29 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             "Cannot infer data types and compile statistics: {}".format(e)
         )
 
-    # remove the last four rows. Do this using the qsv slice command
-    # the last four rows are qsv__rowcount, qsv__columncount, qsv__filesize_bytes, qsv__fingerprint_hash
-    # they'll be used in later phases of DRUF, but let's remove them for now until then
-    qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
-    try:
-        subprocess.run(
-            [
-                qsv_bin,
-                "slice",
-                "--start",
-                "-4",
-                "--invert",
-                qsv_stats_csv,
-                "--output",
-                qsv_slice_csv,
-            ],
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("Cannot slice CSV: {}".format(e))
-
-    # read the sliced CSV and remove the qsv__value column (the last column).
-    # Do this using the qsv select command
-    try:
-        subprocess.run(
-            [qsv_bin, "select", "!_", qsv_slice_csv, "--output", qsv_stats_csv],
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("Cannot select CSV: {}".format(e))
+    # Dictionary to look up stats by field name
+    field_stats_lookup = {}
 
     with open(qsv_stats_csv, mode="r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
-            fr = {k: v for k, v in row.items() if not k.startswith("qsv_")}
-            headers.append(fr.get("field", "Unnamed Column"))
+            # Add to lookup dictionary with field name as key
+            field_stats_lookup[row["field"]] = {"stats": row}
+            
+            fr = {k: v for k, v in row.items()}
+            schema_field = fr.get("field", "Unnamed Column")
+            if schema_field.startswith("qsv_"):
+                break
+            headers.append(schema_field)
             types.append(fr.get("type", "String"))
             headers_min.append(fr["min"])
             headers_max.append(fr["max"])
             if auto_index_threshold:
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
+    # logger.info("field_stats_lookup: {}".format(field_stats_lookup))
+
+    # Get the field stats for each field in the headers list
     existing = datastore_resource_exists(resource_id)
     existing_info = None
     if existing:
@@ -1078,6 +1061,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 max TEXT,
                 range TEXT,
                 sort_order TEXT,
+                sortiness FLOAT,
                 min_length INTEGER,
                 max_length INTEGER,
                 sum_length INTEGER,
@@ -1095,7 +1079,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 nullcount INTEGER,
                 max_precision INTEGER,
                 sparsity FLOAT,
-                cardinality INTEGER
+                cardinality INTEGER,
+                uniqueness_ratio FLOAT
             )
         """
         ).format(stats_table, stats_table)
@@ -1105,6 +1090,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
         stats_table
     )
+    
+    # Copy stats CSV to /tmp directory for debugging purposes
+    try:
+        debug_stats_path = os.path.join('/tmp', os.path.basename(qsv_stats_csv))
+        shutil.copy2(qsv_stats_csv, debug_stats_path)
+        logger.info(f"Copied stats CSV to {debug_stats_path} for debugging")
+    except Exception as e:
+        logger.warning(f"Failed to copy stats CSV to /tmp for debugging: {e}")
+    
     try:
         with open(qsv_stats_csv, "r") as f:
             cur_statsfreq.copy_expert(copy_sql, f)
@@ -1144,11 +1138,20 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 field TEXT,
                 value TEXT,
                 count INTEGER,
-                percentage FLOAT
+                percentage FLOAT,
+                PRIMARY KEY (field, value, count)
             )
         """
         ).format(freq_table, freq_table)
     )
+    
+    # Copy frequency CSV to /tmp directory for debugging purposes
+    try:
+        debug_freq_path = os.path.join('/tmp', os.path.basename(qsv_freq_csv))
+        shutil.copy2(qsv_freq_csv, debug_freq_path)
+        logger.info(f"Copied frequency CSV to {debug_freq_path} for debugging")
+    except Exception as e:
+        logger.warning(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
 
     # load the frequency table using COPY
     copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
@@ -1595,6 +1598,62 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             copy_elapsed="{:,.2f}".format(copy_elapsed),
         )
     )
+    
+    # ============================================================
+    # FETCH SCHEMING YAML
+    # ============================================================
+    scheming_yaml = get_scheming_yaml(resource["package_id"])
+    # Check if there are any fields with suggest_jinja2 in the scheming_yaml
+    suggest_jinja2_fields = [
+        field for field in scheming_yaml["dataset_fields"]
+        if field.get("suggest_jinja2")
+    ]
+    
+    # if there are any fields with suggest_jinja2, we need to fetch the associated jinja2 template
+    # and initialize the jinja2 environment with the field stats
+    need_stats_in_jinja2 = False
+    
+    jinja2_dict = {}
+    if suggest_jinja2_fields:
+        logger.info("Found {} field/s with suggest_jinja2 in the scheming_yaml".format(len(suggest_jinja2_fields)))
+        # For each field with suggest_jinja2, get the associated jinja2 template
+        for schema_field in suggest_jinja2_fields:
+            jinja2_template = schema_field["suggest_jinja2"]
+            if jinja2_template:
+                if not need_stats_in_jinja2 and jinja2_template.find(".stats.") != -1:
+                    need_stats_in_jinja2 = True
+            field_name = schema_field["field_name"]
+            jinja2_dict[field_name] = jinja2_template
+            logger.info("Jinja2 template for field \"{}\": {}".format(field_name, jinja2_template))
+
+    jinja2_env = Environment(loader=DictLoader(jinja2_dict))
+
+
+    # if need_stats_in_jinja2 is True, we need to fetch the stats for the field
+    # so we can load it into the jinja2 environment in the "[FIELD_NAME].stats" namespace
+    if need_stats_in_jinja2:
+        logger.info("Need stats in jinja2")
+        # iterate over field_stats_lookup and load the stats into the jinja2 environment in the "[FIELD_NAME].stats" namespace
+        for field_name, field_stats in field_stats_lookup.items():
+            jinja2_env.globals["{}.stats".format(field_name)] = field_stats
+        
+        
+        for schema_field in suggest_jinja2_fields:
+            field_name = schema_field["field_name"]
+            # field_stats = field_stats_lookup.get(field_name)
+            # logger.info("Field stats for field \"{}\": {}".format(field_name, field_stats))
+            
+            
+            # load the field stats into the jinja2 environment in the "[FIELD_NAME].stats" namespace
+            # jinja2_env.globals["{}.stats".format(field_name)] = field_stats
+            
+            # evaluate the jinja2 template
+            template = jinja2_env.get_template(field_name)
+            logger.info("Evaluated jinja2 template for field \"{}\": {}".format(field_name, template.render()))
+
+    else:
+        logger.info("No need for stats in jinja2")
+        
 
     # ============================================================
     # UPDATE METADATA
