@@ -934,7 +934,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         for row in reader:
             # Add to lookup dictionary with field name as key
             field_stats_lookup[row["field"]] = {"stats": row}
-            
+
             fr = {k: v for k, v in row.items()}
             schema_field = fr.get("field", "Unnamed Column")
             if schema_field.startswith("qsv_"):
@@ -945,8 +945,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             headers_max.append(fr["max"])
             if auto_index_threshold:
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
-
-    # logger.info("field_stats_lookup: {}".format(field_stats_lookup))
 
     # Get the field stats for each field in the headers list
     existing = datastore_resource_exists(resource_id)
@@ -1090,15 +1088,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
         stats_table
     )
-    
+
     # Copy stats CSV to /tmp directory for debugging purposes
     try:
-        debug_stats_path = os.path.join('/tmp', os.path.basename(qsv_stats_csv))
+        debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
         shutil.copy2(qsv_stats_csv, debug_stats_path)
         logger.info(f"Copied stats CSV to {debug_stats_path} for debugging")
     except Exception as e:
         logger.warning(f"Failed to copy stats CSV to /tmp for debugging: {e}")
-    
+
     try:
         with open(qsv_stats_csv, "r") as f:
             cur_statsfreq.copy_expert(copy_sql, f)
@@ -1144,10 +1142,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         """
         ).format(freq_table, freq_table)
     )
-    
+
     # Copy frequency CSV to /tmp directory for debugging purposes
     try:
-        debug_freq_path = os.path.join('/tmp', os.path.basename(qsv_freq_csv))
+        debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
         shutil.copy2(qsv_freq_csv, debug_freq_path)
         logger.info(f"Copied frequency CSV to {debug_freq_path} for debugging")
     except Exception as e:
@@ -1598,62 +1596,61 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             copy_elapsed="{:,.2f}".format(copy_elapsed),
         )
     )
-    
+
     # ============================================================
     # FETCH SCHEMING YAML
     # ============================================================
     scheming_yaml = get_scheming_yaml(resource["package_id"])
     # Check if there are any fields with suggest_jinja2 in the scheming_yaml
     suggest_jinja2_fields = [
-        field for field in scheming_yaml["dataset_fields"]
+        field
+        for field in scheming_yaml["dataset_fields"]
         if field.get("suggest_jinja2")
     ]
-    
-    # if there are any fields with suggest_jinja2, we need to fetch the associated jinja2 template
-    # and initialize the jinja2 environment with the field stats
-    need_stats_in_jinja2 = False
-    
+
     jinja2_dict = {}
     if suggest_jinja2_fields:
-        logger.info("Found {} field/s with suggest_jinja2 in the scheming_yaml".format(len(suggest_jinja2_fields)))
+        logger.info(
+            "Found {} field/s with suggest_jinja2 in the scheming_yaml".format(
+                len(suggest_jinja2_fields)
+            )
+        )
+        need_stats_in_jinja2 = False
         # For each field with suggest_jinja2, get the associated jinja2 template
         for schema_field in suggest_jinja2_fields:
             jinja2_template = schema_field["suggest_jinja2"]
             if jinja2_template:
-                if not need_stats_in_jinja2 and jinja2_template.find(".stats.") != -1:
+                # Check if the jinja2 template contains .stats. or ['stats'] or ["stats"]
+                if not need_stats_in_jinja2 and (
+                    jinja2_template.find(".stats.") != -1
+                    or jinja2_template.find("['stats']") != -1
+                    or jinja2_template.find('["stats"]') != -1
+                ):
                     need_stats_in_jinja2 = True
             field_name = schema_field["field_name"]
             jinja2_dict[field_name] = jinja2_template
-            logger.info("Jinja2 template for field \"{}\": {}".format(field_name, jinja2_template))
+            logger.info(
+                'Jinja2 template for field "{}": {}'.format(field_name, jinja2_template)
+            )
 
+    logger.info("Jinja2 dict: {}".format(jinja2_dict))
     jinja2_env = Environment(loader=DictLoader(jinja2_dict))
 
-
-    # if need_stats_in_jinja2 is True, we need to fetch the stats for the field
-    # so we can load it into the jinja2 environment in the "[FIELD_NAME].stats" namespace
     if need_stats_in_jinja2:
         logger.info("Need stats in jinja2")
-        # iterate over field_stats_lookup and load the stats into the jinja2 environment in the "[FIELD_NAME].stats" namespace
-        for field_name, field_stats in field_stats_lookup.items():
-            jinja2_env.globals["{}.stats".format(field_name)] = field_stats
-        
-        
+
         for schema_field in suggest_jinja2_fields:
             field_name = schema_field["field_name"]
-            # field_stats = field_stats_lookup.get(field_name)
-            # logger.info("Field stats for field \"{}\": {}".format(field_name, field_stats))
-            
-            
-            # load the field stats into the jinja2 environment in the "[FIELD_NAME].stats" namespace
-            # jinja2_env.globals["{}.stats".format(field_name)] = field_stats
-            
+
             # evaluate the jinja2 template
             template = jinja2_env.get_template(field_name)
-            logger.info("Evaluated jinja2 template for field \"{}\": {}".format(field_name, template.render()))
-
+            logger.info(
+                'Evaluated jinja2 template for field "{}": {}'.format(
+                    field_name, template.render(field_stats_lookup)
+                )
+            )
     else:
         logger.info("No need for stats in jinja2")
-        
 
     # ============================================================
     # UPDATE METADATA
