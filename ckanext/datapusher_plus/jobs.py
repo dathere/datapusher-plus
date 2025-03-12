@@ -77,8 +77,68 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "3.1.1"
-MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
+MINIMUM_QSV_VERSION = "3.2.0"
+
+PII_SCREENING = tk.asbool(tk.config.get("ckanext.datastore_plus.pii_screening", False))
+QSV_BIN = Path(tk.config.get("ckanext.datapusher_plus.qsv_bin"))
+FILE_BIN = Path(tk.config.get("ckanext.datapusher_plus.file_bin"))
+PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "1000"))
+TIMEOUT = tk.asint(tk.config.get("ckanext.datapusher_plus.download_timeout", "300"))
+MAX_CONTENT_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
+)
+CHUNK_SIZE = tk.asint(tk.config.get("ckanext.datapusher_plus.chunk_size", "1048576"))
+DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 1))
+SORT_AND_DUPE_CHECK = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check", True)
+)
+DEDUP = tk.asbool(tk.config.get("ckanext.datapusher_plus.dedup", True))
+UNSAFE_PREFIX = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
+RESERVED_COLNAMES = tk.config.get("ckanext.datapusher_plus.reserved_colnames", "_id")
+PREFER_DMY = tk.asbool(tk.config.get("ckanext.datapusher_plus.prefer_dmy", False))
+AUTO_INDEX_THRESHOLD = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.auto_index_threshold", "3")
+)
+SUMMARY_STATS_OPTIONS = tk.config.get("ckanext.datapusher_plus.summary_stats_options")
+PII_FOUND_ABORT = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.pii_found_abort", False)
+)
+PII_REGEX_RESOURCE_ID = tk.config.get(
+    "ckanext.datapusher_plus.pii_regex_resource_id_or_alias"
+)
+PII_SHOW_CANDIDATES = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.pii_show_candidates", False)
+)
+PII_QUICK_SCREEN = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.pii_quick_screen", False)
+)
+COPY_READBUFFER_SIZE = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.copy_readbuffer_size", "1048576")
+)
+AUTO_INDEX_DATES = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_index_dates", True)
+)
+AUTO_UNIQUE_INDEX = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_unique_index", True)
+)
+TYPE_MAPPING = json.loads(
+    tk.config.get(
+        "ckanext.datapusher_plus.type_mapping",
+        '{"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}',
+    )
+)
+AUTO_ALIAS = tk.asbool(tk.config.get("ckanext.datapusher_plus.auto_alias", True))
+AUTO_ALIAS_UNIQUE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_alias_unique", True)
+)
+
+ADD_SUMMARY_STATS_RESOURCE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.add_summary_stats_resource", False)
+)
+SUMMARY_STATS_WITH_PREVIEW = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.summary_stats_with_preview", False)
+)
+
 
 DATASTORE_URLS = {
     "datastore_delete": "{ckan_url}/api/action/datastore_delete",
@@ -343,20 +403,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.setLevel(logging.DEBUG)
 
     # check if QSV_BIN and FILE_BIN exists
-    qsv_bin = tk.config.get("ckanext.datapusher_plus.qsv_bin")
-    qsv_path = Path(qsv_bin)
-    if not qsv_path.is_file():
-        raise utils.JobError("{} not found.".format(qsv_bin))
-    file_bin = tk.config.get("ckanext.datapusher_plus.file_bin")
+    # qsv_path = Path(QSV_BIN)
+    if not QSV_BIN.is_file():
+        raise utils.JobError("{} not found.".format(QSV_BIN))
 
-    file_path = Path(file_bin)
-    if not file_path.is_file():
-        raise utils.JobError("{} not found.".format(file_bin))
+    if not FILE_BIN.is_file():
+        raise utils.JobError("{} not found.".format(FILE_BIN))
 
     # make sure qsv binary variant is up-to-date
     try:
         qsv_version = subprocess.run(
-            [qsv_bin, "--version"],
+            [QSV_BIN, "--version"],
             capture_output=True,
             text=True,
         )
@@ -369,7 +426,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsvdp 0.134.0-mimalloc-Luau 0.640;polars-0.42.0-fe04390;...
         """
         raise utils.JobError(
-            f"We expect qsv version info to be returned. Command: {qsv_bin} --version. Response: {qsv_version_info}"
+            f"We expect qsv version info to be returned. Command: {QSV_BIN} --version. Response: {qsv_version_info}"
         )
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" ") : qsv_version_info.find("-")
@@ -417,7 +474,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # fetch the resource data
     logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
-    preview_rows = int(tk.config.get("ckanext.datapusher_plus.preview_rows"))
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
@@ -456,7 +512,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             ct = response.headers.get("content-type")
 
             try:
-                if cl and int(cl) > max_content_length and preview_rows > 0:
+                if cl and int(cl) > max_content_length and PREVIEW_ROWS > 0:
                     raise utils.JobError(
                         "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
                             cl=DataSize(int(cl)),
@@ -504,7 +560,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     int(tk.config.get("ckanext.datapusher_plus.chunk_size"))
                 ):
                     length += len(chunk)
-                    if length > max_content_length and not preview_rows:
+                    if length > max_content_length and not PREVIEW_ROWS:
                         raise utils.JobError(
                             "Resource too large to process: {cl} > max ({max_cl}).".format(
                                 cl=length, max_cl=max_content_length
@@ -594,7 +650,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_excel = subprocess.run(
                 [
-                    qsv_bin,
+                    QSV_BIN,
                     "excel",
                     qsv_spreadsheet,
                     "--sheet",
@@ -617,7 +673,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # just in case the file is not actually a spreadsheet or is encrypted
             # so the user has some actionable info
             file_format = subprocess.run(
-                [file_bin, qsv_spreadsheet],
+                [FILE_BIN, qsv_spreadsheet],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -702,7 +758,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_input = subprocess.run(
                 [
-                    qsv_bin,
+                    QSV_BIN,
                     "input",
                     tmp,
                     "--trim-headers",
@@ -728,7 +784,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.info("Validating CSV...")
     try:
         subprocess.run(
-            [qsv_bin, "validate", tmp], check=True, capture_output=True, text=True
+            [QSV_BIN, "validate", tmp], check=True, capture_output=True, text=True
         )
     except subprocess.CalledProcessError as e:
         # return as we can't push an invalid CSV file
@@ -741,14 +797,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # if SORT_AND_DUPE_CHECK is True or DEDUP is True
     # check if the file is sorted and if it has duplicates
     # get the record count, unsorted breaks and duplicate count as well
-    sort_and_dupe_check = tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check")
-    dedup = tk.config.get("ckanext.datapusher_plus.dedup")
-
-    if sort_and_dupe_check or dedup:
+    if SORT_AND_DUPE_CHECK or DEDUP:
         logger.info("Checking for duplicates and if the CSV is sorted...")
         try:
             qsv_sortcheck = subprocess.run(
-                [qsv_bin, "sortcheck", tmp, "--json"],
+                [QSV_BIN, "sortcheck", tmp, "--json"],
                 capture_output=True,
                 text=True,
             )
@@ -768,10 +821,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         logger.info(sortcheck_msg)
 
     # --------------- Do we need to dedup? ------------------
-    if dedup and dupe_count > 0:
+    if DEDUP and dupe_count > 0:
         qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
         logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
-        qsv_extdedup_cmd = [qsv_bin, "extdedup", tmp, qsv_dedup_csv]
+        qsv_extdedup_cmd = [QSV_BIN, "extdedup", tmp, qsv_dedup_csv]
 
         try:
             qsv_extdedup = subprocess.run(
@@ -793,7 +846,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # should we need to change the column name to make it "db-safe"
     try:
         qsv_headers = subprocess.run(
-            [qsv_bin, "headers", "--just-names", tmp],
+            [QSV_BIN, "headers", "--just-names", tmp],
             capture_output=True,
             check=True,
             text=True,
@@ -807,20 +860,24 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # now, ensure our column/header names identifiers are "safe names"
     # i.e. valid postgres/CKAN Datastore identifiers
-    unsafe_prefix = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
-    reserved_colnames = tk.config.get(
-        "ckanext.datapuhser_plus.reserved_colnames", "_id"
-    )
+    # unsafe_prefix = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
+    # reserved_colnames = tk.config.get(
+    #     "ckanext.datapuhser_plus.reserved_colnames", "_id"
+    # )
     qsv_safenames_csv = os.path.join(temp_dir, "qsv_safenames.csv")
     logger.info('Checking for "database-safe" header names...')
     try:
         qsv_safenames = subprocess.run(
             [
-                qsv_bin,
+                QSV_BIN,
                 "safenames",
                 tmp,
                 "--mode",
                 "json",
+                "--reserved",
+                RESERVED_COLNAMES,
+                "--prefix",
+                UNSAFE_PREFIX,
             ],
             capture_output=True,
             text=True,
@@ -839,7 +896,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         )
         qsv_safenames = subprocess.run(
             [
-                qsv_bin,
+                QSV_BIN,
                 "safenames",
                 tmp,
                 "--mode",
@@ -861,17 +918,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # are all accelerated/multithreaded when an index is present
     try:
         qsv_index_file = tmp + ".idx"
-        subprocess.run([qsv_bin, "index", tmp], check=True)
+        subprocess.run([QSV_BIN, "index", tmp], check=True)
     except subprocess.CalledProcessError as e:
         raise utils.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
     # so we can skip qsv count.
-    if not sort_and_dupe_check:
+    if not SORT_AND_DUPE_CHECK:
         # get record count, this is instantaneous with an index
         try:
             qsv_count = subprocess.run(
-                [qsv_bin, "count", tmp], capture_output=True, check=True, text=True
+                [QSV_BIN, "count", tmp], capture_output=True, check=True, text=True
             )
         except subprocess.CalledProcessError as e:
             raise utils.JobError("Cannot count records in CSV: {}".format(e))
@@ -884,7 +941,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # log how many records we detected
     unique_qualifier = ""
-    if dedup:
+    if DEDUP:
         unique_qualifier = "unique"
     logger.info("{:,} {} records detected...".format(record_count, unique_qualifier))
 
@@ -897,7 +954,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     headers_cardinality = []
     qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
     qsv_stats_cmd = [
-        qsv_bin,
+        QSV_BIN,
         "stats",
         tmp,
         "--infer-dates",
@@ -907,17 +964,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         "--output",
         qsv_stats_csv,
     ]
-    prefer_dmy = tk.config.get("ckanext.datapusher_plus.prefer_dmy")
-    if prefer_dmy:
+
+    if PREFER_DMY:
         qsv_stats_cmd.append("--prefer-dmy")
-    auto_index_threshold = tk.config.get("ckanext.datapusher_plus.auto_index_threshold")
-    if auto_index_threshold:
+
+    global AUTO_INDEX_THRESHOLD
+    if AUTO_INDEX_THRESHOLD:
         qsv_stats_cmd.append("--cardinality")
-    summary_stats_options = tk.config.get(
-        "ckanext.datapusher_plus.summary_stats_options"
-    )
-    if summary_stats_options:
-        qsv_stats_cmd.append(summary_stats_options)
+    if SUMMARY_STATS_OPTIONS:
+        qsv_stats_cmd.append(SUMMARY_STATS_OPTIONS)
 
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
@@ -943,7 +998,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             types.append(fr.get("type", "String"))
             headers_min.append(fr["min"])
             headers_max.append(fr["max"])
-            if auto_index_threshold:
+            if AUTO_INDEX_THRESHOLD:
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
     # Get the field stats for each field in the headers list
@@ -977,12 +1032,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
-    type_mapping = json.loads(tk.config.get("ckanext.datapusher_plus.type_mapping"))
     default_type = "String"
     temp_headers_dicts = [
         dict(
             id=field[0],
-            type=type_mapping.get(str(field[1]) if field[1] else default_type, "text"),
+            type=TYPE_MAPPING.get(str(field[1]) if field[1] else default_type, "text"),
         )
         for field in zip(headers, types)
     ]
@@ -1026,7 +1080,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 h["info"] = existing_info[h["id"]]
                 # create columns with types user requested
                 type_override = existing_info[h["id"]].get("type_override")
-                if type_override in list(type_mapping.values()):
+                if type_override in list(TYPE_MAPPING.values()):
                     h["type"] = type_override
 
     logger.info(
@@ -1034,7 +1088,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # save stats to the datastore by loading qsv_stats_csv directly using COPY
-    stats_table = sql.Identifier(resource_id + "-stats")
+    stats_table = sql.Identifier(resource_id + "-druf-stats")
 
     try:
         raw_connection_statsfreq = psycopg2.connect(
@@ -1111,7 +1165,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # compile a frequency table for each column
     qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
     qsv_freq_cmd = [
-        qsv_bin,
+        QSV_BIN,
         "frequency",
         "--limit",
         "0",
@@ -1127,7 +1181,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # save frequency table to the datastore by loading qsv_freq_csv directly using COPY
     # into the datastore using the resource_id + "-freq" table
     # first, create the table
-    freq_table = sql.Identifier(resource_id + "-freq")
+    freq_table = sql.Identifier(resource_id + "-druf-freq")
     cur_statsfreq.execute(
         sql.SQL(
             """
@@ -1173,18 +1227,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # we do the rows_to_copy > preview_rows to check if we don't need to slice
     # the CSV anymore if we only did a partial download of N preview_rows already
     rows_to_copy = record_count
-    if preview_rows and record_count > preview_rows:
-        if preview_rows > 0:
+    if PREVIEW_ROWS and record_count > PREVIEW_ROWS:
+        if PREVIEW_ROWS > 0:
             # PREVIEW_ROWS is positive, slice from the beginning
-            logger.info("Preparing {:,}-row preview...".format(preview_rows))
+            logger.info("Preparing {:,}-row preview...".format(PREVIEW_ROWS))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv_slice = subprocess.run(
                     [
-                        qsv_bin,
+                        QSV_BIN,
                         "slice",
                         "--len",
-                        str(preview_rows),
+                        str(PREVIEW_ROWS),
                         tmp,
                         "--output",
                         qsv_slice_csv,
@@ -1193,19 +1247,19 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 )
             except subprocess.CalledProcessError as e:
                 raise utils.JobError("Cannot create a preview slice: {}".format(e))
-            rows_to_copy = preview_rows
+            rows_to_copy = PREVIEW_ROWS
             tmp = qsv_slice_csv
         else:
             # PREVIEW_ROWS is negative, slice from the end
             # TODO: do http range request so we don't have to download the whole file
             # to slice from the end
-            slice_len = abs(preview_rows)
+            slice_len = abs(PREVIEW_ROWS)
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv_slice = subprocess.run(
                     [
-                        qsv_bin,
+                        QSV_BIN,
                         "slice",
                         "--start",
                         "-1",
@@ -1232,18 +1286,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         datecols = ",".join(datetimecols_list)
 
         qsv_applydp_cmd = [
-            qsv_bin,
+            QSV_BIN,
             "datefmt",
             datecols,
             tmp,
             "--output",
             qsv_applydp_csv,
         ]
-        if prefer_dmy:
+        if PREFER_DMY:
             qsv_applydp_cmd.append("--prefer-dmy")
         logger.info(
             'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
-                datecols, prefer_dmy
+                datecols, PREFER_DMY
             )
         )
         try:
@@ -1266,7 +1320,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # field in one pass
     piiscreening_start = 0
     piiscreening_elapsed = 0
-    if tk.config.get("ckanext.datastore_plus.pii_screening"):
+    if PII_SCREENING:
         piiscreening_start = time.perf_counter()
         pii_found_abort = tk.config.get("ckanext.datastore_plus.pii_found_abort")
 
@@ -1275,13 +1329,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # use a custom set of regex patterns by pointing to a resource with
         # a text file, with each line having a regex pattern, and an optional
         # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
-        pii_regex_resource_id = tk.config.get(
-            "ckanext.datapusher_plus.pii_regex_resource_id_or_alias"
-        )
-        if pii_regex_resource_id:
-            pii_regex_resource_exist = datastore_resource_exists(pii_regex_resource_id)
+        if PII_REGEX_RESOURCE_ID:
+            pii_regex_resource_exist = datastore_resource_exists(PII_REGEX_RESOURCE_ID)
             if pii_regex_resource_exist:
-                pii_resource = get_resource(pii_regex_resource_id)
+                pii_resource = get_resource(PII_REGEX_RESOURCE_ID)
                 pii_regex_url = pii_resource["url"]
 
                 r = requests.get(pii_regex_url)
@@ -1297,13 +1348,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         pii_found = False
         pii_regex_fname = p.absolute()
 
-        pii_quick_screen = tk.config.get("ckanext.datapusher_plus.pii_quick_screen")
-        if pii_quick_screen:
+        if PII_QUICK_SCREEN:
             logger.info("Quickly scanning for PII using {}...".format(pii_regex_file))
             try:
                 qsv_searchset = subprocess.run(
                     [
-                        qsv_bin,
+                        QSV_BIN,
                         "searchset",
                         "--ignore-case",
                         "--quick",
@@ -1325,7 +1375,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 qsv_searchset = subprocess.run(
                     [
-                        qsv_bin,
+                        QSV_BIN,
                         "searchset",
                         "--ignore-case",
                         "--flag",
@@ -1348,12 +1398,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if pii_total_matches > 0:
                 pii_found = True
 
-        pii_show_candidates = tk.config.get(
-            "ckanext.datapusher_plus.pii_show_candidates"
-        )
-        if pii_found and pii_found_abort and not pii_show_candidates:
+        if pii_found and pii_found_abort and not PII_SHOW_CANDIDATES:
             logger.error("PII Candidate/s Found!")
-            if pii_quick_screen:
+            if PII_QUICK_SCREEN:
                 raise utils.JobError(
                     "PII CANDIDATE FOUND on row {}! Job aborted.".format(
                         pii_candidate_row.rstrip()
@@ -1365,7 +1412,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         pii_total_matches, pii_rows_with_matches
                     )
                 )
-        elif pii_found and pii_show_candidates and not pii_quick_screen:
+        elif pii_found and PII_SHOW_CANDIDATES and not PII_QUICK_SCREEN:
             # TODO: Create PII Candidates resource and set package to private if its not private
             # ------------ Create PII Preview Resource ------------------
             logger.warning(
@@ -1411,7 +1458,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 qsv_pii_stats = subprocess.run(
                     [
-                        qsv_bin,
+                        QSV_BIN,
                         "stats",
                         "--typesonly",
                         qsv_searchset_csv,
@@ -1520,7 +1567,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     copy_start = time.perf_counter()
 
-    if preview_rows:
+    if PREVIEW_ROWS:
         logger.info("COPYING {:,}-row preview to Datastore...".format(rows_to_copy))
     else:
         logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
@@ -1541,9 +1588,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
-        copy_readbuffer_size = tk.config.get(
-            "ckanext.datapusher_plus.copy_readbuffer_size"
-        )
         cur = raw_connection.cursor()
         """
         truncate table to use copy freeze option and further increase
@@ -1569,9 +1613,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             column_names,
         )
         # specify a 1MB buffer size for COPY read from disk
-        with open(tmp, "rb", copy_readbuffer_size) as f:
+        with open(tmp, "rb", COPY_READBUFFER_SIZE) as f:
             try:
-                cur.copy_expert(copy_sql, f, size=copy_readbuffer_size)
+                cur.copy_expert(copy_sql, f, size=COPY_READBUFFER_SIZE)
             except psycopg2.Error as e:
                 raise utils.JobError("Postgres COPY failed: {}".format(e))
             else:
@@ -1629,26 +1673,34 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     need_stats_in_jinja2 = True
             field_name = schema_field["field_name"]
             jinja2_dict[field_name] = jinja2_template
-            logger.info(
+            logger.debug(
                 'Jinja2 template for field "{}": {}'.format(field_name, jinja2_template)
             )
 
-    logger.info("Jinja2 dict: {}".format(jinja2_dict))
+    logger.debug("Jinja2 dict: {}".format(jinja2_dict))
     jinja2_env = Environment(loader=DictLoader(jinja2_dict))
 
     if need_stats_in_jinja2:
-        logger.info("Need stats in jinja2")
+        logger.debug("Need stats in jinja2")
 
         for schema_field in suggest_jinja2_fields:
             field_name = schema_field["field_name"]
 
             # evaluate the jinja2 template
-            template = jinja2_env.get_template(field_name)
-            logger.info(
-                'Evaluated jinja2 template for field "{}": {}'.format(
-                    field_name, template.render(field_stats_lookup)
+            try:
+                template = jinja2_env.get_template(field_name)
+                rendered_template = template.render(field_stats_lookup)
+                logger.debug(
+                    'Evaluated jinja2 template for field "{}": {}'.format(
+                        field_name, rendered_template
+                    )
                 )
-            )
+            except Exception as e:
+                logger.error(
+                    'Error evaluating jinja2 template for field "{}": {}'.format(
+                        field_name, str(e)
+                    )
+                )
     else:
         logger.info("No need for stats in jinja2")
 
@@ -1661,12 +1713,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # --------------------- AUTO-ALIASING ------------------------
     # aliases are human-readable, and make it easier to use than resource id hash
     # when using the Datastore API and in SQL queries
-    auto_alias = tk.config.get("ckanext.datapusher_plus.auto_alias")
-    auto_alias_unique = tk.config.get("ckanext.datapusher_plus.auto_alias_unique")
     alias = None
-    if auto_alias:
+    if AUTO_ALIAS:
         logger.info(
-            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(auto_alias_unique)
+            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(AUTO_ALIAS_UNIQUE)
         )
         # get package info, so we can construct the alias
         package = get_package(resource["package_id"])
@@ -1694,7 +1744,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             else:
                 alias_count = 0
                 existing_alias_of = ""
-            if auto_alias_unique and alias_count > 1:
+            if AUTO_ALIAS_UNIQUE and alias_count > 1:
                 alias_sequence = alias_count + 1
                 while True:
                     # we do this, so we're certain the new alias does not exist
@@ -1733,9 +1783,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # by default, we only add summary stats if we're not doing a partial download
     # (otherwise, you're summarizing the preview, not the whole file)
     # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
-    if (tk.config.get("ckanext.datapusher_plus.add_summary_stats_resource")) or (
-        tk.config.get("ckanext.datapusher_plus.summary_stats_with_preview")
-    ):
+    if ADD_SUMMARY_STATS_RESOURCE or SUMMARY_STATS_WITH_PREVIEW:
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -1758,7 +1806,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 delete_resource(existing_stats_alias_of)
 
         stats_aliases = [stats_resource_id]
-        if auto_alias:
+        if AUTO_ALIAS:
             auto_alias_stats_id = alias + "-stats"
             stats_aliases.append(auto_alias_stats_id)
 
@@ -1790,7 +1838,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_stats_stats = subprocess.run(
                 [
-                    qsv_bin,
+                    QSV_BIN,
                     "stats",
                     "--typesonly",
                     qsv_stats_csv,
@@ -1804,9 +1852,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
         stats_stats_dict = [
-            dict(id=ele.split(",")[0], type=type_mapping[ele.split(",")[1]])
+            dict(id=ele.split(",")[0], type=TYPE_MAPPING[ele.split(",")[1]])
             for idx, ele in enumerate(stats_stats.splitlines()[1:], 1)
         ]
+
+        logger.info(f"stats_stats_dict: {stats_stats_dict}")
 
         resource_name = resource.get("name")
         stats_resource = {
@@ -1823,6 +1873,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             aliases=stats_aliases,
             calculate_record_count=False,
         )
+
+        logger.info(f"stats_response: {stats_response}")
 
         new_stats_resource_id = stats_response["result"]["resource_id"]
 
@@ -1863,7 +1915,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
-    if preview_rows < record_count or (preview_rows > 0):
+    if PREVIEW_ROWS < record_count or (PREVIEW_ROWS > 0):
         resource["preview"] = True
         resource["preview_rows"] = copied_count
     else:
@@ -1900,34 +1952,34 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # For columns w/ cardinality = record_count, it's all unique values, create a unique index
     # If AUTO_INDEX_DATES is true, index all date columns
     # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
-    auto_index_dates = tk.config.get("ckanext.datastore_plus.auto_index_dates")
-    auto_unique_index = tk.config.get("ckanext.datastore_plus.auto_unique_index")
+    # auto_index_dates = tk.config.get("ckanext.datastore_plus.auto_index_dates")
+    # auto_unique_index = tk.config.get("ckanext.datastore_plus.auto_unique_index")
     if (
-        auto_index_threshold
-        or (auto_index_dates and datetimecols_list)
-        or auto_unique_index
+        AUTO_INDEX_THRESHOLD
+        or (AUTO_INDEX_DATES and datetimecols_list)
+        or AUTO_UNIQUE_INDEX
     ):
         index_start = time.perf_counter()
         logger.info(
             "AUTO-INDEXING. Auto-index threshold: {:,} unique value/s. Auto-unique index: {} Auto-index dates: {} ...".format(
-                auto_index_threshold, auto_unique_index, auto_index_dates
+                AUTO_INDEX_THRESHOLD, AUTO_UNIQUE_INDEX, AUTO_INDEX_DATES
             )
         )
         index_cur = raw_connection.cursor()
 
         # if auto_index_threshold == -1
         # we index all the columns
-        if auto_index_threshold == -1:
-            auto_index_threshold = record_count
+        if AUTO_INDEX_THRESHOLD == -1:
+            AUTO_INDEX_THRESHOLD = record_count
 
         index_count = 0
         for idx, cardinality in enumerate(headers_cardinality):
             curr_col = headers[idx]
-            if auto_index_threshold > 0 or auto_index_dates or auto_unique_index:
-                if cardinality == record_count and auto_unique_index:
+            if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES or AUTO_UNIQUE_INDEX:
+                if cardinality == record_count and AUTO_UNIQUE_INDEX:
                     # all the values are unique for this column, create a unique index
-                    if preview_rows > 0:
-                        unique_value_count = min(preview_rows, cardinality)
+                    if PREVIEW_ROWS > 0:
+                        unique_value_count = min(PREVIEW_ROWS, cardinality)
                     else:
                         unique_value_count = cardinality
                     logger.info(
@@ -1949,8 +2001,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                             )
                         )
                     index_count += 1
-                elif cardinality <= auto_index_threshold or (
-                    auto_index_dates and (curr_col in datetimecols_list)
+                elif cardinality <= AUTO_INDEX_THRESHOLD or (
+                    AUTO_INDEX_DATES and (curr_col in datetimecols_list)
                 ):
                     # cardinality <= auto_index_threshold or its a date and auto_index_date is true
                     # create an index
