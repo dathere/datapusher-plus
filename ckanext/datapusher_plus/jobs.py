@@ -77,7 +77,7 @@ POSTGRES_INT_MIN = -2147483648
 POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
-MINIMUM_QSV_VERSION = "3.2.0"
+MINIMUM_QSV_VERSION = "4.0.0"
 
 PII_SCREENING = tk.asbool(tk.config.get("ckanext.datastore_plus.pii_screening", False))
 QSV_BIN = Path(tk.config.get("ckanext.datapusher_plus.qsv_bin"))
@@ -277,6 +277,15 @@ def get_package(package_id):
 
     return dataset_dict
 
+def patch_package(package):
+    """
+    Patches package metadata
+    """
+    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+    context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
+    patched_package = tk.get_action("package_patch")(context, package)
+    return patched_package
+
 
 def get_scheming_yaml(package_id):
     """
@@ -291,7 +300,7 @@ def get_scheming_yaml(package_id):
         {"ignore_auth": True}, {"type": "dataset"}
     )
 
-    return scheming_yaml
+    return scheming_yaml, package
 
 
 def validate_input(input):
@@ -723,8 +732,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
 
-        # using iconv to re-encode in UTF-8
-        if file_encoding.stdout != "UTF-8":
+        # using iconv to re-encode in UTF-8 OR ASCII (as ASCII is a subset of UTF-8)
+        if file_encoding.stdout != "UTF-8" and file_encoding.stdout != "ASCII":
             logger.info(
                 "File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
                     file_encoding.stdout
@@ -1644,63 +1653,96 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     # FETCH SCHEMING YAML
     # ============================================================
-    scheming_yaml = get_scheming_yaml(resource["package_id"])
+    scheming_yaml, package = get_scheming_yaml(resource["package_id"])
+    logger.info(f"package: {package}")
     # Check if there are any fields with suggest_jinja2 in the scheming_yaml
-    suggest_jinja2_fields = [
+    # first, get the dataset package fields
+    suggest_package_fields = [
         field
         for field in scheming_yaml["dataset_fields"]
         if field.get("suggest_jinja2")
     ]
+    # then, get the resource fields
+    suggest_resource_fields = [
+        field
+        for field in scheming_yaml["resource_fields"]
+        if field.get("suggest_jinja2")
+    ]
 
     jinja2_dict = {}
-    if suggest_jinja2_fields:
+    if suggest_package_fields:
         logger.info(
-            "Found {} field/s with suggest_jinja2 in the scheming_yaml".format(
-                len(suggest_jinja2_fields)
+            "Found {} package field/s with suggest_jinja2 in the scheming_yaml".format(
+                len(suggest_package_fields)
             )
         )
-        need_stats_in_jinja2 = False
+        need_stats_in_package = False
         # For each field with suggest_jinja2, get the associated jinja2 template
-        for schema_field in suggest_jinja2_fields:
+        for schema_field in suggest_package_fields:
             jinja2_template = schema_field["suggest_jinja2"]
             if jinja2_template:
                 # Check if the jinja2 template contains .stats. or ['stats'] or ["stats"]
-                if not need_stats_in_jinja2 and (
+                if not need_stats_in_package and (
                     jinja2_template.find(".stats.") != -1
                     or jinja2_template.find("['stats']") != -1
                     or jinja2_template.find('["stats"]') != -1
                 ):
-                    need_stats_in_jinja2 = True
-            field_name = schema_field["field_name"]
-            jinja2_dict[field_name] = jinja2_template
+                    need_stats_in_package = True
+            package_field_name = schema_field["field_name"]
+            jinja2_dict[package_field_name] = jinja2_template
             logger.debug(
-                'Jinja2 template for field "{}": {}'.format(field_name, jinja2_template)
+                'Jinja2 template for packagefield "{}": {}'.format(package_field_name, jinja2_template)
             )
 
     logger.debug("Jinja2 dict: {}".format(jinja2_dict))
-    jinja2_env = Environment(loader=DictLoader(jinja2_dict))
+    # Create a dictionary with both package and field_stats_lookup
+    # context = {"package": package, "field_stats_lookup": field_stats_lookup}
+    context = {"package": package, "resource": field_stats_lookup}
 
-    if need_stats_in_jinja2:
+    # Add the jinja2 templates to the context
+    context.update(jinja2_dict)
+    logger.info(f"Context: {context}")
+    jinja2_env = Environment(loader=DictLoader(context))
+    # jinja2_env = Environment(loader=DictLoader({"package": package, **jinja2_dict}))
+    jinja2_env.filters['truncate_with_ellipsis'] = dph.truncate_with_ellipsis
+    jinja2_env.globals['spatial_extent_wkt'] = dph.spatial_extent_wkt
+
+    if need_stats_in_package:
         logger.debug("Need stats in jinja2")
 
-        for schema_field in suggest_jinja2_fields:
-            field_name = schema_field["field_name"]
+        for schema_field in suggest_package_fields:
+            package_field_name = schema_field["field_name"]
 
-            # evaluate the jinja2 template
+            # evaluate the jinja2 snippet
             try:
-                template = jinja2_env.get_template(field_name)
-                rendered_template = template.render(field_stats_lookup)
+                formula = jinja2_env.get_template(package_field_name)
+                # No need to pass field_stats_lookup here as it's already in the context
+                rendered_formula = formula.render(**context)
                 logger.debug(
-                    'Evaluated jinja2 template for field "{}": {}'.format(
-                        field_name, rendered_template
+                    'Evaluated jinja2 formula for field "{}": {}'.format(
+                        package_field_name, rendered_formula
                     )
                 )
+
+                package["dpp_suggestion.package.{}".format(package_field_name)] = rendered_formula
+                # resource[package_field_name] = rendered_formula
+                package[package_field_name] = rendered_formula
             except Exception as e:
                 logger.error(
-                    'Error evaluating jinja2 template for field "{}": {}'.format(
-                        field_name, str(e)
+                    'Error evaluating jinja2 formula for field "{}": {}'.format(
+                        package_field_name, str(e)
                     )
                 )
+
+        # patch the package
+        logger.info("Patching package...")
+        logger.info(f"Package before patching: {package}")
+        try:
+            patched_package = patch_package(package)
+            logger.info(f"Package after patching: {patched_package}")
+        except Exception as e:
+            logger.error("Error patching package: {}".format(str(e)))
+
     else:
         logger.info("No need for stats in jinja2")
 
@@ -2061,7 +2103,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     end_msg = f"""
     DATAPUSHER+ JOB DONE!
       Download: {fetch_elapsed:,.2f}
-      Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
+      Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
       COPYing: {copy_elapsed:,.2f}
       Metadata updates: {metadata_elapsed:,.2f}
       Indexing: {index_elapsed:,.2f}
