@@ -79,7 +79,7 @@ POSTGRES_BIGINT_MIN = -9223372036854775808
 
 MINIMUM_QSV_VERSION = "4.0.0"
 
-# 0 = None, 1 = Basic, 2 = Verbose/Debug
+# 0 = None, 1 = INFO, 2 = DEBUG
 UPLOAD_LOG_VERBOSITY = tk.asint(
     tk.config.get("ckanext.datapusher_plus.upload_log_verbosity", 1)
 )

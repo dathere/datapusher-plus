@@ -177,5 +177,10 @@ groups:
         default: false
         description: |
           Auto alias unique
-       
-
+      
+      - key: ckanext.datapusher_plus.upload_log_verbosity
+        type: int
+        editable: true
+        default: 1
+        description: |
+          Upload log verbosity (0 = None, 1 = INFO, 2 = DEBUG)
