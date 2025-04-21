@@ -286,6 +286,87 @@ def patch_package(package):
     patched_package = tk.get_action("package_patch")(context, package)
     return patched_package
 
+# def revise_package(package, match=None, update=None, append=None, remove=None, force=False):
+#     """
+#     Revises package metadata using the package_revise action API.
+    
+#     Args:
+#         package (dict): The package dict containing the package ID to revise
+#         match (dict, optional): Fields that must match the current version of the package
+#         update (dict, optional): Fields to update to new values
+#         append (dict, optional): Lists to append to
+#         remove (dict, optional): Lists to remove from
+#         force (bool, optional): Set to True to force update even if match fails. Default False.
+
+#     Returns:
+#         dict: The revised package metadata
+
+#     Example:
+#         revise_package(
+#             package={'id': '123'}, 
+#             update={'title': 'New Title'},
+#             append={'tags': [{'name': 'new_tag'}]},
+#             remove={'tags': [{'name': 'old_tag'}]}
+#         )
+#     """
+#     site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+#     context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
+    
+#     data_dict = {
+#         'match': match or {},
+#         'update': update or {},
+#         'append': append or {},
+#         'remove': remove or {},
+#         'force': force
+#     }
+    
+#     # Add package ID if provided
+#     if isinstance(package, dict) and 'id' in package:
+#         data_dict['id'] = package['id']
+#     elif isinstance(package, str):
+#         data_dict['id'] = package
+#     else:
+#         raise ValueError("Package must be either a package dict with 'id' or a package ID string")
+
+#     revised_package = tk.get_action("package_revise")(context, data_dict)
+#     return revised_package
+
+def revise_package(package_id, match={}, filter=None, update=None, include=None):
+    """
+    Revises package metadata using the package_revise action API.
+    
+    Args:
+        package_id (str): The ID of the package to revise
+        match (dict, optional): Fields that must match the current version of the package
+        filter (list, optional): List of fields to remove from the package
+        update (dict, optional): Fields to update to new values 
+        include (list, optional): List of fields to include in the response
+
+    Returns:
+        dict: The revised package metadata
+    """
+    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+    context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
+
+    # package_id is required
+    if not package_id:
+        raise ValueError("Package ID is required")
+
+    # add package_id to match
+    match['id'] = package_id
+
+    data_dict = {
+        'match': match,
+        'filter': filter or [], # Must be a list
+        'update': update or {},
+        'include': include or [], # Must be a list
+        'id': package_id
+    }
+
+    dph.datastore_log(f"Revising package with data_dict: {data_dict}", logging.INFO)
+
+    revised_package = tk.get_action("package_revise")(context, data_dict)
+    return revised_package
 
 def get_scheming_yaml(package_id):
     """
@@ -1653,7 +1734,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     # FETCH SCHEMING YAML
     # ============================================================
-    scheming_yaml, package = get_scheming_yaml(resource["package_id"])
+    package_id = resource["package_id"]
+    scheming_yaml, package = get_scheming_yaml(package_id)
     logger.info(f"package: {package}")
     # Check if there are any fields with suggest_jinja2 in the scheming_yaml
     # first, get the dataset package fields
@@ -1707,6 +1789,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     jinja2_env.filters['truncate_with_ellipsis'] = dph.truncate_with_ellipsis
     jinja2_env.globals['spatial_extent_wkt'] = dph.spatial_extent_wkt
 
+    revise_update_content = {"package": {}}
     if need_stats_in_package:
         logger.debug("Need stats in jinja2")
 
@@ -1724,9 +1807,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     )
                 )
 
-                package["dpp_suggestion.package.{}".format(package_field_name)] = rendered_formula
+                # package["dpp_suggestion.package.{}".format(package_field_name)] = rendered_formula
+                # revise_update["dpp_suggestion.package.{}".format(package_field_name)] = rendered_formula
+                revise_update_content["package"][package_field_name] = rendered_formula
                 # resource[package_field_name] = rendered_formula
-                package[package_field_name] = rendered_formula
+                # package[package_field_name] = rendered_formula
             except Exception as e:
                 logger.error(
                     'Error evaluating jinja2 formula for field "{}": {}'.format(
@@ -1735,14 +1820,31 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 )
 
         # patch the package
-        logger.info("Patching package...")
-        logger.info(f"Package before patching: {package}")
-        try:
-            patched_package = patch_package(package)
-            logger.info(f"Package after patching: {patched_package}")
-        except Exception as e:
-            logger.error("Error patching package: {}".format(str(e)))
+        # logger.info("Patching package...")
+        # logger.info(f"Package before patching: {package}")
+        # try:
+        #     patched_package = patch_package(package)
+        #     logger.info(f"Package after patching: {patched_package}")
+        # except Exception as e:
+        #     logger.error("Error patching package: {}".format(str(e)))
 
+        # revise the package
+        logger.info("Revising package: {}".format(package_id))
+        logger.info(f"Package before revising: {package}")
+        logger.info(f"Revise update content: {revise_update_content}")
+        # revise_update = {"dpp_suggestion": json.dumps(revise_update_content)}
+        # logger.info(f"Revise update: {revise_update}")
+        try:
+            # revised_package = revise_package(package_id, match={"dpp_suggestion": ""}, update=revise_update)
+            revised_package = revise_package(
+                package_id,
+                update={
+                    "dpp_suggestion": revise_update_content  # Store the entire object directly
+                }
+            )
+            logger.info(f"Package after revising: {revised_package}")
+        except Exception as e:
+            logger.error("Error revising package: {}".format(str(e)))
     else:
         logger.info("No need for stats in jinja2")
 
