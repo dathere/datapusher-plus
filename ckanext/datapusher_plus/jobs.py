@@ -1763,7 +1763,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # patch the PACKAGE
         try:
             patched_package = patch_package(package)
-            logger.info(f"Package after patching: {patched_package}")
+            # logger.debug(f"Package after patching: {patched_package}")
             # update the package
             package = patched_package
         except Exception as e:
@@ -1893,7 +1893,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     "dpp_suggestion": revise_update_content
                 }
             )
-            logger.info(f"Package after revising: {revised_package}")
+            # logger.debug(f"Package after revising: {revised_package}")
             # update the package
             package = revised_package
         except Exception as e:
@@ -1909,6 +1909,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     suggestion_jinja2_formula = {}
     if suggest_resource_fields:
+        # logger.info(f"resource: {resource}")
         logger.info(
             "Found {} field/s with suggestion_formula in the scheming_yaml".format(
                 len(suggest_resource_fields)
@@ -1937,7 +1938,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         revise_update_content = {"resource": {}}
         for schema_field in suggest_resource_fields:
-            resource_field_name = schema_field["field_name"]    
+            resource_field_name = schema_field["field_name"]
+
+            resource_name = resource["name"]
+
+            # Initialize nested dictionary for resource if it doesn't exist
+            if resource_name not in revise_update_content["resource"]:
+                revise_update_content["resource"][resource_name] = {}
 
             # evaluate the jinja2 suggestion_formula
             try:
@@ -1949,7 +1956,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     )
                 )
 
-                revise_update_content["resource"][resource_field_name] = rendered_formula   
+                revise_update_content["resource"][resource_name][resource_field_name] = rendered_formula   
             except Exception as e:
                 logger.error(
                     'Error evaluating jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
@@ -1979,7 +1986,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     "dpp_suggestion": revise_update_content
                 }
             )
-            logger.info(f"Package after revising: {revised_package}")
+            # logger.debug(f"Package after revising: {revised_package}")
             # update the package
             package = revised_package
         except Exception as e:
