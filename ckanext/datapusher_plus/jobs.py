@@ -755,7 +755,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # if resource_format is CSV we don't need to normalize
         if resource_format.upper() == "CSV":
             if UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
+                logger.info(
+                    "Normalizing/UTF-8 transcoding {}...".format(resource_format)
+                )
         else:
             # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
             if UPLOAD_LOG_VERBOSITY >= 1:
@@ -775,7 +777,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             text=True,
         )
         if UPLOAD_LOG_VERBOSITY >= 1:
-            logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
+            logger.info(
+                "Identified encoding of the file: {}".format(file_encoding.stdout)
+            )
 
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
