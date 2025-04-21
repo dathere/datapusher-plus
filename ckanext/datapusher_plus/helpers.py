@@ -21,49 +21,47 @@ log = logging.getLogger(__name__)
 
 def datapusher_status(resource_id: str):
     try:
-        return toolkit.get_action('datapusher_status')(
-            {}, {'resource_id': resource_id})
+        return toolkit.get_action("datapusher_status")({}, {"resource_id": resource_id})
     except toolkit.ObjectNotFound:
-        return {
-            'status': 'unknown'
-        }
+        return {"status": "unknown"}
 
 
 def datapusher_status_description(status: dict[str, Any]):
 
     CAPTIONS = {
-        'complete': _('Complete'),
-        'pending': _('Pending'),
-        'submitting': _('Submitting'),
-        'error': _('Error'),
+        "complete": _("Complete"),
+        "pending": _("Pending"),
+        "submitting": _("Submitting"),
+        "error": _("Error"),
     }
 
-    DEFAULT_STATUS = _('Not Uploaded Yet')
+    DEFAULT_STATUS = _("Not Uploaded Yet")
 
     try:
-        job_status = status['task_info']['status']
+        job_status = status["task_info"]["status"]
         return CAPTIONS.get(job_status, job_status.capitalize())
     except (KeyError, TypeError):
         return DEFAULT_STATUS
-    
+
+
 def datapusher_plus_calculate_field(resource: dict[str, Any], expression: str):
     """Calculate the field using a Jinja2 expression.
     The Jinja2 expression is evaluated in the context of the resource.
     The resource is passed to the Jinja2 template as a dict.
     The resource dict is the same as the resource dict returned by the
     get_resource action.
-    
+
     To access the value of a field in the resource dict, use the following syntax:
     {{ resource.field_name }}
-    
+
     Further, the resource dict is augmented with the following variables:
     - stats: a dict of stats for the resource
     - freq: a dict of frequency for the resource
-    
+
     To access the stats or freq dicts, use the following syntax:
     {{ stats.field_name.stat_name }}
     {{ freq.field_name.freq_values }}
-    
+
     The field_name is the name of the field to calculate the value of.
     The stat_name is the name of the stat to access.
     The freq_values is a list of frequency values for the field.
@@ -73,28 +71,29 @@ def datapusher_plus_calculate_field(resource: dict[str, Any], expression: str):
     - percentage: the percentage of the frequency
     """
     from jinja2 import Template, Environment, meta
-    
+
     # Create a sandboxed environment
     env = Environment(autoescape=True)
-    
+
     try:
         # Create template from expression
         template = env.from_string(expression)
-        
+
         # Create context with resource and its augmented data
         context = {
-            'resource': resource,
-            'stats': resource.get('stats', {}),
-            'freq': resource.get('freq', {})
+            "resource": resource,
+            "stats": resource.get("stats", {}),
+            "freq": resource.get("freq", {}),
         }
-        
+
         # Render the template with the context
         result = template.render(**context)
         return result
-        
+
     except Exception as e:
         log.error(f"Error calculating field: {str(e)}")
         return None
+
 
 def get_job(job_id, limit=None, use_aps_id=False):
     """Return the job with the given job_id as a dict.
@@ -180,6 +179,7 @@ def get_job(job_id, limit=None, use_aps_id=False):
 
     return result_dict
 
+
 def add_pending_job(
     job_id, api_key, job_type, job_key=None, data=None, metadata=None, result_url=None
 ):
@@ -240,8 +240,21 @@ def add_pending_job(
 
     if not metadata:
         metadata = {}
-    
-    job = Jobs(job_id, job_type, "pending", data, None, None, None, None, None, result_url, api_key, job_key)
+
+    job = Jobs(
+        job_id,
+        job_type,
+        "pending",
+        data,
+        None,
+        None,
+        None,
+        None,
+        None,
+        result_url,
+        api_key,
+        job_key,
+    )
     try:
         job.save()
     except Exception as e:
@@ -337,17 +350,16 @@ def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
     if "data" in job_dict:
         job_dict["data"] = str(job_dict["data"])
 
-    
     try:
         job = Jobs.get(job_id)
         if not job:
             raise Exception("Job not found")
-        #dicticize the job
+        # dicticize the job
         jobs_dict = job.as_dict()
         jobs_dict.update(job_dict)
 
         Jobs.update(jobs_dict)
-        
+
     except Exception as e:
         log.error("Failed to update job %s: %s", job_id, e)
         raise e
@@ -423,68 +435,76 @@ def set_aps_job_id(job_id, aps_job_id):
 
     update_job(job_id, {"aps_job_id": aps_job_id})
 
+
 # Jinja2 filters and functions
 # Helper function to truncate text to a specific length and append ellipsis.
-def truncate_with_ellipsis(text, length=50, ellipsis='...'):
+def truncate_with_ellipsis(text, length=50, ellipsis="..."):
     """Truncate text to a specific length and append ellipsis."""
     if not text or len(text) <= length:
         return text
     return text[:length] + ellipsis
 
+
 def format_number(value, decimals=2):
     """Format numbers with thousands separator and decimal places
-    
+
     Example:
     {{ stats.population.sum | format_number }} -> 1,234,567.89
     """
     return f"{float(value):,.{decimals}f}"
 
+
 def format_bytes(bytes):
     """Format byte sizes into human readable format
-    
+
     Example:
     {{ stats.file_size.max | format_bytes }} -> 1.5 GB
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
         if bytes < 1024:
             return f"{bytes:.1f} {unit}"
         bytes /= 1024
 
+
 def format_date(value, format="%Y-%m-%d"):
     """Format dates in specified format
-    
+
     Example:
     {{ stats.created_date.max | format_date("%B %d, %Y") }} -> January 1, 2024
     """
     return value.strftime(format)
 
+
 def calculate_percentage(part, whole):
     """Calculate percentage
-    
+
     Example:
     {{ calculate_percentage(stats.nullcount, stats.total_rows) }} -> 12.5
     """
     return (part / whole) * 100 if whole else 0
 
+
 def get_unique_ratio(field):
     """Get ratio of unique values
-    
+
     Example:
     {{ get_unique_ratio(stats.user_id) }} -> 0.95
     """
     return field.cardinality / field.total_rows if field.total_rows else 0
 
+
 def format_range(min_val, max_val, separator=" to "):
     """Format a range of values
-    
+
     Example:
     {{ format_range(stats.temperature.min, stats.temperature.max) }} -> "-10 to 35"
     """
     return f"{min_val}{separator}{max_val}"
 
+
 def format_coordinates(lat, lon, precision=6):
     """Format coordinates nicely
-    
+
     Example:
     {{ format_coordinates(stats.latitude.mean, stats.longitude.mean) }}
     -> "40.7128°N, 74.0060°W"
@@ -493,33 +513,39 @@ def format_coordinates(lat, lon, precision=6):
     lon_dir = "E" if lon >= 0 else "W"
     return f"{abs(lat):.{precision}f}°{lat_dir}, {abs(lon):.{precision}f}°{lon_dir}"
 
+
 def calculate_bbox_area(min_lon, min_lat, max_lon, max_lat):
     """Calculate approximate area of bounding box in square kilometers
-    
+
     Example:
     {{ calculate_bbox_area(bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat) }}
     -> 1234.56
     """
     from math import radians, cos
+
     earth_radius = 6371  # km
     width = abs(max_lon - min_lon) * cos(radians((min_lat + max_lat) / 2))
     height = abs(max_lat - min_lat)
-    return width * height * (earth_radius ** 2)
+    return width * height * (earth_radius**2)
+
 
 # Jinja2 Functions
 
-def spatial_extent_wkt(min_lon: float, min_lat: float, max_lon: float, max_lat: float) -> str:
+
+def spatial_extent_wkt(
+    min_lon: float, min_lat: float, max_lon: float, max_lat: float
+) -> str:
     """Convert min/max WGS84 coordinates to WKT polygon format.
-    
+
     Args:
         min_lon: Minimum longitude coordinate
-        min_lat: Minimum latitude coordinate 
+        min_lat: Minimum latitude coordinate
         max_lon: Maximum longitude coordinate
         max_lat: Maximum latitude coordinate
-        
+
     Returns:
         str: WKT polygon string representing the spatial extent
-        
+
     Example:
         >>> spatial_extent_wkt(-180, -90, 180, 90)
         'POLYGON((-180 -90, -180 90, 180 90, 180 -90, -180 -90))'
@@ -528,9 +554,10 @@ def spatial_extent_wkt(min_lon: float, min_lat: float, max_lon: float, max_lat: 
     wkt = f"SRID=4326;POLYGON(({min_lon} {min_lat}, {min_lon} {max_lat}, {max_lon} {max_lat}, {max_lon} {min_lat}, {min_lon} {min_lat}))"
     return wkt
 
+
 def spatial_extent_wkt_from_bbox(bbox: list[float]) -> str:
     """Convert a bounding box to WKT polygon format.
-    
+
     Args:
         bbox: List of floats representing the bounding box [min_lon, min_lat, max_lon, max_lat]
 
@@ -543,4 +570,3 @@ def spatial_extent_wkt_from_bbox(bbox: list[float]) -> str:
     """
     min_lon, min_lat, max_lon, max_lat = bbox
     return spatial_extent_wkt(min_lon, min_lat, max_lon, max_lat)
-

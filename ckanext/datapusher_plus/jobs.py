@@ -277,6 +277,7 @@ def get_package(package_id):
 
     return dataset_dict
 
+
 def patch_package(package):
     """
     Patches package metadata
@@ -286,15 +287,16 @@ def patch_package(package):
     patched_package = tk.get_action("package_patch")(context, package)
     return patched_package
 
+
 def revise_package(package_id, match={}, filter=None, update=None, include=None):
     """
     Revises package metadata using the package_revise action API.
-    
+
     Args:
         package_id (str): The ID of the package to revise
         match (dict, optional): Fields that must match the current version of the package
         filter (list, optional): List of fields to remove from the package
-        update (dict, optional): Fields to update to new values 
+        update (dict, optional): Fields to update to new values
         include (list, optional): List of fields to include in the response
 
     Returns:
@@ -308,17 +310,18 @@ def revise_package(package_id, match={}, filter=None, update=None, include=None)
         raise ValueError("Package ID is required")
 
     # add package_id to match
-    match['id'] = package_id
+    match["id"] = package_id
 
     data_dict = {
-        'match': match,
-        'filter': filter or [], # Must be a list
-        'update': update or {},
-        'include': include or [], # Must be a list
+        "match": match,
+        "filter": filter or [],  # Must be a list
+        "update": update or {},
+        "include": include or [],  # Must be a list
     }
 
     revised_package = tk.get_action("package_revise")(context, data_dict)
     return revised_package
+
 
 def get_scheming_yaml(package_id):
     """
@@ -1688,7 +1691,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     package_id = resource["package_id"]
 
-    # Fetch the 
+    # Fetch the
     scheming_yaml, package = get_scheming_yaml(package_id)
     # logger.info(f"package: {package}")
 
@@ -1696,7 +1699,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # There are two types of DRUF entries:
     # 1. "formula": This is used to update the field value DIRECTLY
     #    when the resource is created/updated.
-    # 2. "suggestion_formula": This is used to populate the suggestion 
+    # 2. "suggestion_formula": This is used to populate the suggestion
     #    popovers DURING data entry/curation.
     # DRUF entries are stored as jinja2 templates in the scheming_yaml
     # and are rendered using the Jinja2 template engine.
@@ -1705,9 +1708,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # FIRST, process the FORMULAE for the PACKAGE & RESOURCE fields
     ############################################################
     formula_package_fields = [
-        field
-        for field in scheming_yaml["dataset_fields"]
-        if field.get("formula")
+        field for field in scheming_yaml["dataset_fields"] if field.get("formula")
     ]
 
     # Compute the Formulae for the PACKAGE Fields
@@ -1724,7 +1725,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             package_field_name = schema_field["field_name"]
             jinja2_formulae[package_field_name] = jinja2_template
             logger.debug(
-                'Jinja2 formula for PACKAGE field "{}": {}'.format(package_field_name, jinja2_template)
+                'Jinja2 formula for PACKAGE field "{}": {}'.format(
+                    package_field_name, jinja2_template
+                )
             )
 
         logger.debug("Jinja2 PACKAGE formulae: {}".format(jinja2_formulae))
@@ -1735,8 +1738,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # Add the jinja2 formulae templates to the context
         context.update(jinja2_formulae)
         jinja2_env = Environment(loader=DictLoader(context))
-        jinja2_env.filters['truncate_with_ellipsis'] = dph.truncate_with_ellipsis
-        jinja2_env.globals['spatial_extent_wkt'] = dph.spatial_extent_wkt
+        jinja2_env.filters["truncate_with_ellipsis"] = dph.truncate_with_ellipsis
+        jinja2_env.globals["spatial_extent_wkt"] = dph.spatial_extent_wkt
 
         for schema_field in formula_package_fields:
             package_field_name = schema_field["field_name"]
@@ -1772,9 +1775,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     # now, process the FORMULAE for the RESOURCE fields
     formula_resource_fields = [
-        field
-        for field in scheming_yaml["resource_fields"]
-        if field.get("formula")
+        field for field in scheming_yaml["resource_fields"] if field.get("formula")
     ]
 
     # Compute the Formulae for the RESOURCE Fields
@@ -1791,7 +1792,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             resource_field_name = schema_field["field_name"]
             jinja2_formulae[resource_field_name] = jinja2_template
             logger.debug(
-                'Jinja2 formula for RESOURCE field "{}": {}'.format(resource_field_name, jinja2_template)
+                'Jinja2 formula for RESOURCE field "{}": {}'.format(
+                    resource_field_name, jinja2_template
+                )
             )
 
         logger.debug("Jinja2 RESOURCE formulae: {}".format(jinja2_formulae))
@@ -1801,8 +1804,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # Add the jinja2 formulae templates to the context
         context.update(jinja2_formulae)
         jinja2_env = Environment(loader=DictLoader(context))
-        jinja2_env.filters['truncate_with_ellipsis'] = dph.truncate_with_ellipsis
-        jinja2_env.globals['spatial_extent_wkt'] = dph.spatial_extent_wkt
+        jinja2_env.filters["truncate_with_ellipsis"] = dph.truncate_with_ellipsis
+        jinja2_env.globals["spatial_extent_wkt"] = dph.spatial_extent_wkt
 
         for schema_field in formula_resource_fields:
             resource_field_name = schema_field["field_name"]
@@ -1826,7 +1829,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         resource_field_name, str(e)
                     )
                 )
-    
+
     ############################################################
     # SECOND, process the SUGGESTION FORMULAE for PACKAGE & RESOURCE fields
     ############################################################
@@ -1849,7 +1852,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             package_field_name = schema_field["field_name"]
             suggestion_jinja2_formula[package_field_name] = jinja2_template
             logger.debug(
-                'Jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(package_field_name, jinja2_template)
+                'Jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
+                    package_field_name, jinja2_template
+                )
             )
 
         logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
@@ -1860,8 +1865,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         context.update(suggestion_jinja2_formula)
         # logger.info(f"Context: {context}")
         jinja2_env = Environment(loader=DictLoader(context))
-        jinja2_env.filters['truncate_with_ellipsis'] = dph.truncate_with_ellipsis
-        jinja2_env.globals['spatial_extent_wkt'] = dph.spatial_extent_wkt
+        jinja2_env.filters["truncate_with_ellipsis"] = dph.truncate_with_ellipsis
+        jinja2_env.globals["spatial_extent_wkt"] = dph.spatial_extent_wkt
 
         revise_update_content = {"package": {}}
         for schema_field in suggest_package_fields:
@@ -1888,10 +1893,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         try:
             revised_package = revise_package(
-                package_id,
-                update={
-                    "dpp_suggestion": revise_update_content
-                }
+                package_id, update={"dpp_suggestion": revise_update_content}
             )
             # logger.debug(f"Package after revising: {revised_package}")
             # update the package
@@ -1922,7 +1924,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             resource_field_name = schema_field["field_name"]
             suggestion_jinja2_formula[resource_field_name] = jinja2_template
             logger.debug(
-                'Jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(resource_field_name, jinja2_template)
+                'Jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
+                    resource_field_name, jinja2_template
+                )
             )
 
         logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
@@ -1933,8 +1937,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         context.update(suggestion_jinja2_formula)
         # logger.info(f"Context: {context}")
         jinja2_env = Environment(loader=DictLoader(context))
-        jinja2_env.filters['truncate_with_ellipsis'] = dph.truncate_with_ellipsis
-        jinja2_env.globals['spatial_extent_wkt'] = dph.spatial_extent_wkt
+        jinja2_env.filters["truncate_with_ellipsis"] = dph.truncate_with_ellipsis
+        jinja2_env.globals["spatial_extent_wkt"] = dph.spatial_extent_wkt
 
         revise_update_content = {"resource": {}}
         for schema_field in suggest_resource_fields:
@@ -1956,7 +1960,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     )
                 )
 
-                revise_update_content["resource"][resource_name][resource_field_name] = rendered_formula   
+                revise_update_content["resource"][resource_name][
+                    resource_field_name
+                ] = rendered_formula
             except Exception as e:
                 logger.error(
                     'Error evaluating jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
@@ -1981,10 +1987,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         try:
             revised_package = revise_package(
-                package_id,
-                update={
-                    "dpp_suggestion": revise_update_content
-                }
+                package_id, update={"dpp_suggestion": revise_update_content}
             )
             # logger.debug(f"Package after revising: {revised_package}")
             # update the package
