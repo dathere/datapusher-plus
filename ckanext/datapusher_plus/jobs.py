@@ -79,6 +79,10 @@ POSTGRES_BIGINT_MIN = -9223372036854775808
 
 MINIMUM_QSV_VERSION = "4.0.0"
 
+# 0 = None, 1 = Basic, 2 = Verbose/Debug
+UPLOAD_LOG_VERBOSITY = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.upload_log_verbosity", 1)
+)
 PII_SCREENING = tk.asbool(tk.config.get("ckanext.datastore_plus.pii_screening", False))
 QSV_BIN = Path(tk.config.get("ckanext.datapusher_plus.qsv_bin"))
 FILE_BIN = Path(tk.config.get("ckanext.datapusher_plus.file_bin"))
@@ -476,7 +480,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" ") : qsv_version_info.find("-")
     ].lstrip()
-    logger.info("qsv version found: {}".format(qsv_semver))
+    if UPLOAD_LOG_VERBOSITY >= 1:
+        logger.info("qsv version found: {}".format(qsv_semver))
     try:
         if semver.compare(qsv_semver, MINIMUM_QSV_VERSION) < 0:
             raise utils.JobError(
@@ -517,7 +522,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     timer_start = time.perf_counter()
 
     # fetch the resource data
-    logger.info("Fetching from: {0}...".format(resource_url))
+    if UPLOAD_LOG_VERBOSITY >= 1:
+        logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
@@ -534,7 +540,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 scheme=rewrite_url.scheme, netloc=rewrite_url.netloc
             )
             resource_url = new_url.geturl()
-            logger.info("Rewrote resource url to: {0}".format(resource_url))
+            if UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info("Rewrote resource url to: {0}".format(resource_url))
 
     try:
         kwargs = {
@@ -596,9 +603,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             # download the file
             if cl:
-                logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+                if UPLOAD_LOG_VERBOSITY >= 1:
+                    logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
             else:
-                logger.info("Downloading file of unknown size...")
+                if UPLOAD_LOG_VERBOSITY >= 1:
+                    logger.info("Downloading file of unknown size...")
 
             with open(tmp, "wb") as tmp_file:
                 for chunk in response.iter_content(
@@ -745,12 +754,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
         # if resource_format is CSV we don't need to normalize
         if resource_format.upper() == "CSV":
-            logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
+            if UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
         else:
             # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
-            logger.info(
-                "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
-            )
+            if UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info(
+                    "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
+                )
 
         qsv_input_utf_8_encoded_csv = os.path.join(
             temp_dir, "qsv_input_utf_8_encoded.csv"
@@ -763,7 +774,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             capture_output=True,
             text=True,
         )
-        logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
+        if UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
 
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
@@ -1128,9 +1140,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if type_override in list(TYPE_MAPPING.values()):
                     h["type"] = type_override
 
-    logger.info(
-        "Determined headers and types: {headers}...".format(headers=headers_dicts)
-    )
+    if UPLOAD_LOG_VERBOSITY >= 1:
+        logger.info(
+            "Determined headers and types: {headers}...".format(headers=headers_dicts)
+        )
 
     # save stats to the datastore by loading qsv_stats_csv directly using COPY
     stats_table = sql.Identifier(resource_id + "-druf-stats")
@@ -1189,12 +1202,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy stats CSV to /tmp directory for debugging purposes
-    try:
-        debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
-        shutil.copy2(qsv_stats_csv, debug_stats_path)
-        logger.info(f"Copied stats CSV to {debug_stats_path} for debugging")
-    except Exception as e:
-        logger.warning(f"Failed to copy stats CSV to /tmp for debugging: {e}")
+    if UPLOAD_LOG_VERBOSITY >= 2:
+        try:
+            debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
+            shutil.copy2(qsv_stats_csv, debug_stats_path)
+            logger.info(f"Copied stats CSV to {debug_stats_path} for debugging")
+        except Exception as e:
+            logger.warning(f"Failed to copy stats CSV to /tmp for debugging: {e}")
 
     try:
         with open(qsv_stats_csv, "r") as f:
@@ -1243,12 +1257,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy frequency CSV to /tmp directory for debugging purposes
-    try:
-        debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
-        shutil.copy2(qsv_freq_csv, debug_freq_path)
-        logger.info(f"Copied frequency CSV to {debug_freq_path} for debugging")
-    except Exception as e:
-        logger.warning(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
+    if UPLOAD_LOG_VERBOSITY >= 2:
+        try:
+            debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
+            shutil.copy2(qsv_freq_csv, debug_freq_path)
+            logger.info(f"Copied frequency CSV to {debug_freq_path} for debugging")
+        except Exception as e:
+            logger.warning(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
 
     # load the frequency table using COPY
     copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
@@ -1689,11 +1704,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     # PROCESS DRUF JINJA2 FORMULAE
     # ============================================================
+    formulae_start = time.perf_counter()
+    # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
-
-    # Fetch the
     scheming_yaml, package = get_scheming_yaml(package_id)
-    # logger.info(f"package: {package}")
+
+    if UPLOAD_LOG_VERBOSITY >= 2:
+        logger.debug(f"package: {package}")
 
     # Check if there are any fields with DRUF entries in the scheming_yaml
     # There are two types of DRUF entries:
@@ -1714,11 +1731,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # Compute the Formulae for the PACKAGE Fields
     jinja2_formulae = {}
     if formula_package_fields:
-        logger.info(
-            "Found {} PACKAGE field/s with formulae in the scheming_yaml".format(
-                len(formula_package_fields)
+        if UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info(
+                "Found {} PACKAGE field/s with formulae in the scheming_yaml".format(
+                    len(formula_package_fields)
+                )
             )
-        )
+
         # For each PACKAGEfield with a formula, get the associated jinja2 template
         for schema_field in formula_package_fields:
             jinja2_template = schema_field["formula"]
@@ -1730,7 +1749,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 )
             )
 
-        logger.debug("Jinja2 PACKAGE formulae: {}".format(jinja2_formulae))
+        if UPLOAD_LOG_VERBOSITY >= 2:
+            logger.debug("Jinja2 PACKAGE formulae: {}".format(jinja2_formulae))
 
         # Create a dictionary with both package and field_stats_lookup
         context = {"package": package, "resource": resource_fields_stats}
@@ -1749,11 +1769,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 formula = jinja2_env.get_template(package_field_name)
                 # No need to pass field_stats_lookup here as it's already in the context
                 rendered_formula = formula.render(**context)
-                logger.debug(
-                    'Evaluated jinja2 formula for PACKAGE field "{}": {}'.format(
-                        package_field_name, rendered_formula
+                if UPLOAD_LOG_VERBOSITY >= 2:
+                    logger.debug(
+                        'Evaluated jinja2 formula for PACKAGE field "{}": {}'.format(
+                            package_field_name, rendered_formula
+                        )
                     )
-                )
 
                 package[package_field_name] = rendered_formula
             except Exception as e:
@@ -1766,7 +1787,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # patch the PACKAGE
         try:
             patched_package = patch_package(package)
-            # logger.debug(f"Package after patching: {patched_package}")
+
+            if UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(f"Package after patching: {patched_package}")
+
+            if UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info("PACKAGE formulae processed...")
+
             # update the package
             package = patched_package
         except Exception as e:
@@ -1781,23 +1808,26 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # Compute the Formulae for the RESOURCE Fields
     jinja2_formulae = {}
     if formula_resource_fields:
-        logger.info(
-            "Found {} RESOURCE field/s with formulae in the scheming_yaml".format(
-                len(formula_resource_fields)
+        if UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info(
+                "Found {} RESOURCE field/s with formulae in the scheming_yaml".format(
+                    len(formula_resource_fields)
+                )
             )
-        )
         # For each field with a formula, get the associated jinja2 template
         for schema_field in formula_resource_fields:
             jinja2_template = schema_field["formula"]
             resource_field_name = schema_field["field_name"]
             jinja2_formulae[resource_field_name] = jinja2_template
-            logger.debug(
-                'Jinja2 formula for RESOURCE field "{}": {}'.format(
-                    resource_field_name, jinja2_template
+            if UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(
+                    'Jinja2 formula for RESOURCE field "{}": {}'.format(
+                        resource_field_name, jinja2_template
+                    )
                 )
-            )
 
-        logger.debug("Jinja2 RESOURCE formulae: {}".format(jinja2_formulae))
+        if UPLOAD_LOG_VERBOSITY >= 2:
+            logger.debug("Jinja2 RESOURCE formulae: {}".format(jinja2_formulae))
         # Create a dictionary with both package and field_stats_lookup
         context = {"package": package, "resource": resource_fields_stats}
 
@@ -1815,11 +1845,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 formula = jinja2_env.get_template(resource_field_name)
                 # No need to pass field_stats_lookup here as it's already in the context
                 rendered_formula = formula.render(**context)
-                logger.debug(
-                    'Evaluated jinja2 formula for RESOURCE field "{}": {}'.format(
-                        resource_field_name, rendered_formula
+                if UPLOAD_LOG_VERBOSITY >= 2:
+                    logger.debug(
+                        'Evaluated jinja2 formula for RESOURCE field "{}": {}'.format(
+                            resource_field_name, rendered_formula
+                        )
                     )
-                )
 
                 # update the resource directly
                 resource[resource_field_name] = rendered_formula
@@ -1829,6 +1860,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         resource_field_name, str(e)
                     )
                 )
+
+        if UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info("RESOURCE formulae processed...")
 
     ############################################################
     # SECOND, process the SUGGESTION FORMULAE for PACKAGE & RESOURCE fields
@@ -1841,29 +1875,32 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     suggestion_jinja2_formula = {}
     if suggest_package_fields:
-        logger.info(
-            "Found {} PACKAGE field/s with suggestion_formula in the scheming_yaml".format(
-                len(suggest_package_fields)
+        if UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info(
+                "Found {} PACKAGE field/s with suggestion_formula in the scheming_yaml".format(
+                    len(suggest_package_fields)
+                )
             )
-        )
         # For each field with suggestion_formula, get the associated jinja2 template
         for schema_field in suggest_package_fields:
             jinja2_template = schema_field["suggestion_formula"]
             package_field_name = schema_field["field_name"]
             suggestion_jinja2_formula[package_field_name] = jinja2_template
-            logger.debug(
-                'Jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
-                    package_field_name, jinja2_template
+            if UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(
+                    'Jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
+                        package_field_name, jinja2_template
+                    )
                 )
-            )
 
-        logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
+        if UPLOAD_LOG_VERBOSITY >= 2:
+            logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
+
         # Create a dictionary with both package and field_stats_lookup
         context = {"package": package, "resource": resource_fields_stats}
 
         # Add the jinja2 templates to the context
         context.update(suggestion_jinja2_formula)
-        # logger.info(f"Context: {context}")
         jinja2_env = Environment(loader=DictLoader(context))
         jinja2_env.filters["truncate_with_ellipsis"] = dph.truncate_with_ellipsis
         jinja2_env.globals["spatial_extent_wkt"] = dph.spatial_extent_wkt
@@ -1877,11 +1914,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 formula = jinja2_env.get_template(package_field_name)
                 # No need to pass field_stats_lookup here as it's already in the context
                 rendered_formula = formula.render(**context)
-                logger.debug(
-                    'Evaluated jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
-                        package_field_name, rendered_formula
+                if UPLOAD_LOG_VERBOSITY >= 2:
+                    logger.debug(
+                        'Evaluated jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
+                            package_field_name, rendered_formula
+                        )
                     )
-                )
 
                 revise_update_content["package"][package_field_name] = rendered_formula
             except Exception as e:
@@ -1895,7 +1933,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             revised_package = revise_package(
                 package_id, update={"dpp_suggestion": revise_update_content}
             )
-            # logger.debug(f"Package after revising: {revised_package}")
+
+            if UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(f"Package after revising: {revised_package}")
+
+            if UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info("PACKAGE suggestion formulae processed...")
+
             # update the package
             package = revised_package
         except Exception as e:
@@ -1911,31 +1955,34 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     suggestion_jinja2_formula = {}
     if suggest_resource_fields:
-        # logger.info(f"resource: {resource}")
-        logger.info(
-            "Found {} field/s with suggestion_formula in the scheming_yaml".format(
-                len(suggest_resource_fields)
+        if UPLOAD_LOG_VERBOSITY >= 2:
+            logger.debug("resource: {}".format(resource))
+        if UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info(
+                "Found {} RESOURCE field/s with suggestion_formula in the scheming_yaml".format(
+                    len(suggest_resource_fields)
+                )
             )
-        )
 
         # For each field with suggestion_formula, get the associated jinja2 template
         for schema_field in suggest_resource_fields:
             jinja2_template = schema_field["suggestion_formula"]
             resource_field_name = schema_field["field_name"]
             suggestion_jinja2_formula[resource_field_name] = jinja2_template
-            logger.debug(
-                'Jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
-                    resource_field_name, jinja2_template
+            if UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(
+                    'Jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
+                        resource_field_name, jinja2_template
+                    )
                 )
-            )
 
-        logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
+        if UPLOAD_LOG_VERBOSITY >= 2:
+            logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
         # Create a dictionary with both package and field_stats_lookup
         context = {"package": package, "resource": resource_fields_stats}
 
         # Add the jinja2 templates to the context
         context.update(suggestion_jinja2_formula)
-        # logger.info(f"Context: {context}")
         jinja2_env = Environment(loader=DictLoader(context))
         jinja2_env.filters["truncate_with_ellipsis"] = dph.truncate_with_ellipsis
         jinja2_env.globals["spatial_extent_wkt"] = dph.spatial_extent_wkt
@@ -1954,11 +2001,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 formula = jinja2_env.get_template(resource_field_name)
                 rendered_formula = formula.render(**context)
-                logger.debug(
-                    'Evaluated jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
-                        resource_field_name, rendered_formula
+                if UPLOAD_LOG_VERBOSITY >= 2:
+                    logger.debug(
+                        'Evaluated jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
+                            resource_field_name, rendered_formula
+                        )
                     )
-                )
 
                 revise_update_content["resource"][resource_name][
                     resource_field_name
@@ -1989,11 +2037,24 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             revised_package = revise_package(
                 package_id, update={"dpp_suggestion": revise_update_content}
             )
-            # logger.debug(f"Package after revising: {revised_package}")
+            if UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(f"Package after revising: {revised_package}")
+
+            if UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info("RESOURCE suggestion formulae processed...")
+
             # update the package
             package = revised_package
         except Exception as e:
             logger.error("Error revising package: {}".format(str(e)))
+
+    # -------------------- FORMULAE PROCESSING DONE --------------------
+    formulae_elapsed = time.perf_counter() - formulae_start
+    logger.info(
+        "FORMULAE PROCESSING DONE! Processed in {:,.2f} seconds.".format(
+            formulae_elapsed
+        )
+    )
 
     # ============================================================
     # UPDATE METADATA
@@ -2353,6 +2414,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     DATAPUSHER+ JOB DONE!
       Download: {fetch_elapsed:,.2f}
       Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
+      Formulae processing: {formulae_elapsed:,.2f}
       COPYing: {copy_elapsed:,.2f}
       Metadata updates: {metadata_elapsed:,.2f}
       Indexing: {index_elapsed:,.2f}
