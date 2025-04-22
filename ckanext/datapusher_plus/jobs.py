@@ -449,7 +449,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if not qsv_version_info:
         """
         Sample response
-        qsvdp 0.134.0-mimalloc-Luau 0.640;polars-0.42.0-fe04390;...
+        qsvdp 4.0.0-mimalloc-geocode;Luau 0.663;self_update...
         """
         raise utils.JobError(
             f"We expect qsv version info to be returned. Command: {conf.QSV_BIN} --version. Response: {qsv_version_info}"
