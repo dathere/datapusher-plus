@@ -18,7 +18,6 @@ import logging
 
 # Third-party imports
 import psycopg2
-from ckanext.datapusher_plus.job_exceptions import HTTPError
 from datasize import DataSize
 from dateutil.parser import parse as parsedate
 import json
@@ -35,7 +34,6 @@ import tempfile
 import subprocess
 import csv
 import os
-import psycopg2
 import semver
 import sys
 import traceback
@@ -54,6 +52,7 @@ from jinja2 import DictLoader, Environment
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.jinja2_helpers as j2h
+from ckanext.datapusher_plus.job_exceptions import HTTPError
 import ckanext.datapusher_plus.config as conf
 
 if locale.getdefaultlocale()[0]:
