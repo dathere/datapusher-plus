@@ -269,6 +269,72 @@ def validate_input(input):
     # if not input.get("api_key"):
     #     raise utils.JobError("No CKAN API key provided")
 
+class FormulaProcessor:
+    def __init__(self, scheming_yaml, package, resource_fields_stats, logger):
+        self.scheming_yaml = scheming_yaml
+        self.package = package
+        self.resource_fields_stats = resource_fields_stats
+        self.logger = logger
+        
+    def process_formulae(self, entity_type: str, fields_key: str, formula_type: str = "formula"):
+        """
+        Generic formula processor for both package and resource fields
+        
+        Args:
+            entity_type: 'package' or 'resource'
+            fields_key: Key in scheming_yaml for fields ('dataset_fields' or 'resource_fields')
+            formula_type: Type of formula ('formula' or 'suggestion_formula')
+        """
+        formula_fields = [
+            field for field in self.scheming_yaml[fields_key] 
+            if field.get(formula_type)
+        ]
+        
+        if not formula_fields:
+            return
+            
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
+            self.logger.info(
+                f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
+            )
+            
+        jinja2_formulae = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            template = schema_field[formula_type]
+            jinja2_formulae[field_name] = template
+            
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                self.logger.debug(
+                    f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
+                )
+                
+        context = {
+            "package": self.package,
+            "resource": self.resource_fields_stats
+        }
+        context.update(jinja2_formulae)
+        jinja2_env = j2h.create_jinja2_env(context)
+        
+        updates = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            try:
+                formula = jinja2_env.get_template(field_name)
+                rendered_formula = formula.render(**context)
+                updates[field_name] = rendered_formula
+                
+                if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                    self.logger.debug(
+                        f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
+                    )
+            except Exception as e:
+                self.logger.error(
+                    f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
+                )
+                
+        return updates
+
 
 def callback_datapusher_hook(result_url, job_dict):
     # api_key_from_job = job_dict.pop("api_key", None)
@@ -1620,7 +1686,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     if conf.UPLOAD_LOG_VERBOSITY >= 2:
         logger.debug(f"package: {package}")
-
+    
     # Check if there are any fields with DRUF entries in the scheming_yaml
     # There are two types of DRUF entries:
     # 1. "formula": This is used to update the field value DIRECTLY
@@ -1630,308 +1696,59 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # DRUF entries are stored as jinja2 templates in the scheming_yaml
     # and are rendered using the Jinja2 template engine.
 
-    ############################################################
-    # FIRST, process the FORMULAE for the PACKAGE & RESOURCE fields
-    ############################################################
-    formula_package_fields = [
-        field for field in scheming_yaml["dataset_fields"] if field.get("formula")
-    ]
+    # Initialize the formula processor
+    formula_processor = FormulaProcessor(scheming_yaml, package, resource_fields_stats, logger)
 
-    # Compute the Formulae for the PACKAGE Fields
-    jinja2_formulae = {}
-    if formula_package_fields:
-        if conf.UPLOAD_LOG_VERBOSITY >= 1:
-            logger.info(
-                "Found {} PACKAGE field/s with formulae in the scheming_yaml".format(
-                    len(formula_package_fields)
-                )
-            )
-
-        # For each PACKAGEfield with a formula, get the associated jinja2 template
-        for schema_field in formula_package_fields:
-            jinja2_template = schema_field["formula"]
-            package_field_name = schema_field["field_name"]
-            jinja2_formulae[package_field_name] = jinja2_template
-            logger.debug(
-                'Jinja2 formula for PACKAGE field "{}": {}'.format(
-                    package_field_name, jinja2_template
-                )
-            )
-
-        if conf.UPLOAD_LOG_VERBOSITY >= 2:
-            logger.debug("Jinja2 PACKAGE formulae: {}".format(jinja2_formulae))
-
-        # Create a dictionary with both package and field_stats_lookup
-        context = {"package": package, "resource": resource_fields_stats}
-
-        # Add the jinja2 formulae templates to the context
-        context.update(jinja2_formulae)
-        jinja2_env = j2h.create_jinja2_env(context)
-
-        for schema_field in formula_package_fields:
-            package_field_name = schema_field["field_name"]
-
-            # evaluate the jinja2 PACKAGEformula
-            try:
-                formula = jinja2_env.get_template(package_field_name)
-                # No need to pass field_stats_lookup here as it's already in the context
-                rendered_formula = formula.render(**context)
-                if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                    logger.debug(
-                        'Evaluated jinja2 formula for PACKAGE field "{}": {}'.format(
-                            package_field_name, rendered_formula
-                        )
-                    )
-
-                package[package_field_name] = rendered_formula
-            except Exception as e:
-                logger.error(
-                    'Error evaluating jinja2 formula for PACKAGE field "{}": {}'.format(
-                        package_field_name, str(e)
-                    )
-                )
-
-        # patch the PACKAGE
+    # Process package formulae
+    package_updates = formula_processor.process_formulae("package", "dataset_fields", "formula")
+    if package_updates:
+        # Update package with formula results
+        package.update(package_updates)
         try:
             patched_package = patch_package(package)
-
             if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after patching: {patched_package}")
-
-            if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info("PACKAGE formulae processed...")
-
-            # update the package
             package = patched_package
+            logger.info("PACKAGE formulae processed...")
         except Exception as e:
-            logger.error("Error patching package: {}".format(str(e)))
+            logger.error(f"Error patching package: {str(e)}")
 
-    # ============================================================
-    # now, process the FORMULAE for the RESOURCE fields
-    formula_resource_fields = [
-        field for field in scheming_yaml["resource_fields"] if field.get("formula")
-    ]
+    # Process resource formulae
+    resource_updates = formula_processor.process_formulae("resource", "resource_fields", "formula")
+    if resource_updates:
+        # Update resource with formula results
+        resource.update(resource_updates)
+        logger.info("RESOURCE formulae processed...")
 
-    # Compute the Formulae for the RESOURCE Fields
-    jinja2_formulae = {}
-    if formula_resource_fields:
-        if conf.UPLOAD_LOG_VERBOSITY >= 1:
-            logger.info(
-                "Found {} RESOURCE field/s with formulae in the scheming_yaml".format(
-                    len(formula_resource_fields)
-                )
-            )
-        # For each field with a formula, get the associated jinja2 template
-        for schema_field in formula_resource_fields:
-            jinja2_template = schema_field["formula"]
-            resource_field_name = schema_field["field_name"]
-            jinja2_formulae[resource_field_name] = jinja2_template
-            if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                logger.debug(
-                    'Jinja2 formula for RESOURCE field "{}": {}'.format(
-                        resource_field_name, jinja2_template
-                    )
-                )
-
-        if conf.UPLOAD_LOG_VERBOSITY >= 2:
-            logger.debug("Jinja2 RESOURCE formulae: {}".format(jinja2_formulae))
-        # Create a dictionary with both package and field_stats_lookup
-        context = {"package": package, "resource": resource_fields_stats}
-
-        # Add the jinja2 formulae templates to the context
-        context.update(jinja2_formulae)
-        jinja2_env = j2h.create_jinja2_env(context)
-
-        for schema_field in formula_resource_fields:
-            resource_field_name = schema_field["field_name"]
-
-            # evaluate the jinja2 RESOURCE formula
-            try:
-                formula = jinja2_env.get_template(resource_field_name)
-                # No need to pass field_stats_lookup here as it's already in the context
-                rendered_formula = formula.render(**context)
-                if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                    logger.debug(
-                        'Evaluated jinja2 formula for RESOURCE field "{}": {}'.format(
-                            resource_field_name, rendered_formula
-                        )
-                    )
-
-                # update the resource directly
-                resource[resource_field_name] = rendered_formula
-            except Exception as e:
-                logger.error(
-                    'Error evaluating jinja2 formula for RESOURCE field "{}": {}'.format(
-                        resource_field_name, str(e)
-                    )
-                )
-
-        if conf.UPLOAD_LOG_VERBOSITY >= 1:
-            logger.info("RESOURCE formulae processed...")
-
-    ############################################################
-    # SECOND, process the SUGGESTION FORMULAE for PACKAGE & RESOURCE fields
-    ############################################################
-    suggest_package_fields = [
-        field
-        for field in scheming_yaml["dataset_fields"]
-        if field.get("suggestion_formula")
-    ]
-
-    suggestion_jinja2_formula = {}
-    if suggest_package_fields:
-        if conf.UPLOAD_LOG_VERBOSITY >= 1:
-            logger.info(
-                "Found {} PACKAGE field/s with suggestion_formula in the scheming_yaml".format(
-                    len(suggest_package_fields)
-                )
-            )
-        # For each field with suggestion_formula, get the associated jinja2 template
-        for schema_field in suggest_package_fields:
-            jinja2_template = schema_field["suggestion_formula"]
-            package_field_name = schema_field["field_name"]
-            suggestion_jinja2_formula[package_field_name] = jinja2_template
-            if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                logger.debug(
-                    'Jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
-                        package_field_name, jinja2_template
-                    )
-                )
-
-        if conf.UPLOAD_LOG_VERBOSITY >= 2:
-            logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
-
-        # Create a dictionary with both package and field_stats_lookup
-        context = {"package": package, "resource": resource_fields_stats}
-
-        # Add the jinja2 templates to the context
-        context.update(suggestion_jinja2_formula)
-        jinja2_env = j2h.create_jinja2_env(context)
-
-        revise_update_content = {"package": {}}
-        for schema_field in suggest_package_fields:
-            package_field_name = schema_field["field_name"]
-
-            # evaluate the jinja2 suggestion_formula
-            try:
-                formula = jinja2_env.get_template(package_field_name)
-                # No need to pass field_stats_lookup here as it's already in the context
-                rendered_formula = formula.render(**context)
-                if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                    logger.debug(
-                        'Evaluated jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
-                            package_field_name, rendered_formula
-                        )
-                    )
-
-                revise_update_content["package"][package_field_name] = rendered_formula
-            except Exception as e:
-                logger.error(
-                    'Error evaluating jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
-                        package_field_name, str(e)
-                    )
-                )
-
+    # Process package suggestion formulae
+    package_suggestions = formula_processor.process_formulae("package", "dataset_fields", "suggestion_formula")
+    if package_suggestions:
+        revise_update_content = {"package": package_suggestions}
         try:
             revised_package = revise_package(
                 package_id, update={"dpp_suggestion": revise_update_content}
             )
-
             if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after revising: {revised_package}")
-
-            if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info("PACKAGE suggestion formulae processed...")
-
-            # update the package
             package = revised_package
+            logger.info("PACKAGE suggestion formulae processed...")
         except Exception as e:
-            logger.error("Error revising package: {}".format(str(e)))
+            logger.error(f"Error revising package: {str(e)}")
 
-    # ============================================================
-    # now, process the SUGGESTION FORMULAE for RESOURCE fields
-    suggest_resource_fields = [
-        field
-        for field in scheming_yaml["resource_fields"]
-        if field.get("suggestion_formula")
-    ]
-
-    suggestion_jinja2_formula = {}
-    if suggest_resource_fields:
-        if conf.UPLOAD_LOG_VERBOSITY >= 2:
-            logger.debug("resource: {}".format(resource))
-        if conf.UPLOAD_LOG_VERBOSITY >= 1:
-            logger.info(
-                "Found {} RESOURCE field/s with suggestion_formula in the scheming_yaml".format(
-                    len(suggest_resource_fields)
-                )
-            )
-
-        # For each field with suggestion_formula, get the associated jinja2 template
-        for schema_field in suggest_resource_fields:
-            jinja2_template = schema_field["suggestion_formula"]
-            resource_field_name = schema_field["field_name"]
-            suggestion_jinja2_formula[resource_field_name] = jinja2_template
-            if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                logger.debug(
-                    'Jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
-                        resource_field_name, jinja2_template
-                    )
-                )
-
-        if conf.UPLOAD_LOG_VERBOSITY >= 2:
-            logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
-        # Create a dictionary with both package and field_stats_lookup
-        context = {"package": package, "resource": resource_fields_stats}
-
-        # Add the jinja2 templates to the context
-        context.update(suggestion_jinja2_formula)
-        jinja2_env = j2h.create_jinja2_env(context)
-
-        revise_update_content = {"resource": {}}
-        for schema_field in suggest_resource_fields:
-            resource_field_name = schema_field["field_name"]
-
-            resource_name = resource["name"]
-
-            # Initialize nested dictionary for resource if it doesn't exist
-            if resource_name not in revise_update_content["resource"]:
-                revise_update_content["resource"][resource_name] = {}
-
-            # evaluate the jinja2 suggestion_formula
-            try:
-                formula = jinja2_env.get_template(resource_field_name)
-                rendered_formula = formula.render(**context)
-                if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                    logger.debug(
-                        'Evaluated jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
-                            resource_field_name, rendered_formula
-                        )
-                    )
-
-                revise_update_content["resource"][resource_name][
-                    resource_field_name
-                ] = rendered_formula
-            except Exception as e:
-                logger.error(
-                    'Error evaluating jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
-                        resource_field_name, str(e)
-                    )
-                )
-
-        # check if package already has a suggestion
-        # if it does, merge the new suggestion with the existing one
-        # otherwise, add the new suggestion
-        # Note that dpp_suggestion is a dictionary of dictionaries
-        # with the field_name as the key and the suggestion as the value
-        # so we need to merge the new suggestion with the existing one
-        # and update the package
-        # It's at the package level, not the resource level as we may be
-        # updating multiple resources from the same package
+    # Process resource suggestion formulae
+    resource_suggestions = formula_processor.process_formulae("resource", "resource_fields", "suggestion_formula")
+    if resource_suggestions:
+        resource_name = resource["name"]
+        revise_update_content = {
+            "resource": {
+                resource_name: resource_suggestions
+            }
+        }
+        
+        # Handle existing suggestions
         if package.get("dpp_suggestion"):
             package["dpp_suggestion"].update(revise_update_content["resource"])
         else:
-            # add the new suggestion
             package["dpp_suggestion"] = revise_update_content["resource"]
 
         try:
@@ -1940,14 +1757,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             )
             if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after revising: {revised_package}")
-
-            if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info("RESOURCE suggestion formulae processed...")
-
-            # update the package
             package = revised_package
+            logger.info("RESOURCE suggestion formulae processed...")
         except Exception as e:
-            logger.error("Error revising package: {}".format(str(e)))
+            logger.error(f"Error revising package: {str(e)}")
 
     # -------------------- FORMULAE PROCESSING DONE --------------------
     formulae_elapsed = time.perf_counter() - formulae_start
