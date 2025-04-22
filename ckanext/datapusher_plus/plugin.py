@@ -157,7 +157,6 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         return {
             "datapusher_plus_status": dph.datapusher_status,
             "datapusher_plus_status_description": dph.datapusher_status_description,
-            "datapusher_plus_calculate_field": dph.datapusher_plus_calculate_field,
         }
 
     # IBlueprint
