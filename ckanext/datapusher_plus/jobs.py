@@ -54,8 +54,7 @@ from jinja2 import DictLoader, Environment
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.jinja2_helpers as j2h
-
-# from ckanext.datapusher_plus.config import config
+import ckanext.datapusher_plus.config as config
 
 
 if locale.getdefaultlocale()[0]:
@@ -64,92 +63,45 @@ if locale.getdefaultlocale()[0]:
 else:
     locale.setlocale(locale.LC_ALL, "")
 
-
-SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
-if not SSL_VERIFY:
-    requests.packages.urllib3.disable_warnings()
-
-USE_PROXY = "ckanext.datapusher_plus.download_proxy" in tk.config
+# Import configuration from config.py
+SSL_VERIFY = config.SSL_VERIFY
+USE_PROXY = config.USE_PROXY
 if USE_PROXY:
-    DOWNLOAD_PROXY = tk.config.get("ckanext.datapusher_plus.download_proxy")
-
-POSTGRES_INT_MAX = 2147483647
-POSTGRES_INT_MIN = -2147483648
-POSTGRES_BIGINT_MAX = 9223372036854775807
-POSTGRES_BIGINT_MIN = -9223372036854775808
-
-MINIMUM_QSV_VERSION = "4.0.0"
-
-# 0 = None, 1 = INFO, 2 = DEBUG
-UPLOAD_LOG_VERBOSITY = tk.asint(
-    tk.config.get("ckanext.datapusher_plus.upload_log_verbosity", 1)
-)
-PII_SCREENING = tk.asbool(tk.config.get("ckanext.datastore_plus.pii_screening", False))
-QSV_BIN = Path(tk.config.get("ckanext.datapusher_plus.qsv_bin"))
-FILE_BIN = Path(tk.config.get("ckanext.datapusher_plus.file_bin"))
-PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "1000"))
-TIMEOUT = tk.asint(tk.config.get("ckanext.datapusher_plus.download_timeout", "300"))
-MAX_CONTENT_LENGTH = tk.asint(
-    tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
-)
-CHUNK_SIZE = tk.asint(tk.config.get("ckanext.datapusher_plus.chunk_size", "1048576"))
-DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 1))
-SORT_AND_DUPE_CHECK = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check", True)
-)
-DEDUP = tk.asbool(tk.config.get("ckanext.datapusher_plus.dedup", True))
-UNSAFE_PREFIX = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
-RESERVED_COLNAMES = tk.config.get("ckanext.datapusher_plus.reserved_colnames", "_id")
-PREFER_DMY = tk.asbool(tk.config.get("ckanext.datapusher_plus.prefer_dmy", False))
-AUTO_INDEX_THRESHOLD = tk.asint(
-    tk.config.get("ckanext.datapusher_plus.auto_index_threshold", "3")
-)
-SUMMARY_STATS_OPTIONS = tk.config.get("ckanext.datapusher_plus.summary_stats_options")
-PII_FOUND_ABORT = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.pii_found_abort", False)
-)
-PII_REGEX_RESOURCE_ID = tk.config.get(
-    "ckanext.datapusher_plus.pii_regex_resource_id_or_alias"
-)
-PII_SHOW_CANDIDATES = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.pii_show_candidates", False)
-)
-PII_QUICK_SCREEN = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.pii_quick_screen", False)
-)
-COPY_READBUFFER_SIZE = tk.asint(
-    tk.config.get("ckanext.datapusher_plus.copy_readbuffer_size", "1048576")
-)
-AUTO_INDEX_DATES = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.auto_index_dates", True)
-)
-AUTO_UNIQUE_INDEX = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.auto_unique_index", True)
-)
-TYPE_MAPPING = json.loads(
-    tk.config.get(
-        "ckanext.datapusher_plus.type_mapping",
-        '{"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}',
-    )
-)
-AUTO_ALIAS = tk.asbool(tk.config.get("ckanext.datapusher_plus.auto_alias", True))
-AUTO_ALIAS_UNIQUE = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.auto_alias_unique", True)
-)
-
-ADD_SUMMARY_STATS_RESOURCE = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.add_summary_stats_resource", False)
-)
-SUMMARY_STATS_WITH_PREVIEW = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.summary_stats_with_preview", False)
-)
-
-
-DATASTORE_URLS = {
-    "datastore_delete": "{ckan_url}/api/action/datastore_delete",
-    "resource_update": "{ckan_url}/api/action/resource_update",
-}
-
+    DOWNLOAD_PROXY = config.DOWNLOAD_PROXY
+POSTGRES_INT_MAX = config.POSTGRES_INT_MAX
+POSTGRES_INT_MIN = config.POSTGRES_INT_MIN
+POSTGRES_BIGINT_MAX = config.POSTGRES_BIGINT_MAX
+POSTGRES_BIGINT_MIN = config.POSTGRES_BIGINT_MIN
+MINIMUM_QSV_VERSION = config.MINIMUM_QSV_VERSION
+UPLOAD_LOG_VERBOSITY = config.UPLOAD_LOG_VERBOSITY
+PII_SCREENING = config.PII_SCREENING
+QSV_BIN = config.QSV_BIN
+FILE_BIN = config.FILE_BIN
+PREVIEW_ROWS = config.PREVIEW_ROWS
+TIMEOUT = config.TIMEOUT
+MAX_CONTENT_LENGTH = config.MAX_CONTENT_LENGTH
+CHUNK_SIZE = config.CHUNK_SIZE
+DEFAULT_EXCEL_SHEET = config.DEFAULT_EXCEL_SHEET
+SORT_AND_DUPE_CHECK = config.SORT_AND_DUPE_CHECK
+DEDUP = config.DEDUP
+UNSAFE_PREFIX = config.UNSAFE_PREFIX
+RESERVED_COLNAMES = config.RESERVED_COLNAMES
+PREFER_DMY = config.PREFER_DMY
+AUTO_INDEX_THRESHOLD = config.AUTO_INDEX_THRESHOLD
+SUMMARY_STATS_OPTIONS = config.SUMMARY_STATS_OPTIONS
+PII_FOUND_ABORT = config.PII_FOUND_ABORT
+PII_REGEX_RESOURCE_ID = config.PII_REGEX_RESOURCE_ID
+PII_SHOW_CANDIDATES = config.PII_SHOW_CANDIDATES
+PII_QUICK_SCREEN = config.PII_QUICK_SCREEN
+COPY_READBUFFER_SIZE = config.COPY_READBUFFER_SIZE
+AUTO_INDEX_DATES = config.AUTO_INDEX_DATES
+AUTO_UNIQUE_INDEX = config.AUTO_UNIQUE_INDEX
+TYPE_MAPPING = config.TYPE_MAPPING
+AUTO_ALIAS = config.AUTO_ALIAS
+AUTO_ALIAS_UNIQUE = config.AUTO_ALIAS_UNIQUE
+ADD_SUMMARY_STATS_RESOURCE = config.ADD_SUMMARY_STATS_RESOURCE
+SUMMARY_STATS_WITH_PREVIEW = config.SUMMARY_STATS_WITH_PREVIEW
+DATASTORE_URLS = config.DATASTORE_URLS
 
 def get_url(action, ckan_url):
     """
@@ -418,7 +370,6 @@ def datapusher_plus_to_datastore(input):
         )
         errored = errored or not is_saved_ok
     return "error" if errored else None
-
 
 def push_to_datastore(input, task_id, dry_run=False):
     """Download and parse a resource push its data into CKAN's DataStore.
@@ -2414,3 +2365,4 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     TOTAL ELAPSED TIME: {total_elapsed:,.2f}
     """
     logger.info(end_msg)
+
