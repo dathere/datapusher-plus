@@ -62,6 +62,7 @@ if locale.getdefaultlocale()[0]:
 else:
     locale.setlocale(locale.LC_ALL, "")
 
+
 def get_url(action, ckan_url):
     """
     Get url for ckan action
@@ -330,6 +331,7 @@ def datapusher_plus_to_datastore(input):
         errored = errored or not is_saved_ok
     return "error" if errored else None
 
+
 def push_to_datastore(input, task_id, dry_run=False):
     """Download and parse a resource push its data into CKAN's DataStore.
 
@@ -462,7 +464,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             "stream": True,
         }
         if conf.USE_PROXY:
-            kwargs["proxies"] = {"http": conf.DOWNLOAD_PROXY, "https": conf.DOWNLOAD_PROXY}
+            kwargs["proxies"] = {
+                "http": conf.DOWNLOAD_PROXY,
+                "https": conf.DOWNLOAD_PROXY,
+            }
         with requests.get(resource_url, **kwargs) as response:
             response.raise_for_status()
 
@@ -517,9 +522,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     logger.info("Downloading file of unknown size...")
 
             with open(tmp, "wb") as tmp_file:
-                for chunk in response.iter_content(
-                    conf.CHUNK_SIZE
-                ):
+                for chunk in response.iter_content(conf.CHUNK_SIZE):
                     length += len(chunk)
                     if length > max_content_length and not conf.PREVIEW_ROWS:
                         raise utils.JobError(
@@ -1000,7 +1003,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     temp_headers_dicts = [
         dict(
             id=field[0],
-            type=conf.TYPE_MAPPING.get(str(field[1]) if field[1] else default_type, "text"),
+            type=conf.TYPE_MAPPING.get(
+                str(field[1]) if field[1] else default_type, "text"
+            ),
         )
         for field in zip(headers, types)
     ]
@@ -1056,9 +1061,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     stats_table = sql.Identifier(resource_id + "-druf-stats")
 
     try:
-        raw_connection_statsfreq = psycopg2.connect(
-            conf.DATASTORE_WRITE_URL
-        )
+        raw_connection_statsfreq = psycopg2.connect(conf.DATASTORE_WRITE_URL)
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
@@ -1297,7 +1300,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # a text file, with each line having a regex pattern, and an optional
         # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
         if conf.PII_REGEX_RESOURCE_ID:
-            pii_regex_resource_exist = datastore_resource_exists(conf.PII_REGEX_RESOURCE_ID)
+            pii_regex_resource_exist = datastore_resource_exists(
+                conf.PII_REGEX_RESOURCE_ID
+            )
             if pii_regex_resource_exist:
                 pii_resource = get_resource(conf.PII_REGEX_RESOURCE_ID)
                 pii_regex_url = pii_resource["url"]
@@ -1390,9 +1395,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             pii_resource_id = resource_id + "-pii"
 
             try:
-                raw_connection_pii = psycopg2.connect(
-                    conf.DATASTORE_WRITE_URL
-                )
+                raw_connection_pii = psycopg2.connect(conf.DATASTORE_WRITE_URL)
             except psycopg2.Error as e:
                 raise utils.JobError("Could not connect to the Datastore: {}".format(e))
             else:
@@ -2224,7 +2227,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         index_count = 0
         for idx, cardinality in enumerate(headers_cardinality):
             curr_col = headers[idx]
-            if conf.AUTO_INDEX_THRESHOLD > 0 or conf.AUTO_INDEX_DATES or conf.AUTO_UNIQUE_INDEX:
+            if (
+                conf.AUTO_INDEX_THRESHOLD > 0
+                or conf.AUTO_INDEX_DATES
+                or conf.AUTO_UNIQUE_INDEX
+            ):
                 if cardinality == record_count and conf.AUTO_UNIQUE_INDEX:
                     # all the values are unique for this column, create a unique index
                     if conf.PREVIEW_ROWS > 0:
@@ -2318,4 +2325,3 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     TOTAL ELAPSED TIME: {total_elapsed:,.2f}
     """
     logger.info(end_msg)
-

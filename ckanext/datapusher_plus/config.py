@@ -63,7 +63,9 @@ DEDUP = tk.asbool(tk.config.get("ckanext.datapusher_plus.dedup", True))
 UNSAFE_PREFIX = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
 RESERVED_COLNAMES = tk.config.get("ckanext.datapusher_plus.reserved_colnames", "_id")
 PREFER_DMY = tk.asbool(tk.config.get("ckanext.datapusher_plus.prefer_dmy", False))
-IGNORE_FILE_HASH = tk.asbool(tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False))
+IGNORE_FILE_HASH = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False)
+)
 
 # Indexing settings
 AUTO_INDEX_THRESHOLD = tk.asint(
