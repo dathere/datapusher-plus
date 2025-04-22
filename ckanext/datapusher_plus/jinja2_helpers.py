@@ -3,9 +3,36 @@ from __future__ import annotations
 
 import logging
 from math import radians, cos
+from jinja2 import DictLoader, Environment
 
 log = logging.getLogger(__name__)
 
+def create_jinja2_env(context):
+    """Create a configured Jinja2 environment with all filters and globals."""
+    env = Environment(loader=DictLoader(context))
+    
+    # Add filters
+    filters = {
+        "truncate_with_ellipsis": truncate_with_ellipsis,
+        "format_number": format_number,
+        "format_bytes": format_bytes,
+        "format_date": format_date,
+        "calculate_percentage": calculate_percentage,
+        "get_unique_ratio": get_unique_ratio,
+        "format_range": format_range,
+        "format_coordinates": format_coordinates,
+        "calculate_bbox_area": calculate_bbox_area
+    }
+    env.filters.update(filters)
+    
+    # Add globals
+    globals = {
+        "spatial_extent_wkt": spatial_extent_wkt,
+        "spatial_extent_feature_collection": spatial_extent_feature_collection
+    }
+    env.globals.update(globals)
+    
+    return env
 
 # Jinja2 filters and functions
 # Helper function to truncate text to a specific length and append ellipsis.

@@ -419,33 +419,6 @@ def datapusher_plus_to_datastore(input):
         errored = errored or not is_saved_ok
     return "error" if errored else None
 
-def create_jinja2_env(context):
-    """Create a configured Jinja2 environment with all filters and globals."""
-    env = Environment(loader=DictLoader(context))
-    
-    # Add filters
-    filters = {
-        "truncate_with_ellipsis": j2h.truncate_with_ellipsis,
-        "format_number": j2h.format_number,
-        "format_bytes": j2h.format_bytes,
-        "format_date": j2h.format_date,
-        "calculate_percentage": j2h.calculate_percentage,
-        "get_unique_ratio": j2h.get_unique_ratio,
-        "format_range": j2h.format_range,
-        "format_coordinates": j2h.format_coordinates,
-        "calculate_bbox_area": j2h.calculate_bbox_area
-    }
-    env.filters.update(filters)
-    
-    # Add globals
-    globals = {
-        "spatial_extent_wkt": j2h.spatial_extent_wkt,
-        "spatial_extent_feature_collection": j2h.spatial_extent_feature_collection
-    }
-    env.globals.update(globals)
-    
-    return env
-
 def push_to_datastore(input, task_id, dry_run=False):
     """Download and parse a resource push its data into CKAN's DataStore.
 
@@ -1783,7 +1756,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         # Add the jinja2 formulae templates to the context
         context.update(jinja2_formulae)
-        jinja2_env = create_jinja2_env(context)
+        jinja2_env = j2h.create_jinja2_env(context)
 
         for schema_field in formula_package_fields:
             package_field_name = schema_field["field_name"]
@@ -1857,7 +1830,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         # Add the jinja2 formulae templates to the context
         context.update(jinja2_formulae)
-        jinja2_env = create_jinja2_env(context)
+        jinja2_env = j2h.create_jinja2_env(context)
      
         for schema_field in formula_resource_fields:
             resource_field_name = schema_field["field_name"]
@@ -1923,7 +1896,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         # Add the jinja2 templates to the context
         context.update(suggestion_jinja2_formula)
-        jinja2_env = create_jinja2_env(context)
+        jinja2_env = j2h.create_jinja2_env(context)
 
         revise_update_content = {"package": {}}
         for schema_field in suggest_package_fields:
@@ -2003,7 +1976,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         # Add the jinja2 templates to the context
         context.update(suggestion_jinja2_formula)
-        jinja2_env = create_jinja2_env(context)
+        jinja2_env = j2h.create_jinja2_env(context)
 
         revise_update_content = {"resource": {}}
         for schema_field in suggest_resource_fields:
