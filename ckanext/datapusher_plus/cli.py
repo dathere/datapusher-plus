@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ckan.types import Context
+
 
 import logging
 from typing import cast
@@ -14,6 +14,8 @@ import ckan.plugins.toolkit as tk
 import ckanext.datastore.backend as datastore_backend
 from ckan.cli import error_shout
 
+if tk.check_ckan_version('2.10'):
+    from ckan.types import Context
 
 log = logging.getLogger(__name__)
 
