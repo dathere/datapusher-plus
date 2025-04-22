@@ -109,7 +109,7 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 1. Install the required packages.
 
     ```bash
-    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file
+    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file uchardet
     ```
 
 2. Activate the CKAN virtual environment using atleast python 3.8.
@@ -170,13 +170,13 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     Add the qsv repository to your sources list:
 
       ```bash
-      echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://tino097.github.io/qsv-deb-releases ./" > qsv.list
+      echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://dathere.github.io/qsv-deb-releases ./" > qsv.list
       ```
 
     Import trusted GPG key:
 
       ```bash
-    wget -O - https://tino097.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
+    wget -O - https://dathere.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
       ```
 
     Install qsv:
@@ -245,14 +245,6 @@ ckan.plugins = <other plugins> datapusher_plus
 >```
 
 ### DataPusher+ Database Setup
-
-DP+ tables will be created with the command:
-
-```bash
-ckan -c /etc/ckan/default/ckan.ini datapusher_plus db-init
-```
-
-**NOTE:** If you are upgrading from a previous version of Datapusher, you will need to run the following command to upgrade the database:
 
 ```bash
 
