@@ -530,8 +530,6 @@ def calculate_bbox_area(min_lon, min_lat, max_lon, max_lat):
 
 
 # Jinja2 Functions
-
-
 def spatial_extent_wkt(
     min_lon: float, min_lat: float, max_lon: float, max_lat: float
 ) -> str:
@@ -555,18 +553,21 @@ def spatial_extent_wkt(
     return wkt
 
 
-def spatial_extent_wkt_from_bbox(bbox: list[float]) -> str:
-    """Convert a bounding box to WKT polygon format.
+def spatial_extent_feature_collection(
+    name: str, bbox: list[float], type: str = "calculated"
+) -> str:
+    """Convert a bounding box to a namedGeoJSON feature collection.
 
     Args:
+        name: Name of the feature
         bbox: List of floats representing the bounding box [min_lon, min_lat, max_lon, max_lat]
+        type: Type of the feature, defaults to "calculated"
 
     Returns:
-        str: WKT polygon string representing the spatial extent
+        str: GeoJSON feature collection string
 
     Example:
-        >>> spatial_extent_wkt_from_bbox([-180, -90, 180, 90])
-        'SRID=4326;POLYGON((-180 -90, -180 90, 180 90, 180 -90, -180 -90))'
+        >>> spatial_extent_feature_collection("User Drawn Polygon 1", "draw", [-180, -90, 180, 90])
+        '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"User Drawn Polygon 1","type":"draw"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
     """
-    min_lon, min_lat, max_lon, max_lat = bbox
-    return spatial_extent_wkt(min_lon, min_lat, max_lon, max_lat)
+    return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[{bbox[0]} {bbox[1]}, {bbox[0]} {bbox[3]}, {bbox[2]} {bbox[3]}, {bbox[2]} {bbox[1]}, {bbox[0]} {bbox[1]}]]}}, "properties": {{}}}}]}}'
