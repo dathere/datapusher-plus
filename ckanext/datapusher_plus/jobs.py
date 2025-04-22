@@ -269,53 +269,52 @@ def validate_input(input):
     # if not input.get("api_key"):
     #     raise utils.JobError("No CKAN API key provided")
 
+
 class FormulaProcessor:
     def __init__(self, scheming_yaml, package, resource_fields_stats, logger):
         self.scheming_yaml = scheming_yaml
         self.package = package
         self.resource_fields_stats = resource_fields_stats
         self.logger = logger
-        
-    def process_formulae(self, entity_type: str, fields_key: str, formula_type: str = "formula"):
+
+    def process_formulae(
+        self, entity_type: str, fields_key: str, formula_type: str = "formula"
+    ):
         """
         Generic formula processor for both package and resource fields
-        
+
         Args:
             entity_type: 'package' or 'resource'
             fields_key: Key in scheming_yaml for fields ('dataset_fields' or 'resource_fields')
             formula_type: Type of formula ('formula' or 'suggestion_formula')
         """
         formula_fields = [
-            field for field in self.scheming_yaml[fields_key] 
-            if field.get(formula_type)
+            field for field in self.scheming_yaml[fields_key] if field.get(formula_type)
         ]
-        
+
         if not formula_fields:
             return
-            
+
         if conf.UPLOAD_LOG_VERBOSITY >= 1:
             self.logger.info(
                 f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
             )
-            
+
         jinja2_formulae = {}
         for schema_field in formula_fields:
             field_name = schema_field["field_name"]
             template = schema_field[formula_type]
             jinja2_formulae[field_name] = template
-            
+
             if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 self.logger.debug(
                     f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
                 )
-                
-        context = {
-            "package": self.package,
-            "resource": self.resource_fields_stats
-        }
+
+        context = {"package": self.package, "resource": self.resource_fields_stats}
         context.update(jinja2_formulae)
         jinja2_env = j2h.create_jinja2_env(context)
-        
+
         updates = {}
         for schema_field in formula_fields:
             field_name = schema_field["field_name"]
@@ -323,7 +322,7 @@ class FormulaProcessor:
                 formula = jinja2_env.get_template(field_name)
                 rendered_formula = formula.render(**context)
                 updates[field_name] = rendered_formula
-                
+
                 if conf.UPLOAD_LOG_VERBOSITY >= 2:
                     self.logger.debug(
                         f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
@@ -332,7 +331,7 @@ class FormulaProcessor:
                 self.logger.error(
                     f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
                 )
-                
+
         return updates
 
 
@@ -1679,6 +1678,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     # PROCESS DRUF JINJA2 FORMULAE
     # ============================================================
+    # Check if there are any fields with DRUF keys in the scheming_yaml
+    # There are two types of DRUF keys:
+    # 1. "formula": This is used to update the field value DIRECTLY
+    #    when the resource is created/updated. It can update both package and resource fields.
+    # 2. "suggestion_formula": This is used to populate the suggestion
+    #    popovers DURING data entry/curation.
+    # DRUF keys are stored as jinja2 templates in the scheming_yaml
+    # and are rendered using the Jinja2 template engine.
     formulae_start = time.perf_counter()
     # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
@@ -1686,21 +1693,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     if conf.UPLOAD_LOG_VERBOSITY >= 2:
         logger.debug(f"package: {package}")
-    
-    # Check if there are any fields with DRUF entries in the scheming_yaml
-    # There are two types of DRUF entries:
-    # 1. "formula": This is used to update the field value DIRECTLY
-    #    when the resource is created/updated.
-    # 2. "suggestion_formula": This is used to populate the suggestion
-    #    popovers DURING data entry/curation.
-    # DRUF entries are stored as jinja2 templates in the scheming_yaml
-    # and are rendered using the Jinja2 template engine.
 
     # Initialize the formula processor
-    formula_processor = FormulaProcessor(scheming_yaml, package, resource_fields_stats, logger)
+    formula_processor = FormulaProcessor(
+        scheming_yaml, package, resource_fields_stats, logger
+    )
 
     # Process package formulae
-    package_updates = formula_processor.process_formulae("package", "dataset_fields", "formula")
+    # as this is a direct update, we update the package fields directly
+    # using the package_patch CKAN API
+    package_updates = formula_processor.process_formulae(
+        "package", "dataset_fields", "formula"
+    )
     if package_updates:
         # Update package with formula results
         package.update(package_updates)
@@ -1714,14 +1718,21 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.error(f"Error patching package: {str(e)}")
 
     # Process resource formulae
-    resource_updates = formula_processor.process_formulae("resource", "resource_fields", "formula")
+    # as this is a direct update, we update the resource fields directly
+    resource_updates = formula_processor.process_formulae(
+        "resource", "resource_fields", "formula"
+    )
     if resource_updates:
         # Update resource with formula results
         resource.update(resource_updates)
         logger.info("RESOURCE formulae processed...")
 
     # Process package suggestion formulae
-    package_suggestions = formula_processor.process_formulae("package", "dataset_fields", "suggestion_formula")
+    # as this is a suggestion, we update the package dpp_suggestion field
+    # from which the Suggestion bootstrap popover will pick it up
+    package_suggestions = formula_processor.process_formulae(
+        "package", "dataset_fields", "suggestion_formula"
+    )
     if package_suggestions:
         revise_update_content = {"package": package_suggestions}
         try:
@@ -1736,15 +1747,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.error(f"Error revising package: {str(e)}")
 
     # Process resource suggestion formulae
-    resource_suggestions = formula_processor.process_formulae("resource", "resource_fields", "suggestion_formula")
+    # Note how we update the PACKAGE dpp_suggestion field
+    # and there is NO RESOURCE dpp_suggestion field.
+    # This is because suggestion formulae are used to populate the
+    # suggestion popover DURING data entry/curation and suggestion formulae
+    # may update both package and resource fields.
+    resource_suggestions = formula_processor.process_formulae(
+        "resource", "resource_fields", "suggestion_formula"
+    )
     if resource_suggestions:
         resource_name = resource["name"]
-        revise_update_content = {
-            "resource": {
-                resource_name: resource_suggestions
-            }
-        }
-        
+        revise_update_content = {"resource": {resource_name: resource_suggestions}}
+
         # Handle existing suggestions
         if package.get("dpp_suggestion"):
             package["dpp_suggestion"].update(revise_update_content["resource"])
