@@ -419,6 +419,7 @@ def datapusher_plus_to_datastore(input):
         errored = errored or not is_saved_ok
     return "error" if errored else None
 
+
 def push_to_datastore(input, task_id, dry_run=False):
     """Download and parse a resource push its data into CKAN's DataStore.
 
@@ -436,6 +437,7 @@ def push_to_datastore(input, task_id, dry_run=False):
     # Ensure temporary files are removed after run
     with tempfile.TemporaryDirectory() as temp_dir:
         return _push_to_datastore(task_id, input, dry_run=dry_run, temp_dir=temp_dir)
+
 
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # add job to dn  (datapusher_plus_jobs table)
@@ -1831,7 +1833,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # Add the jinja2 formulae templates to the context
         context.update(jinja2_formulae)
         jinja2_env = j2h.create_jinja2_env(context)
-     
+
         for schema_field in formula_resource_fields:
             resource_field_name = schema_field["field_name"]
 
