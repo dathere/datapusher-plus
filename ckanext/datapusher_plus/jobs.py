@@ -54,54 +54,13 @@ from jinja2 import DictLoader, Environment
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.jinja2_helpers as j2h
-import ckanext.datapusher_plus.config as config
-
+import ckanext.datapusher_plus.config as conf
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
 else:
     locale.setlocale(locale.LC_ALL, "")
-
-# Import configuration from config.py
-SSL_VERIFY = config.SSL_VERIFY
-USE_PROXY = config.USE_PROXY
-if USE_PROXY:
-    DOWNLOAD_PROXY = config.DOWNLOAD_PROXY
-POSTGRES_INT_MAX = config.POSTGRES_INT_MAX
-POSTGRES_INT_MIN = config.POSTGRES_INT_MIN
-POSTGRES_BIGINT_MAX = config.POSTGRES_BIGINT_MAX
-POSTGRES_BIGINT_MIN = config.POSTGRES_BIGINT_MIN
-MINIMUM_QSV_VERSION = config.MINIMUM_QSV_VERSION
-UPLOAD_LOG_VERBOSITY = config.UPLOAD_LOG_VERBOSITY
-PII_SCREENING = config.PII_SCREENING
-QSV_BIN = config.QSV_BIN
-FILE_BIN = config.FILE_BIN
-PREVIEW_ROWS = config.PREVIEW_ROWS
-TIMEOUT = config.TIMEOUT
-MAX_CONTENT_LENGTH = config.MAX_CONTENT_LENGTH
-CHUNK_SIZE = config.CHUNK_SIZE
-DEFAULT_EXCEL_SHEET = config.DEFAULT_EXCEL_SHEET
-SORT_AND_DUPE_CHECK = config.SORT_AND_DUPE_CHECK
-DEDUP = config.DEDUP
-UNSAFE_PREFIX = config.UNSAFE_PREFIX
-RESERVED_COLNAMES = config.RESERVED_COLNAMES
-PREFER_DMY = config.PREFER_DMY
-AUTO_INDEX_THRESHOLD = config.AUTO_INDEX_THRESHOLD
-SUMMARY_STATS_OPTIONS = config.SUMMARY_STATS_OPTIONS
-PII_FOUND_ABORT = config.PII_FOUND_ABORT
-PII_REGEX_RESOURCE_ID = config.PII_REGEX_RESOURCE_ID
-PII_SHOW_CANDIDATES = config.PII_SHOW_CANDIDATES
-PII_QUICK_SCREEN = config.PII_QUICK_SCREEN
-COPY_READBUFFER_SIZE = config.COPY_READBUFFER_SIZE
-AUTO_INDEX_DATES = config.AUTO_INDEX_DATES
-AUTO_UNIQUE_INDEX = config.AUTO_UNIQUE_INDEX
-TYPE_MAPPING = config.TYPE_MAPPING
-AUTO_ALIAS = config.AUTO_ALIAS
-AUTO_ALIAS_UNIQUE = config.AUTO_ALIAS_UNIQUE
-ADD_SUMMARY_STATS_RESOURCE = config.ADD_SUMMARY_STATS_RESOURCE
-SUMMARY_STATS_WITH_PREVIEW = config.SUMMARY_STATS_WITH_PREVIEW
-DATASTORE_URLS = config.DATASTORE_URLS
 
 def get_url(action, ckan_url):
     """
@@ -322,7 +281,7 @@ def callback_datapusher_hook(result_url, job_dict):
         result = requests.post(
             result_url,
             data=json.dumps(job_dict, cls=utils.DatetimeJsonEncoder),
-            verify=SSL_VERIFY,
+            verify=conf.SSL_VERIFY,
             headers=headers,
         )
     except requests.ConnectionError:
@@ -403,18 +362,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.DEBUG)
 
-    # check if QSV_BIN and FILE_BIN exists
-    # qsv_path = Path(QSV_BIN)
-    if not QSV_BIN.is_file():
-        raise utils.JobError("{} not found.".format(QSV_BIN))
+    # check if conf.QSV_BIN and conf.FILE_BIN exists
+    # qsv_path = Path(conf.QSV_BIN)
+    if not Path(conf.QSV_BIN).is_file():
+        raise utils.JobError("{} not found.".format(conf.QSV_BIN))
 
-    if not FILE_BIN.is_file():
-        raise utils.JobError("{} not found.".format(FILE_BIN))
+    if not conf.FILE_BIN.is_file():
+        raise utils.JobError("{} not found.".format(conf.FILE_BIN))
 
     # make sure qsv binary variant is up-to-date
     try:
         qsv_version = subprocess.run(
-            [QSV_BIN, "--version"],
+            [conf.QSV_BIN, "--version"],
             capture_output=True,
             text=True,
         )
@@ -427,18 +386,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsvdp 0.134.0-mimalloc-Luau 0.640;polars-0.42.0-fe04390;...
         """
         raise utils.JobError(
-            f"We expect qsv version info to be returned. Command: {QSV_BIN} --version. Response: {qsv_version_info}"
+            f"We expect qsv version info to be returned. Command: {conf.QSV_BIN} --version. Response: {qsv_version_info}"
         )
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" ") : qsv_version_info.find("-")
     ].lstrip()
-    if UPLOAD_LOG_VERBOSITY >= 1:
+    if conf.UPLOAD_LOG_VERBOSITY >= 1:
         logger.info("qsv version found: {}".format(qsv_semver))
     try:
-        if semver.compare(qsv_semver, MINIMUM_QSV_VERSION) < 0:
+        if semver.compare(qsv_semver, conf.MINIMUM_QSV_VERSION) < 0:
             raise utils.JobError(
                 "At least qsv version {} required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
-                    MINIMUM_QSV_VERSION, qsv_version_info
+                    conf.MINIMUM_QSV_VERSION, qsv_version_info
                 )
             )
     except ValueError as e:
@@ -474,7 +433,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     timer_start = time.perf_counter()
 
     # fetch the resource data
-    if UPLOAD_LOG_VERBOSITY >= 1:
+    if conf.UPLOAD_LOG_VERBOSITY >= 1:
         logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
     if resource.get("url_type") == "upload":
@@ -492,31 +451,27 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 scheme=rewrite_url.scheme, netloc=rewrite_url.netloc
             )
             resource_url = new_url.geturl()
-            if UPLOAD_LOG_VERBOSITY >= 1:
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
                 logger.info("Rewritten resource url to: {0}".format(resource_url))
 
     try:
         kwargs = {
             "headers": headers,
-            "timeout": tk.asint(
-                tk.config.get("ckanext.datapusher_plus.download_timeout")
-            ),
-            "verify": SSL_VERIFY,
+            "timeout": conf.TIMEOUT,
+            "verify": conf.SSL_VERIFY,
             "stream": True,
         }
-        if USE_PROXY:
-            kwargs["proxies"] = {"http": DOWNLOAD_PROXY, "https": DOWNLOAD_PROXY}
+        if conf.USE_PROXY:
+            kwargs["proxies"] = {"http": conf.DOWNLOAD_PROXY, "https": conf.DOWNLOAD_PROXY}
         with requests.get(resource_url, **kwargs) as response:
             response.raise_for_status()
 
             cl = response.headers.get("content-length")
-            max_content_length = int(
-                tk.config.get("ckanext.datapusher_plus.max_content_length")
-            )
+            max_content_length = conf.MAX_CONTENT_LENGTH
             ct = response.headers.get("content-type")
 
             try:
-                if cl and int(cl) > max_content_length and PREVIEW_ROWS > 0:
+                if cl and int(cl) > max_content_length and conf.PREVIEW_ROWS > 0:
                     raise utils.JobError(
                         "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
                             cl=DataSize(int(cl)),
@@ -555,18 +510,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             # download the file
             if cl:
-                if UPLOAD_LOG_VERBOSITY >= 1:
+                if conf.UPLOAD_LOG_VERBOSITY >= 1:
                     logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
             else:
-                if UPLOAD_LOG_VERBOSITY >= 1:
+                if conf.UPLOAD_LOG_VERBOSITY >= 1:
                     logger.info("Downloading file of unknown size...")
 
             with open(tmp, "wb") as tmp_file:
                 for chunk in response.iter_content(
-                    int(tk.config.get("ckanext.datapusher_plus.chunk_size"))
+                    conf.CHUNK_SIZE
                 ):
                     length += len(chunk)
-                    if length > max_content_length and not PREVIEW_ROWS:
+                    if length > max_content_length and not conf.PREVIEW_ROWS:
                         raise utils.JobError(
                             "Resource too large to process: {cl} > max ({max_cl}).".format(
                                 cl=length, max_cl=max_content_length
@@ -605,7 +560,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if (
         resource.get("hash") == file_hash
         and not data.get("ignore_hash")
-        and not tk.config.get("ckanext.datapusher_plus.ignore_file_hash")
+        and not conf.IGNORE_FILE_HASH
         and not resource_updated
     ):
         logger.warning(
@@ -640,7 +595,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     format = resource.get("format").upper()
     if format in spreadsheet_extensions:
         # if so, export spreadsheet as a CSV file
-        default_excel_sheet = tk.config.get("DEFAULT_EXCEL_SHEET")
+        default_excel_sheet = conf.DEFAULT_EXCEL_SHEET
         logger.info(
             "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
         )
@@ -656,7 +611,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_excel = subprocess.run(
                 [
-                    QSV_BIN,
+                    conf.QSV_BIN,
                     "excel",
                     qsv_spreadsheet,
                     "--sheet",
@@ -679,7 +634,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # just in case the file is not actually a spreadsheet or is encrypted
             # so the user has some actionable info
             file_format = subprocess.run(
-                [FILE_BIN, qsv_spreadsheet],
+                [conf.FILE_BIN, qsv_spreadsheet],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -706,13 +661,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
         # if resource_format is CSV we don't need to normalize
         if resource_format.upper() == "CSV":
-            if UPLOAD_LOG_VERBOSITY >= 1:
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
                 logger.info(
                     "Normalizing/UTF-8 transcoding {}...".format(resource_format)
                 )
         else:
             # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
-            if UPLOAD_LOG_VERBOSITY >= 1:
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
                 logger.info(
                     "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
                 )
@@ -728,7 +683,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             capture_output=True,
             text=True,
         )
-        if UPLOAD_LOG_VERBOSITY >= 1:
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
             logger.info(
                 "Identified encoding of the file: {}".format(file_encoding.stdout)
             )
@@ -771,7 +726,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_input = subprocess.run(
                 [
-                    QSV_BIN,
+                    conf.QSV_BIN,
                     "input",
                     tmp,
                     "--trim-headers",
@@ -797,7 +752,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.info("Validating CSV...")
     try:
         subprocess.run(
-            [QSV_BIN, "validate", tmp], check=True, capture_output=True, text=True
+            [conf.QSV_BIN, "validate", tmp], check=True, capture_output=True, text=True
         )
     except subprocess.CalledProcessError as e:
         # return as we can't push an invalid CSV file
@@ -810,11 +765,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # if SORT_AND_DUPE_CHECK is True or DEDUP is True
     # check if the file is sorted and if it has duplicates
     # get the record count, unsorted breaks and duplicate count as well
-    if SORT_AND_DUPE_CHECK or DEDUP:
+    if conf.SORT_AND_DUPE_CHECK or conf.DEDUP:
         logger.info("Checking for duplicates and if the CSV is sorted...")
         try:
             qsv_sortcheck = subprocess.run(
-                [QSV_BIN, "sortcheck", tmp, "--json"],
+                [conf.QSV_BIN, "sortcheck", tmp, "--json"],
                 capture_output=True,
                 text=True,
             )
@@ -834,10 +789,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         logger.info(sortcheck_msg)
 
     # --------------- Do we need to dedup? ------------------
-    if DEDUP and dupe_count > 0:
+    if conf.DEDUP and dupe_count > 0:
         qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
         logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
-        qsv_extdedup_cmd = [QSV_BIN, "extdedup", tmp, qsv_dedup_csv]
+        qsv_extdedup_cmd = [conf.QSV_BIN, "extdedup", tmp, qsv_dedup_csv]
 
         try:
             qsv_extdedup = subprocess.run(
@@ -859,7 +814,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # should we need to change the column name to make it "db-safe"
     try:
         qsv_headers = subprocess.run(
-            [QSV_BIN, "headers", "--just-names", tmp],
+            [conf.QSV_BIN, "headers", "--just-names", tmp],
             capture_output=True,
             check=True,
             text=True,
@@ -878,15 +833,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     try:
         qsv_safenames = subprocess.run(
             [
-                QSV_BIN,
+                conf.QSV_BIN,
                 "safenames",
                 tmp,
                 "--mode",
                 "json",
                 "--reserved",
-                RESERVED_COLNAMES,
+                conf.RESERVED_COLNAMES,
                 "--prefix",
-                UNSAFE_PREFIX,
+                conf.UNSAFE_PREFIX,
             ],
             capture_output=True,
             text=True,
@@ -905,7 +860,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         )
         qsv_safenames = subprocess.run(
             [
-                QSV_BIN,
+                conf.QSV_BIN,
                 "safenames",
                 tmp,
                 "--mode",
@@ -927,17 +882,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # are all accelerated/multithreaded when an index is present
     try:
         qsv_index_file = tmp + ".idx"
-        subprocess.run([QSV_BIN, "index", tmp], check=True)
+        subprocess.run([conf.QSV_BIN, "index", tmp], check=True)
     except subprocess.CalledProcessError as e:
         raise utils.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
     # so we can skip qsv count.
-    if not SORT_AND_DUPE_CHECK:
+    if not conf.SORT_AND_DUPE_CHECK:
         # get record count, this is instantaneous with an index
         try:
             qsv_count = subprocess.run(
-                [QSV_BIN, "count", tmp], capture_output=True, check=True, text=True
+                [conf.QSV_BIN, "count", tmp], capture_output=True, check=True, text=True
             )
         except subprocess.CalledProcessError as e:
             raise utils.JobError("Cannot count records in CSV: {}".format(e))
@@ -950,7 +905,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # log how many records we detected
     unique_qualifier = ""
-    if DEDUP:
+    if conf.DEDUP:
         unique_qualifier = "unique"
     logger.info("{:,} {} records detected...".format(record_count, unique_qualifier))
 
@@ -963,7 +918,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     headers_cardinality = []
     qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
     qsv_stats_cmd = [
-        QSV_BIN,
+        conf.QSV_BIN,
         "stats",
         tmp,
         "--infer-dates",
@@ -974,14 +929,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_stats_csv,
     ]
 
-    if PREFER_DMY:
+    if conf.PREFER_DMY:
         qsv_stats_cmd.append("--prefer-dmy")
 
-    global AUTO_INDEX_THRESHOLD
-    if AUTO_INDEX_THRESHOLD:
+    # global conf.AUTO_INDEX_THRESHOLD
+    if conf.AUTO_INDEX_THRESHOLD:
         qsv_stats_cmd.append("--cardinality")
-    if SUMMARY_STATS_OPTIONS:
-        qsv_stats_cmd.append(SUMMARY_STATS_OPTIONS)
+    if conf.SUMMARY_STATS_OPTIONS:
+        qsv_stats_cmd.append(conf.SUMMARY_STATS_OPTIONS)
 
     try:
         qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
@@ -1007,7 +962,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             types.append(fr.get("type", "String"))
             headers_min.append(fr["min"])
             headers_max.append(fr["max"])
-            if AUTO_INDEX_THRESHOLD:
+            if conf.AUTO_INDEX_THRESHOLD:
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
     # Get the field stats for each field in the headers list
@@ -1045,7 +1000,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     temp_headers_dicts = [
         dict(
             id=field[0],
-            type=TYPE_MAPPING.get(str(field[1]) if field[1] else default_type, "text"),
+            type=conf.TYPE_MAPPING.get(str(field[1]) if field[1] else default_type, "text"),
         )
         for field in zip(headers, types)
     ]
@@ -1062,13 +1017,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     for idx, header in enumerate(temp_headers_dicts):
         if header["type"] == "smartint":
             if (
-                int(headers_max[idx]) <= POSTGRES_INT_MAX
-                and int(headers_min[idx]) >= POSTGRES_INT_MIN
+                int(headers_max[idx]) <= conf.POSTGRES_INT_MAX
+                and int(headers_min[idx]) >= conf.POSTGRES_INT_MIN
             ):
                 header_type = "integer"
             elif (
-                int(headers_max[idx]) <= POSTGRES_BIGINT_MAX
-                and int(headers_min[idx]) >= POSTGRES_BIGINT_MIN
+                int(headers_max[idx]) <= conf.POSTGRES_BIGINT_MAX
+                and int(headers_min[idx]) >= conf.POSTGRES_BIGINT_MIN
             ):
                 header_type = "bigint"
             else:
@@ -1089,10 +1044,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 h["info"] = existing_info[h["id"]]
                 # create columns with types user requested
                 type_override = existing_info[h["id"]].get("type_override")
-                if type_override in list(TYPE_MAPPING.values()):
+                if type_override in list(conf.TYPE_MAPPING.values()):
                     h["type"] = type_override
 
-    if UPLOAD_LOG_VERBOSITY >= 1:
+    if conf.UPLOAD_LOG_VERBOSITY >= 1:
         logger.info(
             "Determined headers and types: {headers}...".format(headers=headers_dicts)
         )
@@ -1102,7 +1057,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     try:
         raw_connection_statsfreq = psycopg2.connect(
-            tk.config.get("ckan.datastore.write_url")
+            conf.DATASTORE_WRITE_URL
         )
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
@@ -1154,7 +1109,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy stats CSV to /tmp directory for debugging purposes
-    if UPLOAD_LOG_VERBOSITY >= 2:
+    if conf.UPLOAD_LOG_VERBOSITY >= 2:
         try:
             debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
             shutil.copy2(qsv_stats_csv, debug_stats_path)
@@ -1176,7 +1131,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # compile a frequency table for each column
     qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
     qsv_freq_cmd = [
-        QSV_BIN,
+        conf.QSV_BIN,
         "frequency",
         "--limit",
         "0",
@@ -1209,7 +1164,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy frequency CSV to /tmp directory for debugging purposes
-    if UPLOAD_LOG_VERBOSITY >= 2:
+    if conf.UPLOAD_LOG_VERBOSITY >= 2:
         try:
             debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
             shutil.copy2(qsv_freq_csv, debug_freq_path)
@@ -1235,22 +1190,22 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     raw_connection_statsfreq.close()
 
     # ------------------- Do we need to create a Preview?  -----------------------
-    # if PREVIEW_ROWS is not zero, create a preview using qsv slice
-    # we do the rows_to_copy > preview_rows to check if we don't need to slice
-    # the CSV anymore if we only did a partial download of N preview_rows already
+    # if conf.PREVIEW_ROWS is not zero, create a preview using qsv slice
+    # we do the rows_to_copy > conf.PREVIEW_ROWS to check if we don't need to slice
+    # the CSV anymore if we only did a partial download of N conf.PREVIEW_ROWS already
     rows_to_copy = record_count
-    if PREVIEW_ROWS and record_count > PREVIEW_ROWS:
-        if PREVIEW_ROWS > 0:
-            # PREVIEW_ROWS is positive, slice from the beginning
-            logger.info("Preparing {:,}-row preview...".format(PREVIEW_ROWS))
+    if conf.PREVIEW_ROWS and record_count > conf.PREVIEW_ROWS:
+        if conf.PREVIEW_ROWS > 0:
+            # conf.PREVIEW_ROWS is positive, slice from the beginning
+            logger.info("Preparing {:,}-row preview...".format(conf.PREVIEW_ROWS))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv_slice = subprocess.run(
                     [
-                        QSV_BIN,
+                        conf.QSV_BIN,
                         "slice",
                         "--len",
-                        str(PREVIEW_ROWS),
+                        str(conf.PREVIEW_ROWS),
                         tmp,
                         "--output",
                         qsv_slice_csv,
@@ -1259,19 +1214,19 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 )
             except subprocess.CalledProcessError as e:
                 raise utils.JobError("Cannot create a preview slice: {}".format(e))
-            rows_to_copy = PREVIEW_ROWS
+            rows_to_copy = conf.PREVIEW_ROWS
             tmp = qsv_slice_csv
         else:
-            # PREVIEW_ROWS is negative, slice from the end
+            # conf.PREVIEW_ROWS is negative, slice from the end
             # TODO: do http range request so we don't have to download the whole file
             # to slice from the end
-            slice_len = abs(PREVIEW_ROWS)
+            slice_len = abs(conf.PREVIEW_ROWS)
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv_slice = subprocess.run(
                     [
-                        QSV_BIN,
+                        conf.QSV_BIN,
                         "slice",
                         "--start",
                         "-1",
@@ -1298,18 +1253,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         datecols = ",".join(datetimecols_list)
 
         qsv_applydp_cmd = [
-            QSV_BIN,
+            conf.QSV_BIN,
             "datefmt",
             datecols,
             tmp,
             "--output",
             qsv_applydp_csv,
         ]
-        if PREFER_DMY:
+        if conf.PREFER_DMY:
             qsv_applydp_cmd.append("--prefer-dmy")
         logger.info(
             'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
-                datecols, PREFER_DMY
+                datecols, conf.PREFER_DMY
             )
         )
         try:
@@ -1332,19 +1287,19 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # field in one pass
     piiscreening_start = 0
     piiscreening_elapsed = 0
-    if PII_SCREENING:
+    if conf.PII_SCREENING:
         piiscreening_start = time.perf_counter()
-        pii_found_abort = tk.config.get("ckanext.datastore_plus.pii_found_abort")
+        pii_found_abort = conf.PII_FOUND_ABORT
 
         # DP+ comes with default regex patterns for PII (SSN, credit cards,
         # email, bank account numbers, & phone number). The DP+ admin can
         # use a custom set of regex patterns by pointing to a resource with
         # a text file, with each line having a regex pattern, and an optional
         # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
-        if PII_REGEX_RESOURCE_ID:
-            pii_regex_resource_exist = datastore_resource_exists(PII_REGEX_RESOURCE_ID)
+        if conf.PII_REGEX_RESOURCE_ID:
+            pii_regex_resource_exist = datastore_resource_exists(conf.PII_REGEX_RESOURCE_ID)
             if pii_regex_resource_exist:
-                pii_resource = get_resource(PII_REGEX_RESOURCE_ID)
+                pii_resource = get_resource(conf.PII_REGEX_RESOURCE_ID)
                 pii_regex_url = pii_resource["url"]
 
                 r = requests.get(pii_regex_url)
@@ -1360,12 +1315,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         pii_found = False
         pii_regex_fname = p.absolute()
 
-        if PII_QUICK_SCREEN:
+        if conf.PII_QUICK_SCREEN:
             logger.info("Quickly scanning for PII using {}...".format(pii_regex_file))
             try:
                 qsv_searchset = subprocess.run(
                     [
-                        QSV_BIN,
+                        conf.QSV_BIN,
                         "searchset",
                         "--ignore-case",
                         "--quick",
@@ -1387,7 +1342,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 qsv_searchset = subprocess.run(
                     [
-                        QSV_BIN,
+                        conf.QSV_BIN,
                         "searchset",
                         "--ignore-case",
                         "--flag",
@@ -1410,9 +1365,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if pii_total_matches > 0:
                 pii_found = True
 
-        if pii_found and pii_found_abort and not PII_SHOW_CANDIDATES:
+        if pii_found and pii_found_abort and not conf.PII_SHOW_CANDIDATES:
             logger.error("PII Candidate/s Found!")
-            if PII_QUICK_SCREEN:
+            if conf.PII_QUICK_SCREEN:
                 raise utils.JobError(
                     "PII CANDIDATE FOUND on row {}! Job aborted.".format(
                         pii_candidate_row.rstrip()
@@ -1424,7 +1379,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         pii_total_matches, pii_rows_with_matches
                     )
                 )
-        elif pii_found and PII_SHOW_CANDIDATES and not PII_QUICK_SCREEN:
+        elif pii_found and conf.PII_SHOW_CANDIDATES and not conf.PII_QUICK_SCREEN:
             # TODO: Create PII Candidates resource and set package to private if its not private
             # ------------ Create PII Preview Resource ------------------
             logger.warning(
@@ -1436,7 +1391,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             try:
                 raw_connection_pii = psycopg2.connect(
-                    tk.config.get("ckan.datastore.write_url")
+                    conf.DATASTORE_WRITE_URL
                 )
             except psycopg2.Error as e:
                 raise utils.JobError("Could not connect to the Datastore: {}".format(e))
@@ -1470,7 +1425,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 qsv_pii_stats = subprocess.run(
                     [
-                        QSV_BIN,
+                        conf.QSV_BIN,
                         "stats",
                         "--typesonly",
                         qsv_searchset_csv,
@@ -1486,7 +1441,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             pii_stats = str(qsv_pii_stats.stdout).strip()
             pii_stats_dict = [
-                dict(id=ele.split(",")[0], type=type_mapping[ele.split(",")[1]])
+                dict(id=ele.split(",")[0], type=conf.TYPE_MAPPING[ele.split(",")[1]])
                 for idx, ele in enumerate(pii_stats.splitlines()[1:], 1)
             ]
 
@@ -1579,7 +1534,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     copy_start = time.perf_counter()
 
-    if PREVIEW_ROWS:
+    if conf.PREVIEW_ROWS:
         logger.info("COPYING {:,}-row preview to Datastore...".format(rows_to_copy))
     else:
         logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
@@ -1596,7 +1551,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     copied_count = 0
     try:
-        raw_connection = psycopg2.connect(tk.config.get("ckan.datastore.write_url"))
+        raw_connection = psycopg2.connect(conf.DATASTORE_WRITE_URL)
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
@@ -1625,9 +1580,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             column_names,
         )
         # specify a 1MB buffer size for COPY read from disk
-        with open(tmp, "rb", COPY_READBUFFER_SIZE) as f:
+        with open(tmp, "rb", conf.COPY_READBUFFER_SIZE) as f:
             try:
-                cur.copy_expert(copy_sql, f, size=COPY_READBUFFER_SIZE)
+                cur.copy_expert(copy_sql, f, size=conf.COPY_READBUFFER_SIZE)
             except psycopg2.Error as e:
                 raise utils.JobError("Postgres COPY failed: {}".format(e))
             else:
@@ -1661,7 +1616,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     package_id = resource["package_id"]
     scheming_yaml, package = get_scheming_yaml(package_id)
 
-    if UPLOAD_LOG_VERBOSITY >= 2:
+    if conf.UPLOAD_LOG_VERBOSITY >= 2:
         logger.debug(f"package: {package}")
 
     # Check if there are any fields with DRUF entries in the scheming_yaml
@@ -1683,7 +1638,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # Compute the Formulae for the PACKAGE Fields
     jinja2_formulae = {}
     if formula_package_fields:
-        if UPLOAD_LOG_VERBOSITY >= 1:
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
             logger.info(
                 "Found {} PACKAGE field/s with formulae in the scheming_yaml".format(
                     len(formula_package_fields)
@@ -1701,7 +1656,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 )
             )
 
-        if UPLOAD_LOG_VERBOSITY >= 2:
+        if conf.UPLOAD_LOG_VERBOSITY >= 2:
             logger.debug("Jinja2 PACKAGE formulae: {}".format(jinja2_formulae))
 
         # Create a dictionary with both package and field_stats_lookup
@@ -1719,7 +1674,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 formula = jinja2_env.get_template(package_field_name)
                 # No need to pass field_stats_lookup here as it's already in the context
                 rendered_formula = formula.render(**context)
-                if UPLOAD_LOG_VERBOSITY >= 2:
+                if conf.UPLOAD_LOG_VERBOSITY >= 2:
                     logger.debug(
                         'Evaluated jinja2 formula for PACKAGE field "{}": {}'.format(
                             package_field_name, rendered_formula
@@ -1738,10 +1693,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             patched_package = patch_package(package)
 
-            if UPLOAD_LOG_VERBOSITY >= 2:
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after patching: {patched_package}")
 
-            if UPLOAD_LOG_VERBOSITY >= 1:
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
                 logger.info("PACKAGE formulae processed...")
 
             # update the package
@@ -1758,7 +1713,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # Compute the Formulae for the RESOURCE Fields
     jinja2_formulae = {}
     if formula_resource_fields:
-        if UPLOAD_LOG_VERBOSITY >= 1:
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
             logger.info(
                 "Found {} RESOURCE field/s with formulae in the scheming_yaml".format(
                     len(formula_resource_fields)
@@ -1769,14 +1724,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             jinja2_template = schema_field["formula"]
             resource_field_name = schema_field["field_name"]
             jinja2_formulae[resource_field_name] = jinja2_template
-            if UPLOAD_LOG_VERBOSITY >= 2:
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(
                     'Jinja2 formula for RESOURCE field "{}": {}'.format(
                         resource_field_name, jinja2_template
                     )
                 )
 
-        if UPLOAD_LOG_VERBOSITY >= 2:
+        if conf.UPLOAD_LOG_VERBOSITY >= 2:
             logger.debug("Jinja2 RESOURCE formulae: {}".format(jinja2_formulae))
         # Create a dictionary with both package and field_stats_lookup
         context = {"package": package, "resource": resource_fields_stats}
@@ -1793,7 +1748,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 formula = jinja2_env.get_template(resource_field_name)
                 # No need to pass field_stats_lookup here as it's already in the context
                 rendered_formula = formula.render(**context)
-                if UPLOAD_LOG_VERBOSITY >= 2:
+                if conf.UPLOAD_LOG_VERBOSITY >= 2:
                     logger.debug(
                         'Evaluated jinja2 formula for RESOURCE field "{}": {}'.format(
                             resource_field_name, rendered_formula
@@ -1809,7 +1764,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     )
                 )
 
-        if UPLOAD_LOG_VERBOSITY >= 1:
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
             logger.info("RESOURCE formulae processed...")
 
     ############################################################
@@ -1823,7 +1778,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     suggestion_jinja2_formula = {}
     if suggest_package_fields:
-        if UPLOAD_LOG_VERBOSITY >= 1:
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
             logger.info(
                 "Found {} PACKAGE field/s with suggestion_formula in the scheming_yaml".format(
                     len(suggest_package_fields)
@@ -1834,14 +1789,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             jinja2_template = schema_field["suggestion_formula"]
             package_field_name = schema_field["field_name"]
             suggestion_jinja2_formula[package_field_name] = jinja2_template
-            if UPLOAD_LOG_VERBOSITY >= 2:
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(
                     'Jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
                         package_field_name, jinja2_template
                     )
                 )
 
-        if UPLOAD_LOG_VERBOSITY >= 2:
+        if conf.UPLOAD_LOG_VERBOSITY >= 2:
             logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
 
         # Create a dictionary with both package and field_stats_lookup
@@ -1860,7 +1815,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 formula = jinja2_env.get_template(package_field_name)
                 # No need to pass field_stats_lookup here as it's already in the context
                 rendered_formula = formula.render(**context)
-                if UPLOAD_LOG_VERBOSITY >= 2:
+                if conf.UPLOAD_LOG_VERBOSITY >= 2:
                     logger.debug(
                         'Evaluated jinja2 suggestion_formula for PACKAGE field "{}": {}'.format(
                             package_field_name, rendered_formula
@@ -1880,10 +1835,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 package_id, update={"dpp_suggestion": revise_update_content}
             )
 
-            if UPLOAD_LOG_VERBOSITY >= 2:
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after revising: {revised_package}")
 
-            if UPLOAD_LOG_VERBOSITY >= 1:
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
                 logger.info("PACKAGE suggestion formulae processed...")
 
             # update the package
@@ -1901,9 +1856,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     suggestion_jinja2_formula = {}
     if suggest_resource_fields:
-        if UPLOAD_LOG_VERBOSITY >= 2:
+        if conf.UPLOAD_LOG_VERBOSITY >= 2:
             logger.debug("resource: {}".format(resource))
-        if UPLOAD_LOG_VERBOSITY >= 1:
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
             logger.info(
                 "Found {} RESOURCE field/s with suggestion_formula in the scheming_yaml".format(
                     len(suggest_resource_fields)
@@ -1915,14 +1870,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             jinja2_template = schema_field["suggestion_formula"]
             resource_field_name = schema_field["field_name"]
             suggestion_jinja2_formula[resource_field_name] = jinja2_template
-            if UPLOAD_LOG_VERBOSITY >= 2:
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(
                     'Jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
                         resource_field_name, jinja2_template
                     )
                 )
 
-        if UPLOAD_LOG_VERBOSITY >= 2:
+        if conf.UPLOAD_LOG_VERBOSITY >= 2:
             logger.debug("Suggestion formulae: {}".format(suggestion_jinja2_formula))
         # Create a dictionary with both package and field_stats_lookup
         context = {"package": package, "resource": resource_fields_stats}
@@ -1945,7 +1900,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 formula = jinja2_env.get_template(resource_field_name)
                 rendered_formula = formula.render(**context)
-                if UPLOAD_LOG_VERBOSITY >= 2:
+                if conf.UPLOAD_LOG_VERBOSITY >= 2:
                     logger.debug(
                         'Evaluated jinja2 suggestion_formula for RESOURCE field "{}": {}'.format(
                             resource_field_name, rendered_formula
@@ -1981,10 +1936,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             revised_package = revise_package(
                 package_id, update={"dpp_suggestion": revise_update_content}
             )
-            if UPLOAD_LOG_VERBOSITY >= 2:
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after revising: {revised_package}")
 
-            if UPLOAD_LOG_VERBOSITY >= 1:
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
                 logger.info("RESOURCE suggestion formulae processed...")
 
             # update the package
@@ -2010,9 +1965,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # aliases are human-readable, and make it easier to use than resource id hash
     # when using the Datastore API and in SQL queries
     alias = None
-    if AUTO_ALIAS:
+    if conf.AUTO_ALIAS:
         logger.info(
-            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(AUTO_ALIAS_UNIQUE)
+            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(conf.AUTO_ALIAS_UNIQUE)
         )
         # get package info, so we can construct the alias
         package = get_package(resource["package_id"])
@@ -2040,7 +1995,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             else:
                 alias_count = 0
                 existing_alias_of = ""
-            if AUTO_ALIAS_UNIQUE and alias_count > 1:
+            if conf.AUTO_ALIAS_UNIQUE and alias_count > 1:
                 alias_sequence = alias_count + 1
                 while True:
                     # we do this, so we're certain the new alias does not exist
@@ -2079,7 +2034,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # by default, we only add summary stats if we're not doing a partial download
     # (otherwise, you're summarizing the preview, not the whole file)
     # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
-    if ADD_SUMMARY_STATS_RESOURCE or SUMMARY_STATS_WITH_PREVIEW:
+    if conf.ADD_SUMMARY_STATS_RESOURCE or conf.SUMMARY_STATS_WITH_PREVIEW:
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -2102,7 +2057,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 delete_resource(existing_stats_alias_of)
 
         stats_aliases = [stats_resource_id]
-        if AUTO_ALIAS:
+        if conf.AUTO_ALIAS:
             auto_alias_stats_id = alias + "-stats"
             stats_aliases.append(auto_alias_stats_id)
 
@@ -2134,7 +2089,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_stats_stats = subprocess.run(
                 [
-                    QSV_BIN,
+                    conf.QSV_BIN,
                     "stats",
                     "--typesonly",
                     qsv_stats_csv,
@@ -2211,7 +2166,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
-    if PREVIEW_ROWS < record_count or (PREVIEW_ROWS > 0):
+    if conf.PREVIEW_ROWS < record_count or (conf.PREVIEW_ROWS > 0):
         resource["preview"] = True
         resource["preview_rows"] = copied_count
     else:
@@ -2248,34 +2203,32 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # For columns w/ cardinality = record_count, it's all unique values, create a unique index
     # If AUTO_INDEX_DATES is true, index all date columns
     # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
-    # auto_index_dates = tk.config.get("ckanext.datastore_plus.auto_index_dates")
-    # auto_unique_index = tk.config.get("ckanext.datastore_plus.auto_unique_index")
     if (
-        AUTO_INDEX_THRESHOLD
-        or (AUTO_INDEX_DATES and datetimecols_list)
-        or AUTO_UNIQUE_INDEX
+        conf.AUTO_INDEX_THRESHOLD
+        or (conf.AUTO_INDEX_DATES and datetimecols_list)
+        or conf.AUTO_UNIQUE_INDEX
     ):
         index_start = time.perf_counter()
         logger.info(
             "AUTO-INDEXING. Auto-index threshold: {:,} unique value/s. Auto-unique index: {} Auto-index dates: {} ...".format(
-                AUTO_INDEX_THRESHOLD, AUTO_UNIQUE_INDEX, AUTO_INDEX_DATES
+                conf.AUTO_INDEX_THRESHOLD, conf.AUTO_UNIQUE_INDEX, conf.AUTO_INDEX_DATES
             )
         )
         index_cur = raw_connection.cursor()
 
         # if auto_index_threshold == -1
         # we index all the columns
-        if AUTO_INDEX_THRESHOLD == -1:
-            AUTO_INDEX_THRESHOLD = record_count
+        if conf.AUTO_INDEX_THRESHOLD == -1:
+            conf.AUTO_INDEX_THRESHOLD = record_count
 
         index_count = 0
         for idx, cardinality in enumerate(headers_cardinality):
             curr_col = headers[idx]
-            if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES or AUTO_UNIQUE_INDEX:
-                if cardinality == record_count and AUTO_UNIQUE_INDEX:
+            if conf.AUTO_INDEX_THRESHOLD > 0 or conf.AUTO_INDEX_DATES or conf.AUTO_UNIQUE_INDEX:
+                if cardinality == record_count and conf.AUTO_UNIQUE_INDEX:
                     # all the values are unique for this column, create a unique index
-                    if PREVIEW_ROWS > 0:
-                        unique_value_count = min(PREVIEW_ROWS, cardinality)
+                    if conf.PREVIEW_ROWS > 0:
+                        unique_value_count = min(conf.PREVIEW_ROWS, cardinality)
                     else:
                         unique_value_count = cardinality
                     logger.info(
@@ -2297,8 +2250,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                             )
                         )
                     index_count += 1
-                elif cardinality <= AUTO_INDEX_THRESHOLD or (
-                    AUTO_INDEX_DATES and (curr_col in datetimecols_list)
+                elif cardinality <= conf.AUTO_INDEX_THRESHOLD or (
+                    conf.AUTO_INDEX_DATES and (curr_col in datetimecols_list)
                 ):
                     # cardinality <= auto_index_threshold or its a date and auto_index_date is true
                     # create an index
