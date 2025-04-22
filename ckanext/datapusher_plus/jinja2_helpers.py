@@ -1,0 +1,144 @@
+# encoding: utf-8
+from __future__ import annotations
+
+import logging
+from math import radians, cos
+
+log = logging.getLogger(__name__)
+
+
+# Jinja2 filters and functions
+# Helper function to truncate text to a specific length and append ellipsis.
+def truncate_with_ellipsis(text, length=50, ellipsis="..."):
+    """Truncate text to a specific length and append ellipsis."""
+    if not text or len(text) <= length:
+        return text
+    return text[:length] + ellipsis
+
+
+def format_number(value, decimals=2):
+    """Format numbers with thousands separator and decimal places
+
+    Example:
+    {{ stats.population.sum | format_number }} -> 1,234,567.89
+    """
+    return f"{float(value):,.{decimals}f}"
+
+
+def format_bytes(bytes):
+    """Format byte sizes into human readable format
+
+    Example:
+    {{ stats.file_size.max | format_bytes }} -> 1.5 GB
+    """
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if bytes < 1024:
+            return f"{bytes:.1f} {unit}"
+        bytes /= 1024
+
+
+def format_date(value, format="%Y-%m-%d"):
+    """Format dates in specified format
+
+    Example:
+    {{ stats.created_date.max | format_date("%B %d, %Y") }} -> January 1, 2024
+    """
+    return value.strftime(format)
+
+
+def calculate_percentage(part, whole):
+    """Calculate percentage
+
+    Example:
+    {{ calculate_percentage(stats.nullcount, stats.total_rows) }} -> 12.5
+    """
+    return (part / whole) * 100 if whole else 0
+
+
+def get_unique_ratio(field):
+    """Get ratio of unique values
+
+    Example:
+    {{ get_unique_ratio(stats.user_id) }} -> 0.95
+    """
+    return field.cardinality / field.total_rows if field.total_rows else 0
+
+
+def format_range(min_val, max_val, separator=" to "):
+    """Format a range of values
+
+    Example:
+    {{ format_range(stats.temperature.min, stats.temperature.max) }} -> "-10 to 35"
+    """
+    return f"{min_val}{separator}{max_val}"
+
+
+def format_coordinates(lat, lon, precision=6):
+    """Format coordinates nicely
+
+    Example:
+    {{ format_coordinates(stats.latitude.mean, stats.longitude.mean) }}
+    -> "40.7128°N, 74.0060°W"
+    """
+    lat_dir = "N" if lat >= 0 else "S"
+    lon_dir = "E" if lon >= 0 else "W"
+    return f"{abs(lat):.{precision}f}°{lat_dir}, {abs(lon):.{precision}f}°{lon_dir}"
+
+
+def calculate_bbox_area(min_lon, min_lat, max_lon, max_lat):
+    """Calculate approximate area of bounding box in square kilometers
+
+    Example:
+    {{ calculate_bbox_area(bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat) }}
+    -> 1234.56
+    """
+    from math import radians, cos
+
+    earth_radius = 6371  # km
+    width = abs(max_lon - min_lon) * cos(radians((min_lat + max_lat) / 2))
+    height = abs(max_lat - min_lat)
+    return width * height * (earth_radius**2)
+
+
+# Jinja2 Functions
+def spatial_extent_wkt(
+    min_lon: float, min_lat: float, max_lon: float, max_lat: float
+) -> str:
+    """Convert min/max WGS84 coordinates to WKT polygon format.
+
+    Args:
+        min_lon: Minimum longitude coordinate
+        min_lat: Minimum latitude coordinate
+        max_lon: Maximum longitude coordinate
+        max_lat: Maximum latitude coordinate
+
+    Returns:
+        str: WKT polygon string representing the spatial extent
+
+    Example:
+        >>> spatial_extent_wkt(-180, -90, 180, 90)
+        'POLYGON((-180 -90, -180 90, 180 90, 180 -90, -180 -90))'
+    """
+    # Create WKT polygon string from coordinates
+    wkt = f"SRID=4326;POLYGON(({min_lon} {min_lat}, {min_lon} {max_lat}, {max_lon} {max_lat}, {max_lon} {min_lat}, {min_lon} {min_lat}))"
+    return wkt
+
+
+def spatial_extent_feature_collection(
+    name: str, bbox: list[float], type: str = "calculated"
+) -> str:
+    """Convert a bounding box to a namedGeoJSON feature collection.
+
+    Args:
+        name: Name of the feature
+        bbox: List of floats representing the bounding box [min_lon, min_lat, max_lon, max_lat]
+        type: Type of the feature, defaults to "calculated"
+
+    Returns:
+        str: GeoJSON feature collection string
+
+    Example:
+        >>> spatial_extent_feature_collection("User Drawn Polygon 1", "draw", [-180, -90, 180, 90])
+        '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"User Drawn Polygon 1","type":"draw"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
+    """
+    return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[{bbox[0]} {bbox[1]}, {bbox[0]} {bbox[3]}, {bbox[2]} {bbox[3]}, {bbox[2]} {bbox[1]}, {bbox[0]} {bbox[1]}]]}}, "properties": {{}}}}]}}'

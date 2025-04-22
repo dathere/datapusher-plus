@@ -53,6 +53,7 @@ from jinja2 import DictLoader, Environment
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
+import ckanext.datapusher_plus.jinja2_helpers as j2h
 
 # from ckanext.datapusher_plus.config import config
 
@@ -424,27 +425,26 @@ def create_jinja2_env(context):
     
     # Add filters
     filters = {
-        "truncate_with_ellipsis": dph.truncate_with_ellipsis,
-        "format_number": dph.format_number,
-        "format_bytes": dph.format_bytes,
-        "format_date": dph.format_date,
-        "calculate_percentage": dph.calculate_percentage,
-        "get_unique_ratio": dph.get_unique_ratio,
-        "format_range": dph.format_range,
-        "format_coordinates": dph.format_coordinates,
-        "calculate_bbox_area": dph.calculate_bbox_area
+        "truncate_with_ellipsis": j2h.truncate_with_ellipsis,
+        "format_number": j2h.format_number,
+        "format_bytes": j2h.format_bytes,
+        "format_date": j2h.format_date,
+        "calculate_percentage": j2h.calculate_percentage,
+        "get_unique_ratio": j2h.get_unique_ratio,
+        "format_range": j2h.format_range,
+        "format_coordinates": j2h.format_coordinates,
+        "calculate_bbox_area": j2h.calculate_bbox_area
     }
     env.filters.update(filters)
     
     # Add globals
     globals = {
-        "spatial_extent_wkt": dph.spatial_extent_wkt,
-        "spatial_extent_feature_collection": dph.spatial_extent_feature_collection
+        "spatial_extent_wkt": j2h.spatial_extent_wkt,
+        "spatial_extent_feature_collection": j2h.spatial_extent_feature_collection
     }
     env.globals.update(globals)
     
     return env
-
 
 def push_to_datastore(input, task_id, dry_run=False):
     """Download and parse a resource push its data into CKAN's DataStore.
@@ -463,7 +463,6 @@ def push_to_datastore(input, task_id, dry_run=False):
     # Ensure temporary files are removed after run
     with tempfile.TemporaryDirectory() as temp_dir:
         return _push_to_datastore(task_id, input, dry_run=dry_run, temp_dir=temp_dir)
-
 
 def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # add job to dn  (datapusher_plus_jobs table)
@@ -568,7 +567,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             )
             resource_url = new_url.geturl()
             if UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info("Rewrote resource url to: {0}".format(resource_url))
+                logger.info("Rewritten resource url to: {0}".format(resource_url))
 
     try:
         kwargs = {
@@ -948,10 +947,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # now, ensure our column/header names identifiers are "safe names"
     # i.e. valid postgres/CKAN Datastore identifiers
-    # unsafe_prefix = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
-    # reserved_colnames = tk.config.get(
-    #     "ckanext.datapuhser_plus.reserved_colnames", "_id"
-    # )
     qsv_safenames_csv = os.path.join(temp_dir, "qsv_safenames.csv")
     logger.info('Checking for "database-safe" header names...')
     try:
