@@ -1955,7 +1955,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         logger.info("RESOURCE formulae processed...")
 
     # Process package suggestion formulae
-    # as this is a suggestion, we update the package dpp_suggestion field
+    # as this is a suggestion, we update the package dpp_suggestions field
     # from which the Suggestion bootstrap popover will pick it up
     package_suggestions = formula_processor.process_formulae(
         "package", "dataset_fields", "suggestion_formula"
@@ -1964,7 +1964,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         revise_update_content = {"package": package_suggestions}
         try:
             revised_package = revise_package(
-                package_id, update={"dpp_suggestion": revise_update_content}
+                package_id, update={"dpp_suggestions": revise_update_content}
             )
             if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after revising: {revised_package}")
@@ -1974,8 +1974,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.error(f"Error revising package: {str(e)}")
 
     # Process resource suggestion formulae
-    # Note how we update the PACKAGE dpp_suggestion field
-    # and there is NO RESOURCE dpp_suggestion field.
+    # Note how we update the PACKAGE dpp_suggestions field
+    # and there is NO RESOURCE dpp_suggestions field.
     # This is because suggestion formulae are used to populate the
     # suggestion popover DURING data entry/curation and suggestion formulae
     # may update both package and resource fields.
@@ -1987,14 +1987,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         revise_update_content = {"resource": {resource_name: resource_suggestions}}
 
         # Handle existing suggestions
-        if package.get("dpp_suggestion"):
-            package["dpp_suggestion"].update(revise_update_content["resource"])
+        if package.get("dpp_suggestions"):
+            package["dpp_suggestions"].update(revise_update_content["resource"])
         else:
-            package["dpp_suggestion"] = revise_update_content["resource"]
+            package["dpp_suggestions"] = revise_update_content["resource"]
 
         try:
             revised_package = revise_package(
-                package_id, update={"dpp_suggestion": revise_update_content}
+                package_id, update={"dpp_suggestions": revise_update_content}
             )
             if conf.UPLOAD_LOG_VERBOSITY >= 2:
                 logger.debug(f"Package after revising: {revised_package}")
