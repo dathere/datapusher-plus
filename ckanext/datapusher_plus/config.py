@@ -117,3 +117,8 @@ DATASTORE_URLS = {
 
 # Datastore write URL
 DATASTORE_WRITE_URL = tk.config.get("ckan.datastore.write_url")
+
+# Geopandas settings
+SPATIAL_SIMPLIFICATION_TOLERANCE = tk.config.get(
+    "ckanext.datapusher_plus.spatial_simplification_tolerance", "0.0001"
+)

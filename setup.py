@@ -64,6 +64,7 @@ setup(
         #
         # http://docs.ckan.org/en/latest/extensions/best-practices.html#add-third-party-libraries-to-requirements-txt
         'jinja2>=3.1.4',
+        'geopandas==1.0.1',
     ],
 
     # If there are data files included in your packages that need to be

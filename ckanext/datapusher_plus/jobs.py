@@ -22,7 +22,7 @@ from datasize import DataSize
 from dateutil.parser import parse as parsedate
 import json
 import requests
-
+import geopandas as gpd
 from urllib.parse import urlsplit
 import datetime
 import locale
@@ -658,7 +658,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # flag to check if the file is a spatial format
     spatial_format_flag = False
-
+    simplification_failed_flag = False
     # ----------------- is it a spreadsheet? ---------------
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
@@ -724,43 +724,214 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # check if its a SHAPEFILE or a GEOJSON file
         if resource_format.upper() in ["SHP", "SHP.ZIP", "GEOJSON"]:
             logger.info("SHAPEFILE or GEOJSON file detected...")
-            # Convert to CSV using `qsv geoconvert`
-            qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
-            logger.info("Converting {} to CSV...".format(resource_format))
 
-            # Determine the correct format parameter for geoconvert
-            # For SHP.ZIP, we need to use "shp" as the format
-            geoconvert_format = (
-                "shp"
-                if resource_format.upper() == "SHP.ZIP"
-                else resource_format.lower()
+            qsv_spatial_file = os.path.join(temp_dir, "qsv_spatial." + resource_format)
+            os.link(tmp, qsv_spatial_file)
+
+            # FIRST, try to simplify the geometry using Geopandas
+            logger.info(
+                "Simplifying geometry with a tolerance of {} for {}...".format(
+                    conf.SPATIAL_SIMPLIFICATION_TOLERANCE, tmp
+                )
             )
 
-            # Build the geoconvert command
-            # Use --max-length to truncate overly long strings
-            # from causing issues with Python's CSV reader
-            # and Postgres's limits with the COPY command
-            qsv_geoconvert_cmd = [
-                conf.QSV_BIN,
-                "geoconvert",
-                tmp,
-                geoconvert_format,
-                "csv",
-                "--max-length",
-                str(conf.QSV_STATS_STRING_MAX_LENGTH),
-                "--output",
-                qsv_geoconvert_csv,
-            ]
-
             try:
-                qsv_geoconvert = subprocess.run(qsv_geoconvert_cmd, check=True)
-                logger.info("Successfully converted {} to CSV".format(resource_format))
-                tmp = qsv_geoconvert_csv
-                spatial_format_flag = True
-            except subprocess.CalledProcessError as e:
-                raise utils.JobError(
-                    "Cannot convert {} to CSV: {}".format(resource_format, e)
+                # Read the file with geopandas
+                gdf = gpd.read_file(tmp)
+
+                # Add diagnostic information
+                logger.info(f"Geometry types found: {gdf.geometry.type.unique()}")
+                logger.info(f"CRS: {gdf.crs}")
+                logger.info(f"Total features: {len(gdf)}")
+                logger.info(f"Total null geometries: {gdf.geometry.isna().sum()}")
+
+                # Create a copy for simplification
+                simplified_gdf = gdf.copy()
+
+                # First ensure all geometries are valid
+                logger.info("Validating geometries...")
+                simplified_gdf["geometry"] = simplified_gdf.geometry.make_valid()
+
+                # Handle different geometry types appropriately
+                def simplify_geometry(geom):
+                    if geom is None or not geom.is_valid:
+                        return (
+                            None,
+                            True,
+                        )  # Simplification failed for invalid/null geometries
+
+                    try:
+                        # Different simplification strategies based on geometry type
+                        if geom.geom_type in ["Point", "MultiPoint"]:
+                            # Points don't need simplification
+                            return geom, False
+                        elif geom.geom_type in ["LineString", "MultiLineString"]:
+                            # For lines, preserve topology is important
+                            simplified = geom.simplify(
+                                tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE,
+                                preserve_topology=True,
+                            )
+                            return simplified, False
+                        elif geom.geom_type in ["Polygon", "MultiPolygon"]:
+                            # For polygons, try preserve_topology first
+                            try:
+                                simplified = geom.simplify(
+                                    tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE,
+                                    preserve_topology=True,
+                                )
+                                return simplified, False
+                            except:
+                                # If that fails, try without topology preservation
+                                try:
+                                    simplified = geom.simplify(
+                                        tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE,
+                                        preserve_topology=False,
+                                    )
+                                    return simplified, False
+                                except:
+                                    logger.warning(
+                                        f"Both topology-preserving and non-preserving simplification failed for polygon"
+                                    )
+                                    return geom, True
+                        else:
+                            # For other geometry types (GeometryCollection etc.), try basic simplification
+                            try:
+                                simplified = geom.simplify(
+                                    tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE
+                                )
+                                return simplified, False
+                            except:
+                                return geom, True
+                    except Exception as e:
+                        logger.warning(
+                            f"Simplification failed for geometry of type {geom.geom_type}: {str(e)}"
+                        )
+                        return (
+                            geom,
+                            True,
+                        )  # Return original geometry and failure flag if simplification fails
+
+                # Apply the simplification with progress logging
+                logger.info("Starting geometry simplification...")
+                simplified_results = simplified_gdf.geometry.apply(simplify_geometry)
+                simplified_gdf["geometry"] = simplified_results.apply(
+                    lambda x: x[0]
+                )  # Get geometry
+                simplification_failures = simplified_results.apply(
+                    lambda x: x[1]
+                )  # Get failure flags
+
+                # Log simplification results including failure statistics
+                total_failures = simplification_failures.sum()
+                if total_failures == 0:
+
+                    # Log simplification results
+                    valid_geoms_before = sum(
+                        gdf.geometry.apply(lambda x: x is not None and x.is_valid)
+                    )
+                    valid_geoms_after = sum(
+                        simplified_gdf.geometry.apply(
+                            lambda x: x is not None and x.is_valid
+                        )
+                    )
+
+                    logger.info(
+                        f"Valid geometries before simplification: {valid_geoms_before}"
+                    )
+                    logger.info(
+                        f"Valid geometries after simplification: {valid_geoms_after}"
+                    )
+
+                    # Calculate vertex reduction
+                    def count_vertices(geom):
+                        if geom is None or not geom.is_valid:
+                            return 0
+                        try:
+                            return (
+                                len(geom.get_coordinates())
+                                if hasattr(geom, "get_coordinates")
+                                else 0
+                            )
+                        except:
+                            return 0
+
+                    vertices_before = sum(gdf.geometry.apply(count_vertices))
+                    vertices_after = sum(simplified_gdf.geometry.apply(count_vertices))
+
+                    logger.info(f"Original vertices: {vertices_before:,}")
+                    logger.info(f"Simplified vertices: {vertices_after:,}")
+                    if vertices_before > 0:
+                        logger.info(
+                            f"Vertex reduction: {((vertices_before - vertices_after) / vertices_before * 100):.1f}%"
+                        )
+
+                    # Save to CSV
+                    logger.info("Saving simplified geometries to CSV...")
+                    try:
+                        simplified_gdf.to_csv(qsv_spatial_file, index=False)
+                        tmp = qsv_spatial_file
+                        logger.info("Simplified geometries saved to CSV successfully")
+                        simplification_failed_flag = False
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to save simplified geometries to CSV: {str(e)}"
+                        )
+                        simplification_failed_flag = True
+                        pass
+
+                    # Copy spatial file to /tmp for debugging if verbose logging is enabled
+                    if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                        debug_spatial_file = os.path.join(
+                            "/tmp", os.path.basename(qsv_spatial_file)
+                        )
+                        shutil.copy2(qsv_spatial_file, debug_spatial_file)
+                        logger.info(
+                            f"Copied spatial file to {debug_spatial_file} for debugging"
+                        )
+                else:
+                    logger.warning(
+                        f"Geopandas simplification failed for {total_failures} geometries"
+                    )
+                    simplification_failed_flag = True
+            except Exception as e:
+                logger.warning(f"GeoPandas processing failed: {str(e)}")
+                simplification_failed_flag = True
+                pass
+
+            if simplification_failed_flag:
+                # FALLBACK: If geopandas simplification fails, use qsv geoconvert
+                logger.warning(
+                    "Geopandas simplification failed. Using qsv geoconvert to convert to CSV, truncating large columns to {} characters...".format(
+                        conf.QSV_STATS_STRING_MAX_LENGTH
+                    )
                 )
+
+                # Run qsv geoconvert
+                qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
+                try:
+                    subprocess.run(
+                        [
+                            conf.QSV_BIN,
+                            "geoconvert",
+                            tmp,
+                            "geojson",
+                            "csv",
+                            "--max-length",
+                            str(conf.QSV_STATS_STRING_MAX_LENGTH),
+                            "--output",
+                            qsv_geoconvert_csv,
+                        ],
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                    )
+                except subprocess.CalledProcessError as e:
+                    logger.error(f"qsv geoconvert failed: {e.stderr}")
+                    raise
+
+                tmp = qsv_geoconvert_csv
+                logger.info("Geoconverted successfully")
+
         else:
             # -------------- its not a spreadsheet, its a CSV/TSV/TAB file ---------------
             # Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as
