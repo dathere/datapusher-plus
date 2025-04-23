@@ -86,6 +86,9 @@ ADD_SUMMARY_STATS_RESOURCE = tk.asbool(
 SUMMARY_STATS_WITH_PREVIEW = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.summary_stats_with_preview", False)
 )
+QSV_STATS_STRING_MAX_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.qsv_stats_string_max_length", "32767")
+)
 
 # Type mapping
 TYPE_MAPPING = json.loads(

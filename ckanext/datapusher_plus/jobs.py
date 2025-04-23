@@ -737,12 +737,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             )
 
             # Build the geoconvert command
+            # Use --max-length to truncate overly long strings
+            # from causing issues with Python's CSV reader
+            # and Postgres's limits with the COPY command
             qsv_geoconvert_cmd = [
                 conf.QSV_BIN,
                 "geoconvert",
                 tmp,
                 geoconvert_format,
                 "csv",
+                "--max-length",
+                str(conf.QSV_STATS_STRING_MAX_LENGTH),
                 "--output",
                 qsv_geoconvert_csv,
             ]
@@ -1049,7 +1054,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_stats_cmd.append(conf.SUMMARY_STATS_OPTIONS)
 
     try:
-        qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
+        # If the file is a spatial format, we need to use --max-length
+        # to truncate overly long strings from causing issues with
+        # Python's CSV reader and Postgres's limits with the COPY command
+        if spatial_format_flag:
+            env = os.environ.copy()
+            env["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
+            qsv_stats = subprocess.run(qsv_stats_cmd, check=True, env=env)
+        else:
+            qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
         raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
@@ -1061,7 +1074,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     with open(qsv_stats_csv, mode="r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
-            # Add to stats dictionary with resourcefield name as key
+            # Add to stats dictionary with resource field name as key
             resource_fields_stats[row["field"]] = {"stats": row}
 
             fr = {k: v for k, v in row.items()}
@@ -1727,7 +1740,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     #    when the resource is created/updated. It can update both package and resource fields.
     # 2. "suggestion_formula": This is used to populate the suggestion
     #    popovers DURING data entry/curation.
-    # DRUF keys are stored as jinja2 templates in the scheming_yaml
+    # DRUF keys are stored as jinja2 template expressions in the scheming_yaml
     # and are rendered using the Jinja2 template engine.
     formulae_start = time.perf_counter()
     # Fetch the scheming_yaml and package
