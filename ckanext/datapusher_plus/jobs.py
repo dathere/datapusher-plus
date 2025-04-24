@@ -15,6 +15,7 @@ import decimal
 from urllib.parse import urlsplit
 from urllib.parse import urlparse
 import logging
+import uuid
 
 # Third-party imports
 import psycopg2
@@ -22,7 +23,6 @@ from datasize import DataSize
 from dateutil.parser import parse as parsedate
 import json
 import requests
-import geopandas as gpd
 from urllib.parse import urlsplit
 import datetime
 import locale
@@ -47,13 +47,12 @@ from dateutil.parser import parse as parsedate
 from rq import get_current_job
 import ckan.plugins.toolkit as tk
 
-from jinja2 import DictLoader, Environment
-
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.jinja2_helpers as j2h
 from ckanext.datapusher_plus.job_exceptions import HTTPError
 import ckanext.datapusher_plus.config as conf
+import ckanext.datapusher_plus.spatial_helpers as sh
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
@@ -160,6 +159,20 @@ def send_resource_to_datastore(
         raise utils.JobError("Error sending data to datastore ({!s}).".format(e))
 
 
+def upload_resource(new_resource, file):
+    """
+    Uploads a new resource to CKAN
+    """
+    # if not tk.user:
+    #     raise utils.JobError("No user found.")
+
+    new_resource["upload"] = open(file, "rb")
+    try:
+        tk.get_action("resource_create")(new_resource)
+    except tk.ObjectNotFound:
+        raise utils.JobError("Creating resource failed.")
+
+
 def update_resource(resource):
     """
     Updates resource metadata
@@ -192,6 +205,21 @@ def get_package(package_id):
     )
 
     return dataset_dict
+
+def resource_exists(package_id, resource_name):
+    """
+    Checks if a resource name exists in a package
+    Returns:
+        False if package or resource not found
+        (True, resource_id) if resource found
+    """
+    package = get_package(package_id)
+    if not package:
+        return False, None
+    for resource in package["resources"]:
+        if resource["name"] == resource_name:
+            return True, resource["id"]
+    return False, None
 
 
 def patch_package(package):
@@ -725,159 +753,34 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if resource_format.upper() in ["SHP", "SHP.ZIP", "GEOJSON"]:
             logger.info("SHAPEFILE or GEOJSON file detected...")
 
-            qsv_spatial_file = os.path.join(temp_dir, "qsv_spatial." + resource_format)
+            qsv_spatial_file = os.path.join(
+                temp_dir, "qsv_spatial_" + str(uuid.uuid4()) + "." + resource_format
+            )
             os.link(tmp, qsv_spatial_file)
 
-            # FIRST, try to simplify the geometry using Geopandas
+            qsv_spatial_csv = os.path.join(temp_dir, "qsv_spatial.csv")
+
+            # Try to convert spatial file to CSV using spatial_helpers
             logger.info(
-                "Simplifying geometry with a tolerance of {} for {}...".format(
-                    conf.SPATIAL_SIMPLIFICATION_TOLERANCE, tmp
+                "Converting spatial file to CSV with a simplification tolerance of {}...".format(
+                    conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE
                 )
             )
 
             try:
-                # Read the file with geopandas
-                gdf = gpd.read_file(tmp)
+                # Use the convert_to_csv function from spatial_helpers
+                success, error_message = sh.simplify_and_convert_to_csv(
+                    qsv_spatial_file,
+                    output_csv_path=qsv_spatial_csv,
+                    tolerance=conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE,
+                    task_logger=logger,
+                )
 
-                # Add diagnostic information
-                logger.info(f"Geometry types found: {gdf.geometry.type.unique()}")
-                logger.info(f"CRS: {gdf.crs}")
-                logger.info(f"Total features: {len(gdf)}")
-                logger.info(f"Total null geometries: {gdf.geometry.isna().sum()}")
-
-                # Create a copy for simplification
-                simplified_gdf = gdf.copy()
-
-                # First ensure all geometries are valid
-                logger.info("Validating geometries...")
-                simplified_gdf["geometry"] = simplified_gdf.geometry.make_valid()
-
-                # Handle different geometry types appropriately
-                def simplify_geometry(geom):
-                    if geom is None or not geom.is_valid:
-                        return (
-                            None,
-                            True,
-                        )  # Simplification failed for invalid/null geometries
-
-                    try:
-                        # Different simplification strategies based on geometry type
-                        if geom.geom_type in ["Point", "MultiPoint"]:
-                            # Points don't need simplification
-                            return geom, False
-                        elif geom.geom_type in ["LineString", "MultiLineString"]:
-                            # For lines, preserve topology is important
-                            simplified = geom.simplify(
-                                tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE,
-                                preserve_topology=True,
-                            )
-                            return simplified, False
-                        elif geom.geom_type in ["Polygon", "MultiPolygon"]:
-                            # For polygons, try preserve_topology first
-                            try:
-                                simplified = geom.simplify(
-                                    tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE,
-                                    preserve_topology=True,
-                                )
-                                return simplified, False
-                            except:
-                                # If that fails, try without topology preservation
-                                try:
-                                    simplified = geom.simplify(
-                                        tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE,
-                                        preserve_topology=False,
-                                    )
-                                    return simplified, False
-                                except:
-                                    logger.warning(
-                                        f"Both topology-preserving and non-preserving simplification failed for polygon"
-                                    )
-                                    return geom, True
-                        else:
-                            # For other geometry types (GeometryCollection etc.), try basic simplification
-                            try:
-                                simplified = geom.simplify(
-                                    tolerance=conf.SPATIAL_SIMPLIFICATION_TOLERANCE
-                                )
-                                return simplified, False
-                            except:
-                                return geom, True
-                    except Exception as e:
-                        logger.warning(
-                            f"Simplification failed for geometry of type {geom.geom_type}: {str(e)}"
-                        )
-                        return (
-                            geom,
-                            True,
-                        )  # Return original geometry and failure flag if simplification fails
-
-                # Apply the simplification with progress logging
-                logger.info("Starting geometry simplification...")
-                simplified_results = simplified_gdf.geometry.apply(simplify_geometry)
-                simplified_gdf["geometry"] = simplified_results.apply(
-                    lambda x: x[0]
-                )  # Get geometry
-                simplification_failures = simplified_results.apply(
-                    lambda x: x[1]
-                )  # Get failure flags
-
-                # Log simplification results including failure statistics
-                total_failures = simplification_failures.sum()
-                if total_failures == 0:
-
-                    # Log simplification results
-                    valid_geoms_before = sum(
-                        gdf.geometry.apply(lambda x: x is not None and x.is_valid)
-                    )
-                    valid_geoms_after = sum(
-                        simplified_gdf.geometry.apply(
-                            lambda x: x is not None and x.is_valid
-                        )
-                    )
-
+                if success:
                     logger.info(
-                        f"Valid geometries before simplification: {valid_geoms_before}"
+                        "Spatial file successfully simplified and converted to CSV"
                     )
-                    logger.info(
-                        f"Valid geometries after simplification: {valid_geoms_after}"
-                    )
-
-                    # Calculate vertex reduction
-                    def count_vertices(geom):
-                        if geom is None or not geom.is_valid:
-                            return 0
-                        try:
-                            return (
-                                len(geom.get_coordinates())
-                                if hasattr(geom, "get_coordinates")
-                                else 0
-                            )
-                        except:
-                            return 0
-
-                    vertices_before = sum(gdf.geometry.apply(count_vertices))
-                    vertices_after = sum(simplified_gdf.geometry.apply(count_vertices))
-
-                    logger.info(f"Original vertices: {vertices_before:,}")
-                    logger.info(f"Simplified vertices: {vertices_after:,}")
-                    if vertices_before > 0:
-                        logger.info(
-                            f"Vertex reduction: {((vertices_before - vertices_after) / vertices_before * 100):.1f}%"
-                        )
-
-                    # Save to CSV
-                    logger.info("Saving simplified geometries to CSV...")
-                    try:
-                        simplified_gdf.to_csv(qsv_spatial_file, index=False)
-                        tmp = qsv_spatial_file
-                        logger.info("Simplified geometries saved to CSV successfully")
-                        simplification_failed_flag = False
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to save simplified geometries to CSV: {str(e)}"
-                        )
-                        simplification_failed_flag = True
-                        pass
+                    tmp = qsv_spatial_csv
 
                     # Copy spatial file to /tmp for debugging if verbose logging is enabled
                     if conf.UPLOAD_LOG_VERBOSITY >= 2:
@@ -888,20 +791,43 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         logger.info(
                             f"Copied spatial file to {debug_spatial_file} for debugging"
                         )
+
+                    # Check if the resource already exists
+                    simplified_resource_name = os.path.splitext(resource["name"])[0] + "_simplified" + os.path.splitext(resource["name"])[1]
+                    existing_resource, existing_resource_id = resource_exists(resource["package_id"], simplified_resource_name)
+                    logger.info(f"package {resource['package_id']} resource {existing_resource_id}...")
+
+                    if existing_resource:
+                        logger.info("Simplified resource already exists. Replacing it...")
+                        delete_resource(existing_resource_id)
+                    else:
+                        logger.info("Simplified resource does not exist. Uploading it...")
+                        new_simplified_resource = {
+                            "package_id": resource["package_id"],
+                            "name": os.path.splitext(resource["name"])[0] + "_simplified" + os.path.splitext(resource["name"])[1],
+                            "url": "",
+                            "format": resource["format"],
+                            "hash": "",
+                            "mimetype": resource["mimetype"],
+                            "mimetype_inner": resource["mimetype_inner"],                        
+                        }
+                        upload_resource(new_simplified_resource, qsv_spatial_file)
+
+                    simplification_failed_flag = False
                 else:
                     logger.warning(
-                        f"Geopandas simplification failed for {total_failures} geometries"
+                        f"Simplification and conversion failed: {error_message}"
                     )
                     simplification_failed_flag = True
             except Exception as e:
-                logger.warning(f"GeoPandas processing failed: {str(e)}")
+                logger.warning(f"Simplification and conversion failed: {str(e)}")
                 simplification_failed_flag = True
                 pass
 
             if simplification_failed_flag:
-                # FALLBACK: If geopandas simplification fails, use qsv geoconvert
+                # FALLBACK: If simplification and conversion fails, use qsv geoconvert
                 logger.warning(
-                    "Geopandas simplification failed. Using qsv geoconvert to convert to CSV, truncating large columns to {} characters...".format(
+                    "Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {} characters...".format(
                         conf.QSV_STATS_STRING_MAX_LENGTH
                     )
                 )
