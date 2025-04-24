@@ -206,6 +206,7 @@ def get_package(package_id):
 
     return dataset_dict
 
+
 def resource_exists(package_id, resource_name):
     """
     Checks if a resource name exists in a package
@@ -267,17 +268,16 @@ def revise_package(package_id, match={}, filter=None, update=None, include=None)
     return revised_package
 
 
-def get_scheming_yaml(package_id):
+def get_scheming_yaml(package_id, scheming_yaml_type="dataset"):
     """
     Gets the scheming yaml for a package
     """
     package = get_package(package_id)
     if not package:
         raise utils.JobError("Package not found")
-    type = package.get("type")
 
     scheming_yaml = tk.get_action("scheming_dataset_schema_show")(
-        {"ignore_auth": True}, {"type": "dataset"}
+        {"ignore_auth": True}, {"type": scheming_yaml_type}
     )
 
     return scheming_yaml, package
@@ -793,23 +793,37 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         )
 
                     # Check if the resource already exists
-                    simplified_resource_name = os.path.splitext(resource["name"])[0] + "_simplified" + os.path.splitext(resource["name"])[1]
-                    existing_resource, existing_resource_id = resource_exists(resource["package_id"], simplified_resource_name)
-                    logger.info(f"package {resource['package_id']} resource {existing_resource_id}...")
+                    simplified_resource_name = (
+                        os.path.splitext(resource["name"])[0]
+                        + "_simplified"
+                        + os.path.splitext(resource["name"])[1]
+                    )
+                    existing_resource, existing_resource_id = resource_exists(
+                        resource["package_id"], simplified_resource_name
+                    )
+                    logger.info(
+                        f"package {resource['package_id']} resource {existing_resource_id}..."
+                    )
 
                     if existing_resource:
-                        logger.info("Simplified resource already exists. Replacing it...")
+                        logger.info(
+                            "Simplified resource already exists. Replacing it..."
+                        )
                         delete_resource(existing_resource_id)
                     else:
-                        logger.info("Simplified resource does not exist. Uploading it...")
+                        logger.info(
+                            "Simplified resource does not exist. Uploading it..."
+                        )
                         new_simplified_resource = {
                             "package_id": resource["package_id"],
-                            "name": os.path.splitext(resource["name"])[0] + "_simplified" + os.path.splitext(resource["name"])[1],
+                            "name": os.path.splitext(resource["name"])[0]
+                            + "_simplified"
+                            + os.path.splitext(resource["name"])[1],
                             "url": "",
                             "format": resource["format"],
                             "hash": "",
                             "mimetype": resource["mimetype"],
-                            "mimetype_inner": resource["mimetype_inner"],                        
+                            "mimetype_inner": resource["mimetype_inner"],
                         }
                         upload_resource(new_simplified_resource, qsv_spatial_file)
 
@@ -1842,7 +1856,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     formulae_start = time.perf_counter()
     # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
-    scheming_yaml, package = get_scheming_yaml(package_id)
+    scheming_yaml, package = get_scheming_yaml(package_id, scheming_yaml_type="dataset")
 
     if conf.UPLOAD_LOG_VERBOSITY >= 2:
         logger.debug(f"package: {package}")
