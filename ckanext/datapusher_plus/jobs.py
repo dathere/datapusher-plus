@@ -24,7 +24,6 @@ from datasize import DataSize
 from dateutil.parser import parse as parsedate
 import json
 import requests
-from urllib.parse import urlsplit
 import datetime
 import locale
 import logging
@@ -60,16 +59,6 @@ if locale.getdefaultlocale()[0]:
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
 else:
     locale.setlocale(locale.LC_ALL, "")
-
-
-def get_url(action, ckan_url):
-    """
-    Get url for ckan action
-    """
-    if not urlsplit(ckan_url).scheme:
-        ckan_url = "http://" + ckan_url.lstrip("/")  # DevSkim: ignore DS137138
-    ckan_url = ckan_url.rstrip("/")
-    return "{ckan_url}/api/3/action/{action}".format(ckan_url=ckan_url, action=action)
 
 
 class DatastoreEncoder(json.JSONEncoder):
@@ -785,16 +774,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         "Spatial file successfully simplified and converted to CSV"
                     )
                     tmp = qsv_spatial_csv
-
-                    # Copy spatial file to /tmp for debugging if verbose logging is enabled
-                    if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                        debug_spatial_file = os.path.join(
-                            "/tmp", os.path.basename(qsv_spatial_file)
-                        )
-                        shutil.copy2(qsv_spatial_file, debug_spatial_file)
-                        logger.info(
-                            f"Copied spatial file to {debug_spatial_file} for debugging"
-                        )
 
                     # Check if the resource already exists
                     simplified_resource_name = (
@@ -1794,11 +1773,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
         cur = raw_connection.cursor()
-        """
-        truncate table to use copy freeze option and further increase
-        performance as there is no need for WAL logs to be maintained
-        https://www.postgresql.org/docs/current/populate.html#POPULATE-COPY-FROM
-        """
+
+        # truncate table to use copy freeze option and further increase
+        # performance as there is no need for WAL logs to be maintained
+        # https://www.postgresql.org/docs/current/populate.html#POPULATE-COPY-FROM
         try:
             cur.execute(
                 sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(resource_id))
@@ -1858,6 +1836,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # DRUF keys are stored as jinja2 template expressions in the scheming_yaml
     # and are rendered using the Jinja2 template engine.
     formulae_start = time.perf_counter()
+
     # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
     scheming_yaml, package = get_scheming_yaml(package_id, scheming_yaml_type="dataset")
@@ -1870,9 +1849,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         scheming_yaml, package, resource_fields_stats, logger
     )
 
-    # Process package formulae
-    # as this is a direct update, we update the package fields directly
-    # using the package_patch CKAN API
+    # FIRST WE PROCESS THE FORMULAE THAT UPDATE THE
+    # PACKAGE AND RESOURCE FIELDS DIRECTLY
+    # using the package_patch CKAN API so we only update the fields
+    # that with formulae
     package_updates = formula_processor.process_formulae(
         "package", "dataset_fields", "formula"
     )
@@ -1898,9 +1878,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         resource.update(resource_updates)
         logger.info("RESOURCE formulae processed...")
 
-    # Process package suggestion formulae
-    # as this is a suggestion, we update the package dpp_suggestions field
-    # from which the Suggestion bootstrap popover will pick it up
+    # NOW WE PROCESS THE SUGGESTIONS
+    # we update the package dpp_suggestions field
+    # from which the Suggestion popover UI will pick it up
     package_suggestions = formula_processor.process_formulae(
         "package", "dataset_fields", "suggestion_formula"
     )
@@ -1918,7 +1898,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.error(f"Error revising package: {str(e)}")
 
     # Process resource suggestion formulae
-    # Note how we update the PACKAGE dpp_suggestions field
+    # Note how we still update the PACKAGE dpp_suggestions field
     # and there is NO RESOURCE dpp_suggestions field.
     # This is because suggestion formulae are used to populate the
     # suggestion popover DURING data entry/curation and suggestion formulae

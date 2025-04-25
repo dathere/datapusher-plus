@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# flake8: noqa: E501
 '''
 Test individual functions
 '''
@@ -7,10 +8,20 @@ import json
 import requests
 import pytest
 import httpretty
+from urllib.parse import urlsplit
 
-import datapusher.jobs as jobs
-import ckanserviceprovider.util as util
 
+import ckanext.datapusher_plus.jobs as jobs
+import ckanext.datapusher_plus.utils as util
+
+def get_url(action, ckan_url):
+    """
+    Get url for ckan action
+    """
+    if not urlsplit(ckan_url).scheme:
+        ckan_url = "http://" + ckan_url.lstrip("/")  # DevSkim: ignore DS137138
+    ckan_url = ckan_url.rstrip("/")
+    return "{ckan_url}/api/3/action/{action}".format(ckan_url=ckan_url, action=action)
 
 class TestChunky():
     def test_simple(self):
@@ -41,22 +52,22 @@ class TestChunky():
 class TestGetUrl():
     def test_get_action_url(self):
         assert (
-            jobs.get_url('datastore_create', 'http://www.ckan.org') ==
+            get_url('datastore_create', 'http://www.ckan.org') ==
             'http://www.ckan.org/api/3/action/datastore_create')
 
     def test_get_action_url_with_stuff(self):
         assert (
-            jobs.get_url('datastore_create', 'http://www.ckan.org/') ==
+            get_url('datastore_create', 'http://www.ckan.org/') ==
             'http://www.ckan.org/api/3/action/datastore_create')
 
     def test_get_action_url_with_https(self):
         assert (
-            jobs.get_url('datastore_create', 'https://www.ckan.org/') ==
+            get_url('datastore_create', 'https://www.ckan.org/') ==
             'https://www.ckan.org/api/3/action/datastore_create')
 
     def test_get_action_url_missing_http(self):
         assert (
-            jobs.get_url('datastore_create', 'www.ckan.org/') ==
+            get_url('datastore_create', 'www.ckan.org/') ==
             'http://www.ckan.org/api/3/action/datastore_create')
 
 
