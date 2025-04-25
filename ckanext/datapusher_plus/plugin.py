@@ -1,4 +1,6 @@
 # encoding: utf-8
+# flake8: noqa: E501
+
 from __future__ import annotations
 
 from ckan.common import CKANConfig

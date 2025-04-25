@@ -7,7 +7,7 @@ Test individual functions
 import json
 import requests
 import pytest
-import httpretty
+import httpretty # type: ignore
 from urllib.parse import urlsplit
 
 
