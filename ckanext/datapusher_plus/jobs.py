@@ -93,11 +93,9 @@ def delete_datastore_resource(resource_id):
 
 
 def delete_resource(resource_id):
-    if not tk.user:
-        raise utils.JobError("No user found.")
     try:
         tk.get_action("resource_delete")(
-            {"user": tk.user}, {"id": resource_id, "force": True}
+            {"ignore_auth": True}, {"id": resource_id, "force": True}
         )
     except tk.ObjectNotFound:
         raise utils.JobError("Deleting existing resource failed.")
