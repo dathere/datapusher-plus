@@ -1,8 +1,9 @@
 # encoding: utf-8
+# flake8: noqa: E501
+
 from __future__ import annotations
 
 import logging
-from math import radians, cos
 from jinja2 import DictLoader, Environment
 
 log = logging.getLogger(__name__)
