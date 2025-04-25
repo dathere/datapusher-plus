@@ -1,4 +1,6 @@
 # encoding: utf-8
+# flake8: noqa: E501
+
 from __future__ import annotations
 
 
@@ -6,10 +8,8 @@ import json
 import logging
 import datetime
 from typing import Any
-from sqlalchemy.orm import Query
 
 import ckan.plugins.toolkit as toolkit
-from ckan import model as ckan_model
 
 from ckanext.datapusher_plus.model import Jobs, Metadata, Logs
 import ckanext.datapusher_plus.job_exceptions as jex
