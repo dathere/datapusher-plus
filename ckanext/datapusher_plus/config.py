@@ -120,6 +120,9 @@ DATASTORE_URLS = {
 DATASTORE_WRITE_URL = tk.config.get("ckan.datastore.write_url")
 
 # spatial simplification settings
+AUTO_SPATIAL_SIMPLIFICATION = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_spatial_simplification", False)
+)
 SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
     "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE", "0.1"
 )

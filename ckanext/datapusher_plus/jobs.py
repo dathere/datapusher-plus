@@ -741,18 +741,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         excel_export_msg = qsv_excel.stderr
         logger.info("{}...".format(excel_export_msg))
         tmp = qsv_excel_csv
-    else:
-        # check if its a SHAPEFILE or a GEOJSON file
-        if resource_format.upper() in ["SHP", "SHP.ZIP", "GEOJSON"]:
-            logger.info("SHAPEFILE or GEOJSON file detected...")
+    elif resource_format.upper() in ["SHP", "SHP.ZIP", "GEOJSON"]:
+        logger.info("SHAPEFILE or GEOJSON file detected...")
 
-            qsv_spatial_file = os.path.join(
-                temp_dir, "qsv_spatial_" + str(uuid.uuid4()) + "." + resource_format
-            )
-            os.link(tmp, qsv_spatial_file)
+        qsv_spatial_file = os.path.join(
+            temp_dir, "qsv_spatial_" + str(uuid.uuid4()) + "." + resource_format
+        )
+        os.link(tmp, qsv_spatial_file)
+        qsv_spatial_csv = os.path.join(temp_dir, "qsv_spatial.csv")
 
-            qsv_spatial_csv = os.path.join(temp_dir, "qsv_spatial.csv")
-
+        if conf.AUTO_SPATIAL_SIMPLIFICATION:
             # Try to convert spatial file to CSV using spatial_helpers
             logger.info(
                 "Converting spatial file to CSV with a simplification tolerance of {}...".format(
@@ -815,140 +813,137 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     simplification_failed_flag = True
             except Exception as e:
                 logger.warning(f"Simplification and conversion failed: {str(e)}")
-                simplification_failed_flag = True
-                pass
-
-            if simplification_failed_flag:
-                # FALLBACK: If simplification and conversion fails, use qsv geoconvert
                 logger.warning(
                     "Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {} characters...".format(
                         conf.QSV_STATS_STRING_MAX_LENGTH
                     )
                 )
+                simplification_failed_flag = True
+                pass
 
-                # Run qsv geoconvert
-                qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
-                try:
-                    subprocess.run(
-                        [
-                            conf.QSV_BIN,
-                            "geoconvert",
-                            tmp,
-                            "geojson",
-                            "csv",
-                            "--max-length",
-                            str(conf.QSV_STATS_STRING_MAX_LENGTH),
-                            "--output",
-                            qsv_geoconvert_csv,
-                        ],
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    )
-                except subprocess.CalledProcessError as e:
-                    logger.error(f"qsv geoconvert failed: {e.stderr}")
-                    raise
+        # If we are not auto-simplifying or simplification failed, use qsv geoconvert
+        if not conf.AUTO_SPATIAL_SIMPLIFICATION or simplification_failed_flag:
+            logger.info("Converting spatial file to CSV using qsv geoconvert...")
 
-                tmp = qsv_geoconvert_csv
-                logger.info("Geoconverted successfully")
-
-        else:
-            # -------------- its not a spreadsheet, its a CSV/TSV/TAB file ---------------
-            # Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as
-            # it could be a CSV/TSV/TAB dialect with differing delimiters, quoting, etc.
-            # Using qsv input's --output option also auto-transcodes to UTF-8.
-            # Note that we only change the workfile, the resource file itself is unchanged.
-
-            # ------------------- Normalize to CSV ---------------------
-            qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
-            # if resource_format is CSV we don't need to normalize
-            if resource_format.upper() == "CSV":
-                if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                    logger.info(
-                        "Normalizing/UTF-8 transcoding {}...".format(resource_format)
-                    )
-            else:
-                # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
-                if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                    logger.info(
-                        "Normalizing/UTF-8 transcoding {} to CSV...".format(
-                            resource_format
-                        )
-                    )
-
-            qsv_input_utf_8_encoded_csv = os.path.join(
-                temp_dir, "qsv_input_utf_8_encoded.csv"
-            )
-
-            # using uchardet to determine encoding
-            file_encoding = subprocess.run(
-                ["uchardet", tmp],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info(
-                    "Identified encoding of the file: {}".format(file_encoding.stdout)
-                )
-
-            # trim the encoding string
-            file_encoding.stdout = file_encoding.stdout.strip()
-
-            # using iconv to re-encode in UTF-8 OR ASCII (as ASCII is a subset of UTF-8)
-            if file_encoding.stdout != "UTF-8" and file_encoding.stdout != "ASCII":
-                logger.info(
-                    "File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
-                        file_encoding.stdout
-                    )
-                )
-                try:
-                    cmd = subprocess.run(
-                        [
-                            "iconv",
-                            "-f",
-                            file_encoding.stdout,
-                            "-t",
-                            "UTF-8",
-                            tmp,
-                        ],
-                        capture_output=True,
-                        check=True,
-                    )
-                except subprocess.CalledProcessError as e:
-                    logger.error(
-                        f"Job aborted as the file cannot be re-encoded to UTF-8. {e.stderr}"
-                    )
-                    return
-                f = open(qsv_input_utf_8_encoded_csv, "wb")
-                f.write(cmd.stdout)
-                f.close()
-                logger.info("Successfully re-encoded to UTF-8")
-
-            else:
-                qsv_input_utf_8_encoded_csv = tmp
+            # Run qsv geoconvert
+            qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
             try:
-                qsv_input = subprocess.run(
+                subprocess.run(
                     [
                         conf.QSV_BIN,
-                        "input",
+                        "geoconvert",
                         tmp,
-                        "--trim-headers",
+                        "geojson",
+                        "csv",
+                        "--max-length",
+                        str(conf.QSV_STATS_STRING_MAX_LENGTH),
                         "--output",
-                        qsv_input_csv,
+                        qsv_geoconvert_csv,
                     ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as e:
+                logger.error(f"qsv geoconvert failed: {e.stderr}")
+                raise
+
+            tmp = qsv_geoconvert_csv
+            logger.info("Geoconverted successfully")
+
+    else:
+        # --- its not a spreadsheet nor a spatial format, its a CSV/TSV/TAB file ------
+        # Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as
+        # it could be a CSV/TSV/TAB dialect with differing delimiters, quoting, etc.
+        # Using qsv input's --output option also auto-transcodes to UTF-8.
+        # Note that we only change the workfile, the resource file itself is unchanged.
+
+        # ------------------- Normalize to CSV ---------------------
+        qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
+        # if resource_format is CSV we don't need to normalize
+        if resource_format.upper() == "CSV":
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info(
+                    "Normalizing/UTF-8 transcoding {}...".format(resource_format)
+                )
+        else:
+            # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info(
+                    "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
+                )
+
+        qsv_input_utf_8_encoded_csv = os.path.join(
+            temp_dir, "qsv_input_utf_8_encoded.csv"
+        )
+
+        # using uchardet to determine encoding
+        file_encoding = subprocess.run(
+            ["uchardet", tmp],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info(
+                "Identified encoding of the file: {}".format(file_encoding.stdout)
+            )
+
+        # trim the encoding string
+        file_encoding.stdout = file_encoding.stdout.strip()
+
+        # using iconv to re-encode in UTF-8 OR ASCII (as ASCII is a subset of UTF-8)
+        if file_encoding.stdout != "UTF-8" and file_encoding.stdout != "ASCII":
+            logger.info(
+                "File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
+                    file_encoding.stdout
+                )
+            )
+            try:
+                cmd = subprocess.run(
+                    [
+                        "iconv",
+                        "-f",
+                        file_encoding.stdout,
+                        "-t",
+                        "UTF-8",
+                        tmp,
+                    ],
+                    capture_output=True,
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                # return as we can't push an invalid CSV file
                 logger.error(
-                    "Job aborted as the file cannot be normalized/transcoded: {}.".format(
-                        e
-                    )
+                    f"Job aborted as the file cannot be re-encoded to UTF-8. {e.stderr}"
                 )
                 return
-            tmp = qsv_input_csv
-            logger.info("Normalized & transcoded...")
+            f = open(qsv_input_utf_8_encoded_csv, "wb")
+            f.write(cmd.stdout)
+            f.close()
+            logger.info("Successfully re-encoded to UTF-8")
+
+        else:
+            qsv_input_utf_8_encoded_csv = tmp
+        try:
+            qsv_input = subprocess.run(
+                [
+                    conf.QSV_BIN,
+                    "input",
+                    tmp,
+                    "--trim-headers",
+                    "--output",
+                    qsv_input_csv,
+                ],
+                check=True,
+            )
+        except subprocess.CalledProcessError as e:
+            # return as we can't push an invalid CSV file
+            logger.error(
+                "Job aborted as the file cannot be normalized/transcoded: {}.".format(e)
+            )
+            return
+        tmp = qsv_input_csv
+        logger.info("Normalized & transcoded...")
 
     # ------------------------------------- Validate CSV --------------------------------------
     # Run an RFC4180 check with `qsv validate` against the normalized, UTF-8 encoded CSV file.
