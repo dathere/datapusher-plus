@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## What's Changed
+* twdh-0.6-release by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/175
+* Update cli.py to work with CKAN 2.9 by @minhajuddin2510 in https://github.com/dathere/datapusher-plus/pull/176
+* DP+ v2.0.0 - The Data Resource Upload First (DRUF) Workflow by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/177
+
+
+**Full Changelog**: https://github.com/dathere/datapusher-plus/compare/1.0.4...2.0.0
+
 ## [1.0.4] - 2025-01-15
 
 ## [1.0.3] - 2024-10-30
