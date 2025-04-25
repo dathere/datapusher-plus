@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# flake8: noqa: E501
 
 # Standard library imports
 import csv
@@ -163,12 +164,17 @@ def upload_resource(new_resource, file):
     """
     Uploads a new resource to CKAN
     """
-    # if not tk.user:
-    #     raise utils.JobError("No user found.")
+    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+    context = {
+        "package_id": new_resource["package_id"],
+        "ignore_auth": True,
+        "user": site_user["name"],
+        "auth_user_obj": None,
+    }
 
     new_resource["upload"] = open(file, "rb")
     try:
-        tk.get_action("resource_create")(new_resource)
+        tk.get_action("resource_create")(context, new_resource)
     except tk.ObjectNotFound:
         raise utils.JobError("Creating resource failed.")
 
@@ -830,7 +836,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     simplification_failed_flag = False
                 else:
                     logger.warning(
-                        f"Simplification and conversion failed: {error_message}"
+                        f"Upload of simplified spatial file failed: {error_message}"
                     )
                     simplification_failed_flag = True
             except Exception as e:
@@ -2099,7 +2105,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
         stats_stats_dict = [
-            dict(id=ele.split(",")[0], type=TYPE_MAPPING[ele.split(",")[1]])
+            dict(id=ele.split(",")[0], type=conf.TYPE_MAPPING[ele.split(",")[1]])
             for idx, ele in enumerate(stats_stats.splitlines()[1:], 1)
         ]
 
