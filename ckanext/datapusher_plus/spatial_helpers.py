@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+# flake8: noqa: E501
+
 import fiona
 import pandas as pd
 from shapely.geometry import shape, Polygon, MultiPolygon
@@ -19,6 +22,7 @@ def simplify_polygon(
     relative_tolerance: float,
     log: logging.Logger,
     to_meter_proj: Optional[callable] = None,
+    verbosity: int = 1,
 ) -> Union[Polygon, MultiPolygon]:
     """Helper function to simplify polygon geometries while preserving topology.
 
@@ -29,13 +33,13 @@ def simplify_polygon(
         to_meter_proj: Optional transform function to convert coordinates to meters
     """
     if isinstance(geom, MultiPolygon):
-        # log.debug("Processing MultiPolygon with {} parts".format(len(geom.geoms)))
+        if verbosity >= 2:
+            log.debug("Processing MultiPolygon with {} parts".format(len(geom.geoms)))
         # Handle each polygon in the multipolygon separately
         simplified_polys = []
-        for i, poly in enumerate(geom.geoms):
-            # log.debug(f"  Processing MultiPolygon part {i}")
+        for poly in geom.geoms:
             simplified_poly = simplify_polygon(
-                poly, relative_tolerance, log, to_meter_proj
+                poly, relative_tolerance, log, to_meter_proj, verbosity
             )
             if simplified_poly and not simplified_poly.is_empty:
                 simplified_polys.append(simplified_poly)
@@ -45,15 +49,13 @@ def simplify_polygon(
 
     try:
         # Log initial geometry info
-        # log.debug(f"Initial geometry type: {type(geom)}")
 
         # Transform to meters if projection is provided
         if to_meter_proj:
             try:
                 geom = transform(to_meter_proj, geom)
-                # log.debug("  Transformed to meters for simplification")
             except Exception as e:
-                # log.debug(f"  Transform to meters failed: {str(e)}")
+                log.debug(f"  Transform to meters failed: {str(e)}")
                 return geom
 
         # Get the bounds to understand the scale
@@ -62,11 +64,21 @@ def simplify_polygon(
             diagonal = ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
             abs_tolerance = float(diagonal) * float(relative_tolerance)
 
-            # log.debug("  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
-            #     minx, miny, maxx, maxy))
-            # log.debug("  Geometry diagonal length: {:.2f}".format(float(diagonal)))
-            # log.debug("  Relative tolerance: {:.4f}% of diagonal".format(float(relative_tolerance) * 100))
-            # log.debug("  Absolute tolerance: {:.2f} meters".format(float(abs_tolerance)))
+            if verbosity >= 2:
+                log.debug(
+                    "  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
+                        minx, miny, maxx, maxy
+                    )
+                )
+                log.debug("  Geometry diagonal length: {:.2f}".format(float(diagonal)))
+                log.debug(
+                    "  Relative tolerance: {:.4f}% of diagonal".format(
+                        float(relative_tolerance) * 100
+                    )
+                )
+                log.debug(
+                    "  Absolute tolerance: {:.2f} meters".format(float(abs_tolerance))
+                )
         except Exception as e:
             log.debug(f"  Error calculating bounds/tolerance: {str(e)}")
             return geom
@@ -74,13 +86,9 @@ def simplify_polygon(
         # For single polygons, handle exterior and interior rings separately
         try:
             # Get exterior coordinates and ensure they're float
-            # log.debug("Processing exterior ring")
             exterior_coords = []
             for i, (x, y) in enumerate(geom.exterior.coords):
                 try:
-                    # Log every 100th coordinate or if there's an error
-                    # if i % 100 == 0:
-                    #     log.debug(f"  Exterior coordinate {i}: raw values (x={x}, y={y})")
                     fx, fy = float(x), float(y)
                     exterior_coords.append((fx, fy))
                 except (ValueError, TypeError) as e:
@@ -89,41 +97,35 @@ def simplify_polygon(
                     )
                     return geom
 
-            # log.debug(f"  Processed {len(exterior_coords)} exterior coordinates")
             exterior_coords = np.array(exterior_coords, dtype=np.float64)
             simplified_exterior = shapely.LineString(exterior_coords).simplify(
                 abs_tolerance, preserve_topology=True
             )
-            # log.debug(f"  Simplified exterior ring: valid={simplified_exterior.is_valid}, empty={simplified_exterior.is_empty}")
         except Exception as e:
-            # log.debug(f"  Error processing exterior ring: {str(e)}")
+            if verbosity >= 2:
+                log.debug(f"  Error processing exterior ring: {str(e)}")
             return geom
 
         # Only proceed if the simplified exterior is valid
         if simplified_exterior.is_valid and not simplified_exterior.is_empty:
             # Handle interior rings (holes)
             simplified_interiors = []
-            # log.debug(f"Processing {len(geom.interiors)} interior rings")
             for ring_idx, interior in enumerate(geom.interiors):
                 try:
                     # Get interior coordinates and ensure they're float
                     interior_coords = []
-                    # log.debug(f"  Processing interior ring {ring_idx}")
                     for i, (x, y) in enumerate(interior.coords):
                         try:
-                            # Log every 100th coordinate or if there's an error
-                            # if i % 100 == 0:
-                            #     log.debug(f"    Interior {ring_idx} coordinate {i}: raw values (x={x}, y={y})")
                             fx, fy = float(x), float(y)
                             interior_coords.append((fx, fy))
                         except (ValueError, TypeError) as e:
-                            log.debug(
-                                f"    Error converting interior {ring_idx} coordinate {i}: (x={x}, y={y}), Error: {str(e)}"
-                            )
+                            if verbosity >= 2:
+                                log.debug(
+                                    f"    Error converting interior {ring_idx} coordinate {i}: (x={x}, y={y}), Error: {str(e)}"
+                                )
                             continue
 
                     if interior_coords:
-                        # log.debug(f"    Processed {len(interior_coords)} coordinates for interior ring {ring_idx}")
                         interior_coords = np.array(interior_coords, dtype=np.float64)
                         simplified_interior = shapely.LineString(
                             interior_coords
@@ -133,14 +135,15 @@ def simplify_polygon(
                             and not simplified_interior.is_empty
                         ):
                             simplified_interiors.append(simplified_interior)
-                            # log.debug(f"    Successfully simplified interior ring {ring_idx}")
                 except Exception as e:
-                    log.debug(f"  Error processing interior ring {ring_idx}: {str(e)}")
+                    if verbosity >= 2:
+                        log.debug(
+                            f"  Error processing interior ring {ring_idx}: {str(e)}"
+                        )
                     continue
 
             # Create new polygon with simplified exterior and interiors
             try:
-                # log.debug(f"Creating new polygon with {len(simplified_interiors)} interior rings")
                 new_poly = Polygon(
                     simplified_exterior,
                     holes=[interior for interior in simplified_interiors],
@@ -152,17 +155,22 @@ def simplify_polygon(
                             new_poly = transform(
                                 lambda x, y: (x, y), new_poly
                             )  # Transform back to original CRS
-                            # log.debug("Successfully transformed back from meters")
                         except Exception as e:
-                            # log.debug(f"  Transform back from meters failed: {str(e)}")
+                            if verbosity >= 2:
+                                log.debug(
+                                    f"  Transform back from meters failed: {str(e)}"
+                                )
                             return geom
                     return new_poly
-                # else:
-                #     log.debug("Created polygon is invalid")
+                else:
+                    if verbosity >= 2:
+                        log.debug("Created polygon is invalid")
             except Exception as e:
-                log.debug(f"  Failed to create simplified polygon: {str(e)}")
+                if verbosity >= 2:
+                    log.debug(f"  Failed to create simplified polygon: {str(e)}")
     except Exception as e:
-        log.debug(f"  Simplification error: {str(e)}")
+        if verbosity >= 2:
+            log.debug(f"  Simplification error: {str(e)}")
 
     # If anything fails, return original geometry
     return geom
@@ -300,7 +308,7 @@ def simplify_and_convert_to_csv(
                 # Handle polygon geometries specially
                 if isinstance(original_geom, (Polygon, MultiPolygon)):
                     simplified = simplify_polygon(
-                        original_geom, tolerance, log, to_meter_proj
+                        original_geom, tolerance, log, to_meter_proj, verbosity
                     )
                 else:
                     # For non-polygon geometries, try direct simplification
