@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+# flake8: noqa: E501
 
 # Standard library imports
 import csv
@@ -7,6 +8,7 @@ import hashlib
 import locale
 import mimetypes
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -14,16 +16,14 @@ import decimal
 from urllib.parse import urlsplit
 from urllib.parse import urlparse
 import logging
+import uuid
 
 # Third-party imports
 import psycopg2
-from ckanext.datapusher_plus.job_exceptions import HTTPError
 from datasize import DataSize
 from dateutil.parser import parse as parsedate
 import json
 import requests
-
-from urllib.parse import urlsplit
 import datetime
 import locale
 import logging
@@ -34,7 +34,6 @@ import tempfile
 import subprocess
 import csv
 import os
-import psycopg2
 import semver
 import sys
 import traceback
@@ -48,50 +47,18 @@ from dateutil.parser import parse as parsedate
 from rq import get_current_job
 import ckan.plugins.toolkit as tk
 
-
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
-
-# from ckanext.datapusher_plus.config import config
-
+import ckanext.datapusher_plus.jinja2_helpers as j2h
+from ckanext.datapusher_plus.job_exceptions import HTTPError
+import ckanext.datapusher_plus.config as conf
+import ckanext.datapusher_plus.spatial_helpers as sh
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
 else:
     locale.setlocale(locale.LC_ALL, "")
-
-
-SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
-if not SSL_VERIFY:
-    requests.packages.urllib3.disable_warnings()
-
-USE_PROXY = "ckanext.datapusher_plus.download_proxy" in tk.config
-if USE_PROXY:
-    DOWNLOAD_PROXY = tk.config.get("ckanext.datapusher_plus.download_proxy")
-
-POSTGRES_INT_MAX = 2147483647
-POSTGRES_INT_MIN = -2147483648
-POSTGRES_BIGINT_MAX = 9223372036854775807
-POSTGRES_BIGINT_MIN = -9223372036854775808
-
-MINIMUM_QSV_VERSION = "2.1.0"
-MAX_CONTENT_LENGTH = tk.config.get("ckanext.datapusher_plus.max_content_length")
-
-DATASTORE_URLS = {
-    "datastore_delete": "{ckan_url}/api/action/datastore_delete",
-    "resource_update": "{ckan_url}/api/action/resource_update",
-}
-
-
-def get_url(action, ckan_url):
-    """
-    Get url for ckan action
-    """
-    if not urlsplit(ckan_url).scheme:
-        ckan_url = "http://" + ckan_url.lstrip("/")  # DevSkim: ignore DS137138
-    ckan_url = ckan_url.rstrip("/")
-    return "{ckan_url}/api/3/action/{action}".format(ckan_url=ckan_url, action=action)
 
 
 class DatastoreEncoder(json.JSONEncoder):
@@ -115,11 +82,9 @@ def delete_datastore_resource(resource_id):
 
 
 def delete_resource(resource_id):
-    if not tk.user:
-        raise utils.JobError("No user found.")
     try:
         tk.get_action("resource_delete")(
-            {"user": tk.user}, {"id": resource_id, "force": True}
+            {"ignore_auth": True}, {"id": resource_id, "force": True}
         )
     except tk.ObjectNotFound:
         raise utils.JobError("Deleting existing resource failed.")
@@ -182,6 +147,25 @@ def send_resource_to_datastore(
         raise utils.JobError("Error sending data to datastore ({!s}).".format(e))
 
 
+def upload_resource(new_resource, file):
+    """
+    Uploads a new resource to CKAN
+    """
+    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+    context = {
+        "package_id": new_resource["package_id"],
+        "ignore_auth": True,
+        "user": site_user["name"],
+        "auth_user_obj": None,
+    }
+
+    new_resource["upload"] = open(file, "rb")
+    try:
+        tk.get_action("resource_create")(context, new_resource)
+    except tk.ObjectNotFound:
+        raise utils.JobError("Creating resource failed.")
+
+
 def update_resource(resource):
     """
     Updates resource metadata
@@ -216,6 +200,82 @@ def get_package(package_id):
     return dataset_dict
 
 
+def resource_exists(package_id, resource_name):
+    """
+    Checks if a resource name exists in a package
+    Returns:
+        False if package or resource not found
+        (True, resource_id) if resource found
+    """
+    package = get_package(package_id)
+    if not package:
+        return False, None
+    for resource in package["resources"]:
+        if resource["name"] == resource_name:
+            return True, resource["id"]
+    return False, None
+
+
+def patch_package(package):
+    """
+    Patches package metadata
+    """
+    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+    context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
+    patched_package = tk.get_action("package_patch")(context, package)
+    return patched_package
+
+
+def revise_package(package_id, match={}, filter=None, update=None, include=None):
+    """
+    Revises package metadata using the package_revise action API.
+
+    Args:
+        package_id (str): The ID of the package to revise
+        match (dict, optional): Fields that must match the current version of the package
+        filter (list, optional): List of fields to remove from the package
+        update (dict, optional): Fields to update to new values
+        include (list, optional): List of fields to include in the response
+
+    Returns:
+        dict: The revised package metadata
+    """
+    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
+    context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
+
+    # package_id is required
+    if not package_id:
+        raise ValueError("Package ID is required")
+
+    # add package_id to match
+    match["id"] = package_id
+
+    data_dict = {
+        "match": match,
+        "filter": filter or [],  # Must be a list
+        "update": update or {},
+        "include": include or [],  # Must be a list
+    }
+
+    revised_package = tk.get_action("package_revise")(context, data_dict)
+    return revised_package
+
+
+def get_scheming_yaml(package_id, scheming_yaml_type="dataset"):
+    """
+    Gets the scheming yaml for a package
+    """
+    package = get_package(package_id)
+    if not package:
+        raise utils.JobError("Package not found")
+
+    scheming_yaml = tk.get_action("scheming_dataset_schema_show")(
+        {"ignore_auth": True}, {"type": scheming_yaml_type}
+    )
+
+    return scheming_yaml, package
+
+
 def validate_input(input):
     # Especially validate metadata which is provided by the user
     if "metadata" not in input:
@@ -231,6 +291,71 @@ def validate_input(input):
     #     raise utils.JobError("No CKAN API key provided")
 
 
+class FormulaProcessor:
+    def __init__(self, scheming_yaml, package, resource_fields_stats, logger):
+        self.scheming_yaml = scheming_yaml
+        self.package = package
+        self.resource_fields_stats = resource_fields_stats
+        self.logger = logger
+
+    def process_formulae(
+        self, entity_type: str, fields_key: str, formula_type: str = "formula"
+    ):
+        """
+        Generic formula processor for both package and resource fields
+
+        Args:
+            entity_type: 'package' or 'resource'
+            fields_key: Key in scheming_yaml for fields ('dataset_fields' or 'resource_fields')
+            formula_type: Type of formula ('formula' or 'suggestion_formula')
+        """
+        formula_fields = [
+            field for field in self.scheming_yaml[fields_key] if field.get(formula_type)
+        ]
+
+        if not formula_fields:
+            return
+
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
+            self.logger.info(
+                f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
+            )
+
+        jinja2_formulae = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            template = schema_field[formula_type]
+            jinja2_formulae[field_name] = template
+
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                self.logger.debug(
+                    f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
+                )
+
+        context = {"package": self.package, "resource": self.resource_fields_stats}
+        context.update(jinja2_formulae)
+        jinja2_env = j2h.create_jinja2_env(context)
+
+        updates = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            try:
+                formula = jinja2_env.get_template(field_name)
+                rendered_formula = formula.render(**context)
+                updates[field_name] = rendered_formula
+
+                if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                    self.logger.debug(
+                        f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
+                    )
+            except Exception as e:
+                self.logger.error(
+                    f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
+                )
+
+        return updates
+
+
 def callback_datapusher_hook(result_url, job_dict):
     # api_key_from_job = job_dict.pop("api_key", None)
     # if not api_key:
@@ -242,7 +367,7 @@ def callback_datapusher_hook(result_url, job_dict):
         result = requests.post(
             result_url,
             data=json.dumps(job_dict, cls=utils.DatetimeJsonEncoder),
-            verify=SSL_VERIFY,
+            verify=conf.SSL_VERIFY,
             headers=headers,
         )
     except requests.ConnectionError:
@@ -324,21 +449,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.addHandler(logging.StreamHandler())
     logger.setLevel(logging.DEBUG)
 
-    # check if QSV_BIN and FILE_BIN exists
-    qsv_bin = tk.config.get("ckanext.datapusher_plus.qsv_bin")
-    qsv_path = Path(qsv_bin)
-    if not qsv_path.is_file():
-        raise utils.JobError("{} not found.".format(qsv_bin))
-    file_bin = tk.config.get("ckanext.datapusher_plus.file_bin")
+    # check if conf.QSV_BIN and conf.FILE_BIN exists
+    # qsv_path = Path(conf.QSV_BIN)
+    if not Path(conf.QSV_BIN).is_file():
+        raise utils.JobError("{} not found.".format(conf.QSV_BIN))
 
-    file_path = Path(file_bin)
-    if not file_path.is_file():
-        raise utils.JobError("{} not found.".format(file_bin))
+    if not conf.FILE_BIN.is_file():
+        raise utils.JobError("{} not found.".format(conf.FILE_BIN))
 
     # make sure qsv binary variant is up-to-date
     try:
         qsv_version = subprocess.run(
-            [qsv_bin, "--version"],
+            [conf.QSV_BIN, "--version"],
             capture_output=True,
             text=True,
         )
@@ -348,20 +470,21 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if not qsv_version_info:
         """
         Sample response
-        qsvdp 0.134.0-mimalloc-Luau 0.640;polars-0.42.0-fe04390;...
+        qsvdp 4.0.0-mimalloc-geocode;Luau 0.663;self_update...
         """
         raise utils.JobError(
-            f"We expect qsv version info to be returned. Command: {qsv_bin} --version. Response: {qsv_version_info}"
+            f"We expect qsv version info to be returned. Command: {conf.QSV_BIN} --version. Response: {qsv_version_info}"
         )
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" ") : qsv_version_info.find("-")
     ].lstrip()
-    logger.info("qsv version found: {}".format(qsv_semver))
+    if conf.UPLOAD_LOG_VERBOSITY >= 1:
+        logger.info("qsv version found: {}".format(qsv_semver))
     try:
-        if semver.compare(qsv_semver, MINIMUM_QSV_VERSION) < 0:
+        if semver.compare(qsv_semver, conf.MINIMUM_QSV_VERSION) < 0:
             raise utils.JobError(
                 "At least qsv version {} required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
-                    MINIMUM_QSV_VERSION, qsv_version_info
+                    conf.MINIMUM_QSV_VERSION, qsv_version_info
                 )
             )
     except ValueError as e:
@@ -397,9 +520,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     timer_start = time.perf_counter()
 
     # fetch the resource data
-    logger.info("Fetching from: {0}...".format(resource_url))
+    if conf.UPLOAD_LOG_VERBOSITY >= 1:
+        logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
-    preview_rows = int(tk.config.get("ckanext.datapusher_plus.preview_rows"))
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
@@ -415,30 +538,30 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 scheme=rewrite_url.scheme, netloc=rewrite_url.netloc
             )
             resource_url = new_url.geturl()
-            logger.info("Rewrote resource url to: {0}".format(resource_url))
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info("Rewritten resource url to: {0}".format(resource_url))
 
     try:
         kwargs = {
             "headers": headers,
-            "timeout": tk.asint(
-                tk.config.get("ckanext.datapusher_plus.download_timeout")
-            ),
-            "verify": SSL_VERIFY,
+            "timeout": conf.TIMEOUT,
+            "verify": conf.SSL_VERIFY,
             "stream": True,
         }
-        if USE_PROXY:
-            kwargs["proxies"] = {"http": DOWNLOAD_PROXY, "https": DOWNLOAD_PROXY}
+        if conf.USE_PROXY:
+            kwargs["proxies"] = {
+                "http": conf.DOWNLOAD_PROXY,
+                "https": conf.DOWNLOAD_PROXY,
+            }
         with requests.get(resource_url, **kwargs) as response:
             response.raise_for_status()
 
             cl = response.headers.get("content-length")
-            max_content_length = int(
-                tk.config.get("ckanext.datapusher_plus.max_content_length")
-            )
+            max_content_length = conf.MAX_CONTENT_LENGTH
             ct = response.headers.get("content-type")
 
             try:
-                if cl and int(cl) > max_content_length and preview_rows > 0:
+                if cl and int(cl) > max_content_length and conf.PREVIEW_ROWS > 0:
                     raise utils.JobError(
                         "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
                             cl=DataSize(int(cl)),
@@ -471,20 +594,22 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             tmp = os.path.join(temp_dir, "tmp." + resource_format)
             length = 0
-            m = hashlib.md5()
+            # using MD5 for file deduplication only
+            # no need for it to be cryptographically secure
+            m = hashlib.md5()  # DevSkim: ignore DS126858
 
             # download the file
             if cl:
-                logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+                if conf.UPLOAD_LOG_VERBOSITY >= 1:
+                    logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
             else:
-                logger.info("Downloading file of unknown size...")
+                if conf.UPLOAD_LOG_VERBOSITY >= 1:
+                    logger.info("Downloading file of unknown size...")
 
             with open(tmp, "wb") as tmp_file:
-                for chunk in response.iter_content(
-                    int(tk.config.get("ckanext.datapusher_plus.chunk_size"))
-                ):
+                for chunk in response.iter_content(conf.CHUNK_SIZE):
                     length += len(chunk)
-                    if length > max_content_length and not preview_rows:
+                    if length > max_content_length and not conf.PREVIEW_ROWS:
                         raise utils.JobError(
                             "Resource too large to process: {cl} > max ({max_cl}).".format(
                                 cl=length, max_cl=max_content_length
@@ -523,7 +648,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if (
         resource.get("hash") == file_hash
         and not data.get("ignore_hash")
-        and not tk.config.get("ckanext.datapusher_plus.ignore_file_hash")
+        and not conf.IGNORE_FILE_HASH
         and not resource_updated
     ):
         logger.warning(
@@ -552,13 +677,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     analysis_start = time.perf_counter()
     logger.info("ANALYZING WITH QSV..")
 
+    # flag to check if the file is a spatial format
+    spatial_format_flag = False
+    simplification_failed_flag = False
     # ----------------- is it a spreadsheet? ---------------
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
     format = resource.get("format").upper()
     if format in spreadsheet_extensions:
         # if so, export spreadsheet as a CSV file
-        default_excel_sheet = tk.config.get("DEFAULT_EXCEL_SHEET")
+        default_excel_sheet = conf.DEFAULT_EXCEL_SHEET
         logger.info(
             "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
         )
@@ -574,7 +702,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_excel = subprocess.run(
                 [
-                    qsv_bin,
+                    conf.QSV_BIN,
                     "excel",
                     qsv_spreadsheet,
                     "--sheet",
@@ -597,7 +725,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # just in case the file is not actually a spreadsheet or is encrypted
             # so the user has some actionable info
             file_format = subprocess.run(
-                [file_bin, qsv_spreadsheet],
+                [conf.FILE_BIN, qsv_spreadsheet],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -613,8 +741,118 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         excel_export_msg = qsv_excel.stderr
         logger.info("{}...".format(excel_export_msg))
         tmp = qsv_excel_csv
+    elif resource_format.upper() in ["SHP", "SHP.ZIP", "GEOJSON"]:
+        logger.info("SHAPEFILE or GEOJSON file detected...")
+
+        qsv_spatial_file = os.path.join(
+            temp_dir, "qsv_spatial_" + str(uuid.uuid4()) + "." + resource_format
+        )
+        os.link(tmp, qsv_spatial_file)
+        qsv_spatial_csv = os.path.join(temp_dir, "qsv_spatial.csv")
+
+        if conf.AUTO_SPATIAL_SIMPLIFICATION:
+            # Try to convert spatial file to CSV using spatial_helpers
+            logger.info(
+                "Converting spatial file to CSV with a simplification tolerance of {}...".format(
+                    conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE
+                )
+            )
+
+            try:
+                # Use the convert_to_csv function from spatial_helpers
+                success, error_message = sh.simplify_and_convert_to_csv(
+                    qsv_spatial_file,
+                    output_csv_path=qsv_spatial_csv,
+                    tolerance=conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE,
+                    task_logger=logger,
+                )
+
+                if success:
+                    logger.info(
+                        "Spatial file successfully simplified and converted to CSV"
+                    )
+                    tmp = qsv_spatial_csv
+
+                    # Check if the resource already exists
+                    simplified_resource_name = (
+                        os.path.splitext(resource["name"])[0]
+                        + "_simplified"
+                        + os.path.splitext(resource["name"])[1]
+                    )
+                    existing_resource, existing_resource_id = resource_exists(
+                        resource["package_id"], simplified_resource_name
+                    )
+
+                    if existing_resource:
+                        logger.info(
+                            "Simplified resource already exists. Replacing it..."
+                        )
+                        delete_resource(existing_resource_id)
+                    else:
+                        logger.info(
+                            "Simplified resource does not exist. Uploading it..."
+                        )
+                        new_simplified_resource = {
+                            "package_id": resource["package_id"],
+                            "name": os.path.splitext(resource["name"])[0]
+                            + "_simplified"
+                            + os.path.splitext(resource["name"])[1],
+                            "url": "",
+                            "format": resource["format"],
+                            "hash": "",
+                            "mimetype": resource["mimetype"],
+                            "mimetype_inner": resource["mimetype_inner"],
+                        }
+                        upload_resource(new_simplified_resource, qsv_spatial_file)
+
+                    simplification_failed_flag = False
+                else:
+                    logger.warning(
+                        f"Upload of simplified spatial file failed: {error_message}"
+                    )
+                    simplification_failed_flag = True
+            except Exception as e:
+                logger.warning(f"Simplification and conversion failed: {str(e)}")
+                logger.warning(
+                    "Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {} characters...".format(
+                        conf.QSV_STATS_STRING_MAX_LENGTH
+                    )
+                )
+                simplification_failed_flag = True
+                pass
+
+        # If we are not auto-simplifying or simplification failed, use qsv geoconvert
+        if not conf.AUTO_SPATIAL_SIMPLIFICATION or simplification_failed_flag:
+            logger.info("Converting spatial file to CSV using qsv geoconvert...")
+
+            # Run qsv geoconvert
+            qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
+            try:
+                subprocess.run(
+                    [
+                        conf.QSV_BIN,
+                        "geoconvert",
+                        tmp,
+                        "geojson",
+                        "csv",
+                        "--max-length",
+                        str(conf.QSV_STATS_STRING_MAX_LENGTH),
+                        "--output",
+                        qsv_geoconvert_csv,
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as e:
+                logger.error(f"qsv geoconvert failed: {e.stderr}")
+                raise
+
+            tmp = qsv_geoconvert_csv
+            logger.info("Geoconverted successfully")
+
     else:
-        # -------------- its not a spreadsheet, its a CSV/TSV/TAB file ---------------
+        # --- its not a spreadsheet nor a spatial format, its a CSV/TSV/TAB file ------
         # Normalize & transcode to UTF-8 using `qsv input`. We need to normalize as
         # it could be a CSV/TSV/TAB dialect with differing delimiters, quoting, etc.
         # Using qsv input's --output option also auto-transcodes to UTF-8.
@@ -624,12 +862,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
         # if resource_format is CSV we don't need to normalize
         if resource_format.upper() == "CSV":
-            logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info(
+                    "Normalizing/UTF-8 transcoding {}...".format(resource_format)
+                )
         else:
             # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
-            logger.info(
-                "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
-            )
+            if conf.UPLOAD_LOG_VERBOSITY >= 1:
+                logger.info(
+                    "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
+                )
 
         qsv_input_utf_8_encoded_csv = os.path.join(
             temp_dir, "qsv_input_utf_8_encoded.csv"
@@ -642,13 +884,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             capture_output=True,
             text=True,
         )
-        logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
+        if conf.UPLOAD_LOG_VERBOSITY >= 1:
+            logger.info(
+                "Identified encoding of the file: {}".format(file_encoding.stdout)
+            )
 
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
 
-        # using iconv to re-encode in UTF-8
-        if file_encoding.stdout != "UTF-8":
+        # using iconv to re-encode in UTF-8 OR ASCII (as ASCII is a subset of UTF-8)
+        if file_encoding.stdout != "UTF-8" and file_encoding.stdout != "ASCII":
             logger.info(
                 "File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
                     file_encoding.stdout
@@ -682,7 +927,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_input = subprocess.run(
                 [
-                    qsv_bin,
+                    conf.QSV_BIN,
                     "input",
                     tmp,
                     "--trim-headers",
@@ -708,7 +953,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.info("Validating CSV...")
     try:
         subprocess.run(
-            [qsv_bin, "validate", tmp], check=True, capture_output=True, text=True
+            [conf.QSV_BIN, "validate", tmp], check=True, capture_output=True, text=True
         )
     except subprocess.CalledProcessError as e:
         # return as we can't push an invalid CSV file
@@ -721,14 +966,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # if SORT_AND_DUPE_CHECK is True or DEDUP is True
     # check if the file is sorted and if it has duplicates
     # get the record count, unsorted breaks and duplicate count as well
-    sort_and_dupe_check = tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check")
-    dedup = tk.config.get("ckanext.datapusher_plus.dedup")
-
-    if sort_and_dupe_check or dedup:
+    if conf.SORT_AND_DUPE_CHECK or conf.DEDUP:
         logger.info("Checking for duplicates and if the CSV is sorted...")
         try:
             qsv_sortcheck = subprocess.run(
-                [qsv_bin, "sortcheck", tmp, "--json"],
+                [conf.QSV_BIN, "sortcheck", tmp, "--json"],
                 capture_output=True,
                 text=True,
             )
@@ -748,34 +990,23 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         logger.info(sortcheck_msg)
 
     # --------------- Do we need to dedup? ------------------
-    # note that deduping also ends up creating a sorted CSV
-    if dedup and dupe_count > 0:
+    if conf.DEDUP and dupe_count > 0:
         qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
         logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
-        qsv_dedup_cmd = [qsv_bin, "dedup", tmp, "--output", qsv_dedup_csv]
+        qsv_extdedup_cmd = [conf.QSV_BIN, "extdedup", tmp, qsv_dedup_csv]
 
-        # if the file is already sorted,
-        # we can save a lot of time by passing the --sorted flag
-        # we also get to "stream" the file and not load it into memory,
-        # as we don't need to sort it first
-        if is_sorted:
-            qsv_dedup_cmd.append("--sorted")
         try:
-            qsv_dedup = subprocess.run(
-                qsv_dedup_cmd,
+            qsv_extdedup = subprocess.run(
+                qsv_extdedup_cmd,
                 capture_output=True,
                 text=True,
             )
         except subprocess.CalledProcessError as e:
             raise utils.JobError("Check for duplicates error: {}".format(e))
-        dupe_count = int(str(qsv_dedup.stderr).strip())
+        dupe_count = int(str(qsv_extdedup.stderr).strip())
         if dupe_count > 0:
             tmp = qsv_dedup_csv
-            logger.warning(
-                "{:,} duplicates found and removed. Note that deduping results in a sorted CSV.".format(
-                    dupe_count
-                )
-            )
+            logger.warning("{:,} duplicates found and removed.".format(dupe_count))
     elif dupe_count > 0:
         logger.warning("{:,} duplicates found but not deduping...".format(dupe_count))
 
@@ -784,7 +1015,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # should we need to change the column name to make it "db-safe"
     try:
         qsv_headers = subprocess.run(
-            [qsv_bin, "headers", "--just-names", tmp],
+            [conf.QSV_BIN, "headers", "--just-names", tmp],
             capture_output=True,
             check=True,
             text=True,
@@ -798,20 +1029,20 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # now, ensure our column/header names identifiers are "safe names"
     # i.e. valid postgres/CKAN Datastore identifiers
-    unsafe_prefix = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
-    reserved_colnames = tk.config.get(
-        "ckanext.datapuhser_plus.reserved_colnames", "_id"
-    )
     qsv_safenames_csv = os.path.join(temp_dir, "qsv_safenames.csv")
     logger.info('Checking for "database-safe" header names...')
     try:
         qsv_safenames = subprocess.run(
             [
-                qsv_bin,
+                conf.QSV_BIN,
                 "safenames",
                 tmp,
                 "--mode",
                 "json",
+                "--reserved",
+                conf.RESERVED_COLNAMES,
+                "--prefix",
+                conf.UNSAFE_PREFIX,
             ],
             capture_output=True,
             text=True,
@@ -830,7 +1061,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         )
         qsv_safenames = subprocess.run(
             [
-                qsv_bin,
+                conf.QSV_BIN,
                 "safenames",
                 tmp,
                 "--mode",
@@ -852,17 +1083,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # are all accelerated/multithreaded when an index is present
     try:
         qsv_index_file = tmp + ".idx"
-        subprocess.run([qsv_bin, "index", tmp], check=True)
+        subprocess.run([conf.QSV_BIN, "index", tmp], check=True)
     except subprocess.CalledProcessError as e:
         raise utils.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
     # so we can skip qsv count.
-    if not sort_and_dupe_check:
+    if not conf.SORT_AND_DUPE_CHECK:
         # get record count, this is instantaneous with an index
         try:
             qsv_count = subprocess.run(
-                [qsv_bin, "count", tmp], capture_output=True, check=True, text=True
+                [conf.QSV_BIN, "count", tmp], capture_output=True, check=True, text=True
             )
         except subprocess.CalledProcessError as e:
             raise utils.JobError("Cannot count records in CSV: {}".format(e))
@@ -875,7 +1106,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # log how many records we detected
     unique_qualifier = ""
-    if dedup:
+    if conf.DEDUP:
         unique_qualifier = "unique"
     logger.info("{:,} {} records detected...".format(record_count, unique_qualifier))
 
@@ -888,76 +1119,62 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     headers_cardinality = []
     qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
     qsv_stats_cmd = [
-        qsv_bin,
+        conf.QSV_BIN,
         "stats",
         tmp,
         "--infer-dates",
         "--dates-whitelist",
         "all",
+        "--stats-jsonl",
         "--output",
         qsv_stats_csv,
     ]
-    prefer_dmy = tk.config.get("ckanext.datapusher_plus.prefer_dmy")
-    if prefer_dmy:
+
+    if conf.PREFER_DMY:
         qsv_stats_cmd.append("--prefer-dmy")
-    auto_index_threshold = tk.config.get("ckanext.datapusher_plus.auto_index_threshold")
-    if auto_index_threshold:
+
+    # global conf.AUTO_INDEX_THRESHOLD
+    if conf.AUTO_INDEX_THRESHOLD:
         qsv_stats_cmd.append("--cardinality")
-    summary_stats_options = tk.config.get(
-        "ckanext.datapusher_plus.summary_stats_options"
-    )
-    if summary_stats_options:
-        qsv_stats_cmd.append(summary_stats_options)
+    if conf.SUMMARY_STATS_OPTIONS:
+        qsv_stats_cmd.append(conf.SUMMARY_STATS_OPTIONS)
 
     try:
-        qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
+        # If the file is a spatial format, we need to use --max-length
+        # to truncate overly long strings from causing issues with
+        # Python's CSV reader and Postgres's limits with the COPY command
+        if spatial_format_flag:
+            env = os.environ.copy()
+            env["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
+            qsv_stats = subprocess.run(qsv_stats_cmd, check=True, env=env)
+        else:
+            qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
     except subprocess.CalledProcessError as e:
         raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
 
-    # remove the last four rows. Do this using the qsv slice command
-    # the last four rows are qsv__rowcount, qsv__columncount, qsv__filesize_bytes, qsv__fingerprint_hash
-    # they'll be used in later phases of DRUF, but let's remove them for now until then
-    qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
-    try:
-        subprocess.run(
-            [
-                qsv_bin,
-                "slice",
-                "--start",
-                "-4",
-                "--invert",
-                qsv_stats_csv,
-                "--output",
-                qsv_slice_csv,
-            ],
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("Cannot slice CSV: {}".format(e))
-
-    # read the sliced CSV and remove the qsv__value column (the last column).
-    # Do this using the qsv select command
-    try:
-        subprocess.run(
-            [qsv_bin, "select", "!_", qsv_slice_csv, "--output", qsv_stats_csv],
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("Cannot select CSV: {}".format(e))
+    # Dictionary to look up stats by resource field name
+    resource_fields_stats = {}
 
     with open(qsv_stats_csv, mode="r") as inp:
         reader = csv.DictReader(inp)
         for row in reader:
-            fr = {k: v for k, v in row.items() if not k.startswith("qsv_")}
-            headers.append(fr.get("field", "Unnamed Column"))
+            # Add to stats dictionary with resource field name as key
+            resource_fields_stats[row["field"]] = {"stats": row}
+
+            fr = {k: v for k, v in row.items()}
+            schema_field = fr.get("field", "Unnamed Column")
+            if schema_field.startswith("qsv_"):
+                break
+            headers.append(schema_field)
             types.append(fr.get("type", "String"))
             headers_min.append(fr["min"])
             headers_max.append(fr["max"])
-            if auto_index_threshold:
+            if conf.AUTO_INDEX_THRESHOLD:
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
+    # Get the field stats for each field in the headers list
     existing = datastore_resource_exists(resource_id)
     existing_info = None
     if existing:
@@ -988,12 +1205,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
-    type_mapping = json.loads(tk.config.get("ckanext.datapusher_plus.type_mapping"))
     default_type = "String"
     temp_headers_dicts = [
         dict(
             id=field[0],
-            type=type_mapping.get(str(field[1]) if field[1] else default_type, "text"),
+            type=conf.TYPE_MAPPING.get(
+                str(field[1]) if field[1] else default_type, "text"
+            ),
         )
         for field in zip(headers, types)
     ]
@@ -1010,13 +1228,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     for idx, header in enumerate(temp_headers_dicts):
         if header["type"] == "smartint":
             if (
-                int(headers_max[idx]) <= POSTGRES_INT_MAX
-                and int(headers_min[idx]) >= POSTGRES_INT_MIN
+                int(headers_max[idx]) <= conf.POSTGRES_INT_MAX
+                and int(headers_min[idx]) >= conf.POSTGRES_INT_MIN
             ):
                 header_type = "integer"
             elif (
-                int(headers_max[idx]) <= POSTGRES_BIGINT_MAX
-                and int(headers_min[idx]) >= POSTGRES_BIGINT_MIN
+                int(headers_max[idx]) <= conf.POSTGRES_BIGINT_MAX
+                and int(headers_min[idx]) >= conf.POSTGRES_BIGINT_MIN
             ):
                 header_type = "bigint"
             else:
@@ -1037,30 +1255,166 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 h["info"] = existing_info[h["id"]]
                 # create columns with types user requested
                 type_override = existing_info[h["id"]].get("type_override")
-                if type_override in list(type_mapping.values()):
+                if type_override in list(conf.TYPE_MAPPING.values()):
                     h["type"] = type_override
 
-    logger.info(
-        "Determined headers and types: {headers}...".format(headers=headers_dicts)
+    if conf.UPLOAD_LOG_VERBOSITY >= 1:
+        logger.info(
+            "Determined headers and types: {headers}...".format(headers=headers_dicts)
+        )
+
+    # save stats to the datastore by loading qsv_stats_csv directly using COPY
+    stats_table = sql.Identifier(resource_id + "-druf-stats")
+
+    try:
+        raw_connection_statsfreq = psycopg2.connect(conf.DATASTORE_WRITE_URL)
+    except psycopg2.Error as e:
+        raise utils.JobError("Could not connect to the Datastore: {}".format(e))
+    else:
+        cur_statsfreq = raw_connection_statsfreq.cursor()
+
+    # Create stats table based on qsv stats CSV structure
+    cur_statsfreq.execute(
+        sql.SQL(
+            """
+            DROP TABLE IF EXISTS {};
+            CREATE TABLE {} (
+                field TEXT,
+                type TEXT,
+                is_ascii BOOLEAN,
+                sum TEXT,
+                min TEXT,
+                max TEXT,
+                range TEXT,
+                sort_order TEXT,
+                sortiness FLOAT,
+                min_length INTEGER,
+                max_length INTEGER,
+                sum_length INTEGER,
+                avg_length FLOAT,
+                stddev_length FLOAT,
+                variance_length FLOAT,
+                cv_length FLOAT,
+                mean FLOAT,
+                sem FLOAT,
+                geometric_mean FLOAT,
+                harmonic_mean FLOAT,
+                stddev FLOAT,
+                variance FLOAT,
+                cv FLOAT,
+                nullcount INTEGER,
+                max_precision INTEGER,
+                sparsity FLOAT,
+                cardinality INTEGER,
+                uniqueness_ratio FLOAT
+            )
+        """
+        ).format(stats_table, stats_table)
     )
 
+    # Load stats CSV directly using COPY
+    copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
+        stats_table
+    )
+
+    # Copy stats CSV to /tmp directory for debugging purposes
+    if conf.UPLOAD_LOG_VERBOSITY >= 2:
+        try:
+            debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
+            shutil.copy2(qsv_stats_csv, debug_stats_path)
+            logger.info(f"Copied stats CSV to {debug_stats_path} for debugging")
+        except Exception as e:
+            logger.warning(f"Failed to copy stats CSV to /tmp for debugging: {e}")
+
+    try:
+        with open(qsv_stats_csv, "r") as f:
+            cur_statsfreq.copy_expert(copy_sql, f)
+    except IOError as e:
+        raise utils.JobError("Could not open stats CSV file: {}".format(e))
+    except psycopg2.Error as e:
+        raise utils.JobError("Could not copy stats data to database: {}".format(e))
+
+    raw_connection_statsfreq.commit()
+
+    # ----------------------- Frequency Table ---------------------------
+    # compile a frequency table for each column
+    qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
+    qsv_freq_cmd = [
+        conf.QSV_BIN,
+        "frequency",
+        "--limit",
+        "0",
+        tmp,
+        "--output",
+        qsv_freq_csv,
+    ]
+    try:
+        qsv_freq = subprocess.run(qsv_freq_cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        raise utils.JobError("Cannot create a frequency table: {}".format(e))
+
+    # save frequency table to the datastore by loading qsv_freq_csv directly using COPY
+    # into the datastore using the resource_id + "-freq" table
+    # first, create the table
+    freq_table = sql.Identifier(resource_id + "-druf-freq")
+    cur_statsfreq.execute(
+        sql.SQL(
+            """
+            DROP TABLE IF EXISTS {};
+            CREATE TABLE {} (
+                field TEXT,
+                value TEXT,
+                count INTEGER,
+                percentage FLOAT,
+                PRIMARY KEY (field, value, count)
+            )
+        """
+        ).format(freq_table, freq_table)
+    )
+
+    # Copy frequency CSV to /tmp directory for debugging purposes
+    if conf.UPLOAD_LOG_VERBOSITY >= 2:
+        try:
+            debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
+            shutil.copy2(qsv_freq_csv, debug_freq_path)
+            logger.info(f"Copied frequency CSV to {debug_freq_path} for debugging")
+        except Exception as e:
+            logger.warning(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
+
+    # load the frequency table using COPY
+    copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
+        freq_table
+    )
+    try:
+        with open(qsv_freq_csv, "r") as f:
+            cur_statsfreq.copy_expert(copy_sql, f)
+    except IOError as e:
+        raise utils.JobError("Could not open frequency CSV file: {}".format(e))
+    except psycopg2.Error as e:
+        raise utils.JobError("Could not copy frequency data to database: {}".format(e))
+
+    raw_connection_statsfreq.commit()
+
+    cur_statsfreq.close()
+    raw_connection_statsfreq.close()
+
     # ------------------- Do we need to create a Preview?  -----------------------
-    # if PREVIEW_ROWS is not zero, create a preview using qsv slice
-    # we do the rows_to_copy > preview_rows to check if we don't need to slice
-    # the CSV anymore if we only did a partial download of N preview_rows already
+    # if conf.PREVIEW_ROWS is not zero, create a preview using qsv slice
+    # we do the rows_to_copy > conf.PREVIEW_ROWS to check if we don't need to slice
+    # the CSV anymore if we only did a partial download of N conf.PREVIEW_ROWS already
     rows_to_copy = record_count
-    if preview_rows and record_count > preview_rows:
-        if preview_rows > 0:
-            # PREVIEW_ROWS is positive, slice from the beginning
-            logger.info("Preparing {:,}-row preview...".format(preview_rows))
+    if conf.PREVIEW_ROWS and record_count > conf.PREVIEW_ROWS:
+        if conf.PREVIEW_ROWS > 0:
+            # conf.PREVIEW_ROWS is positive, slice from the beginning
+            logger.info("Preparing {:,}-row preview...".format(conf.PREVIEW_ROWS))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv_slice = subprocess.run(
                     [
-                        qsv_bin,
+                        conf.QSV_BIN,
                         "slice",
                         "--len",
-                        str(preview_rows),
+                        str(conf.PREVIEW_ROWS),
                         tmp,
                         "--output",
                         qsv_slice_csv,
@@ -1069,19 +1423,19 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 )
             except subprocess.CalledProcessError as e:
                 raise utils.JobError("Cannot create a preview slice: {}".format(e))
-            rows_to_copy = preview_rows
+            rows_to_copy = conf.PREVIEW_ROWS
             tmp = qsv_slice_csv
         else:
-            # PREVIEW_ROWS is negative, slice from the end
+            # conf.PREVIEW_ROWS is negative, slice from the end
             # TODO: do http range request so we don't have to download the whole file
             # to slice from the end
-            slice_len = abs(preview_rows)
+            slice_len = abs(conf.PREVIEW_ROWS)
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv_slice = subprocess.run(
                     [
-                        qsv_bin,
+                        conf.QSV_BIN,
                         "slice",
                         "--start",
                         "-1",
@@ -1108,18 +1462,18 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         datecols = ",".join(datetimecols_list)
 
         qsv_applydp_cmd = [
-            qsv_bin,
+            conf.QSV_BIN,
             "datefmt",
             datecols,
             tmp,
             "--output",
             qsv_applydp_csv,
         ]
-        if prefer_dmy:
+        if conf.PREFER_DMY:
             qsv_applydp_cmd.append("--prefer-dmy")
         logger.info(
             'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
-                datecols, prefer_dmy
+                datecols, conf.PREFER_DMY
             )
         )
         try:
@@ -1142,22 +1496,21 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # field in one pass
     piiscreening_start = 0
     piiscreening_elapsed = 0
-    if tk.config.get("ckanext.datastore_plus.pii_screening"):
+    if conf.PII_SCREENING:
         piiscreening_start = time.perf_counter()
-        pii_found_abort = tk.config.get("ckanext.datastore_plus.pii_found_abort")
+        pii_found_abort = conf.PII_FOUND_ABORT
 
         # DP+ comes with default regex patterns for PII (SSN, credit cards,
         # email, bank account numbers, & phone number). The DP+ admin can
         # use a custom set of regex patterns by pointing to a resource with
         # a text file, with each line having a regex pattern, and an optional
         # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
-        pii_regex_resource_id = tk.config.get(
-            "ckanext.datapusher_plus.pii_regex_resource_id_or_alias"
-        )
-        if pii_regex_resource_id:
-            pii_regex_resource_exist = datastore_resource_exists(pii_regex_resource_id)
+        if conf.PII_REGEX_RESOURCE_ID:
+            pii_regex_resource_exist = datastore_resource_exists(
+                conf.PII_REGEX_RESOURCE_ID
+            )
             if pii_regex_resource_exist:
-                pii_resource = get_resource(pii_regex_resource_id)
+                pii_resource = get_resource(conf.PII_REGEX_RESOURCE_ID)
                 pii_regex_url = pii_resource["url"]
 
                 r = requests.get(pii_regex_url)
@@ -1173,13 +1526,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         pii_found = False
         pii_regex_fname = p.absolute()
 
-        pii_quick_screen = tk.config.get("ckanext.datapusher_plus.pii_quick_screen")
-        if pii_quick_screen:
+        if conf.PII_QUICK_SCREEN:
             logger.info("Quickly scanning for PII using {}...".format(pii_regex_file))
             try:
                 qsv_searchset = subprocess.run(
                     [
-                        qsv_bin,
+                        conf.QSV_BIN,
                         "searchset",
                         "--ignore-case",
                         "--quick",
@@ -1201,7 +1553,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 qsv_searchset = subprocess.run(
                     [
-                        qsv_bin,
+                        conf.QSV_BIN,
                         "searchset",
                         "--ignore-case",
                         "--flag",
@@ -1224,12 +1576,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if pii_total_matches > 0:
                 pii_found = True
 
-        pii_show_candidates = tk.config.get(
-            "ckanext.datapusher_plus.pii_show_candidates"
-        )
-        if pii_found and pii_found_abort and not pii_show_candidates:
+        if pii_found and pii_found_abort and not conf.PII_SHOW_CANDIDATES:
             logger.error("PII Candidate/s Found!")
-            if pii_quick_screen:
+            if conf.PII_QUICK_SCREEN:
                 raise utils.JobError(
                     "PII CANDIDATE FOUND on row {}! Job aborted.".format(
                         pii_candidate_row.rstrip()
@@ -1241,7 +1590,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         pii_total_matches, pii_rows_with_matches
                     )
                 )
-        elif pii_found and pii_show_candidates and not pii_quick_screen:
+        elif pii_found and conf.PII_SHOW_CANDIDATES and not conf.PII_QUICK_SCREEN:
             # TODO: Create PII Candidates resource and set package to private if its not private
             # ------------ Create PII Preview Resource ------------------
             logger.warning(
@@ -1252,9 +1601,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             pii_resource_id = resource_id + "-pii"
 
             try:
-                raw_connection_pii = psycopg2.connect(
-                    tk.config.get("ckan.datastore.write_url")
-                )
+                raw_connection_pii = psycopg2.connect(conf.DATASTORE_WRITE_URL)
             except psycopg2.Error as e:
                 raise utils.JobError("Could not connect to the Datastore: {}".format(e))
             else:
@@ -1287,7 +1634,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             try:
                 qsv_pii_stats = subprocess.run(
                     [
-                        qsv_bin,
+                        conf.QSV_BIN,
                         "stats",
                         "--typesonly",
                         qsv_searchset_csv,
@@ -1303,7 +1650,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             pii_stats = str(qsv_pii_stats.stdout).strip()
             pii_stats_dict = [
-                dict(id=ele.split(",")[0], type=type_mapping[ele.split(",")[1]])
+                dict(id=ele.split(",")[0], type=conf.TYPE_MAPPING[ele.split(",")[1]])
                 for idx, ele in enumerate(pii_stats.splitlines()[1:], 1)
             ]
 
@@ -1396,7 +1743,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ============================================================
     copy_start = time.perf_counter()
 
-    if preview_rows:
+    if conf.PREVIEW_ROWS:
         logger.info("COPYING {:,}-row preview to Datastore...".format(rows_to_copy))
     else:
         logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
@@ -1413,19 +1760,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     copied_count = 0
     try:
-        raw_connection = psycopg2.connect(tk.config.get("ckan.datastore.write_url"))
+        raw_connection = psycopg2.connect(conf.DATASTORE_WRITE_URL)
     except psycopg2.Error as e:
         raise utils.JobError("Could not connect to the Datastore: {}".format(e))
     else:
-        copy_readbuffer_size = tk.config.get(
-            "ckanext.datapusher_plus.copy_readbuffer_size"
-        )
         cur = raw_connection.cursor()
-        """
-        truncate table to use copy freeze option and further increase
-        performance as there is no need for WAL logs to be maintained
-        https://www.postgresql.org/docs/current/populate.html#POPULATE-COPY-FROM
-        """
+
+        # truncate table to use copy freeze option and further increase
+        # performance as there is no need for WAL logs to be maintained
+        # https://www.postgresql.org/docs/current/populate.html#POPULATE-COPY-FROM
         try:
             cur.execute(
                 sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(resource_id))
@@ -1445,9 +1788,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             column_names,
         )
         # specify a 1MB buffer size for COPY read from disk
-        with open(tmp, "rb", copy_readbuffer_size) as f:
+        with open(tmp, "rb", conf.COPY_READBUFFER_SIZE) as f:
             try:
-                cur.copy_expert(copy_sql, f, size=copy_readbuffer_size)
+                cur.copy_expert(copy_sql, f, size=conf.COPY_READBUFFER_SIZE)
             except psycopg2.Error as e:
                 raise utils.JobError("Postgres COPY failed: {}".format(e))
             else:
@@ -1474,6 +1817,117 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # ============================================================
+    # PROCESS DRUF JINJA2 FORMULAE
+    # ============================================================
+    # Check if there are any fields with DRUF keys in the scheming_yaml
+    # There are two types of DRUF keys:
+    # 1. "formula": This is used to update the field value DIRECTLY
+    #    when the resource is created/updated. It can update both package and resource fields.
+    # 2. "suggestion_formula": This is used to populate the suggestion
+    #    popovers DURING data entry/curation.
+    # DRUF keys are stored as jinja2 template expressions in the scheming_yaml
+    # and are rendered using the Jinja2 template engine.
+    formulae_start = time.perf_counter()
+
+    # Fetch the scheming_yaml and package
+    package_id = resource["package_id"]
+    scheming_yaml, package = get_scheming_yaml(package_id, scheming_yaml_type="dataset")
+
+    if conf.UPLOAD_LOG_VERBOSITY >= 2:
+        logger.debug(f"package: {package}")
+
+    # Initialize the formula processor
+    formula_processor = FormulaProcessor(
+        scheming_yaml, package, resource_fields_stats, logger
+    )
+
+    # FIRST WE PROCESS THE FORMULAE THAT UPDATE THE
+    # PACKAGE AND RESOURCE FIELDS DIRECTLY
+    # using the package_patch CKAN API so we only update the fields
+    # that with formulae
+    package_updates = formula_processor.process_formulae(
+        "package", "dataset_fields", "formula"
+    )
+    if package_updates:
+        # Update package with formula results
+        package.update(package_updates)
+        try:
+            patched_package = patch_package(package)
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(f"Package after patching: {patched_package}")
+            package = patched_package
+            logger.info("PACKAGE formulae processed...")
+        except Exception as e:
+            logger.error(f"Error patching package: {str(e)}")
+
+    # Process resource formulae
+    # as this is a direct update, we update the resource fields directly
+    resource_updates = formula_processor.process_formulae(
+        "resource", "resource_fields", "formula"
+    )
+    if resource_updates:
+        # Update resource with formula results
+        resource.update(resource_updates)
+        logger.info("RESOURCE formulae processed...")
+
+    # NOW WE PROCESS THE SUGGESTIONS
+    # we update the package dpp_suggestions field
+    # from which the Suggestion popover UI will pick it up
+    package_suggestions = formula_processor.process_formulae(
+        "package", "dataset_fields", "suggestion_formula"
+    )
+    if package_suggestions:
+        revise_update_content = {"package": package_suggestions}
+        try:
+            revised_package = revise_package(
+                package_id, update={"dpp_suggestions": revise_update_content}
+            )
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(f"Package after revising: {revised_package}")
+            package = revised_package
+            logger.info("PACKAGE suggestion formulae processed...")
+        except Exception as e:
+            logger.error(f"Error revising package: {str(e)}")
+
+    # Process resource suggestion formulae
+    # Note how we still update the PACKAGE dpp_suggestions field
+    # and there is NO RESOURCE dpp_suggestions field.
+    # This is because suggestion formulae are used to populate the
+    # suggestion popover DURING data entry/curation and suggestion formulae
+    # may update both package and resource fields.
+    resource_suggestions = formula_processor.process_formulae(
+        "resource", "resource_fields", "suggestion_formula"
+    )
+    if resource_suggestions:
+        resource_name = resource["name"]
+        revise_update_content = {"resource": {resource_name: resource_suggestions}}
+
+        # Handle existing suggestions
+        if package.get("dpp_suggestions"):
+            package["dpp_suggestions"].update(revise_update_content["resource"])
+        else:
+            package["dpp_suggestions"] = revise_update_content["resource"]
+
+        try:
+            revised_package = revise_package(
+                package_id, update={"dpp_suggestions": revise_update_content}
+            )
+            if conf.UPLOAD_LOG_VERBOSITY >= 2:
+                logger.debug(f"Package after revising: {revised_package}")
+            package = revised_package
+            logger.info("RESOURCE suggestion formulae processed...")
+        except Exception as e:
+            logger.error(f"Error revising package: {str(e)}")
+
+    # -------------------- FORMULAE PROCESSING DONE --------------------
+    formulae_elapsed = time.perf_counter() - formulae_start
+    logger.info(
+        "FORMULAE PROCESSING DONE! Processed in {:,.2f} seconds.".format(
+            formulae_elapsed
+        )
+    )
+
+    # ============================================================
     # UPDATE METADATA
     # ============================================================
     metadata_start = time.perf_counter()
@@ -1482,12 +1936,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # --------------------- AUTO-ALIASING ------------------------
     # aliases are human-readable, and make it easier to use than resource id hash
     # when using the Datastore API and in SQL queries
-    auto_alias = tk.config.get("ckanext.datapusher_plus.auto_alias")
-    auto_alias_unique = tk.config.get("ckanext.datapusher_plus.auto_alias_unique")
     alias = None
-    if auto_alias:
+    if conf.AUTO_ALIAS:
         logger.info(
-            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(auto_alias_unique)
+            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(conf.AUTO_ALIAS_UNIQUE)
         )
         # get package info, so we can construct the alias
         package = get_package(resource["package_id"])
@@ -1515,7 +1967,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             else:
                 alias_count = 0
                 existing_alias_of = ""
-            if auto_alias_unique and alias_count > 1:
+            if conf.AUTO_ALIAS_UNIQUE and alias_count > 1:
                 alias_sequence = alias_count + 1
                 while True:
                     # we do this, so we're certain the new alias does not exist
@@ -1554,9 +2006,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # by default, we only add summary stats if we're not doing a partial download
     # (otherwise, you're summarizing the preview, not the whole file)
     # That is, unless SUMMARY_STATS_WITH_PREVIEW is set to true
-    if (tk.config.get("ckanext.datapusher_plus.add_summary_stats_resource")) or (
-        tk.config.get("ckanext.datapusher_plus.summary_stats_with_preview")
-    ):
+    if conf.ADD_SUMMARY_STATS_RESOURCE or conf.SUMMARY_STATS_WITH_PREVIEW:
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
@@ -1579,7 +2029,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 delete_resource(existing_stats_alias_of)
 
         stats_aliases = [stats_resource_id]
-        if auto_alias:
+        if conf.AUTO_ALIAS:
             auto_alias_stats_id = alias + "-stats"
             stats_aliases.append(auto_alias_stats_id)
 
@@ -1611,7 +2061,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         try:
             qsv_stats_stats = subprocess.run(
                 [
-                    qsv_bin,
+                    conf.QSV_BIN,
                     "stats",
                     "--typesonly",
                     qsv_stats_csv,
@@ -1625,9 +2075,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
         stats_stats_dict = [
-            dict(id=ele.split(",")[0], type=type_mapping[ele.split(",")[1]])
+            dict(id=ele.split(",")[0], type=conf.TYPE_MAPPING[ele.split(",")[1]])
             for idx, ele in enumerate(stats_stats.splitlines()[1:], 1)
         ]
+
+        logger.info(f"stats_stats_dict: {stats_stats_dict}")
 
         resource_name = resource.get("name")
         stats_resource = {
@@ -1644,6 +2096,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             aliases=stats_aliases,
             calculate_record_count=False,
         )
+
+        logger.info(f"stats_response: {stats_response}")
 
         new_stats_resource_id = stats_response["result"]["resource_id"]
 
@@ -1684,7 +2138,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
-    if preview_rows < record_count or (preview_rows > 0):
+    if conf.PREVIEW_ROWS < record_count or (conf.PREVIEW_ROWS > 0):
         resource["preview"] = True
         resource["preview_rows"] = copied_count
     else:
@@ -1721,34 +2175,36 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # For columns w/ cardinality = record_count, it's all unique values, create a unique index
     # If AUTO_INDEX_DATES is true, index all date columns
     # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
-    auto_index_dates = tk.config.get("ckanext.datastore_plus.auto_index_dates")
-    auto_unique_index = tk.config.get("ckanext.datastore_plus.auto_unique_index")
     if (
-        auto_index_threshold
-        or (auto_index_dates and datetimecols_list)
-        or auto_unique_index
+        conf.AUTO_INDEX_THRESHOLD
+        or (conf.AUTO_INDEX_DATES and datetimecols_list)
+        or conf.AUTO_UNIQUE_INDEX
     ):
         index_start = time.perf_counter()
         logger.info(
             "AUTO-INDEXING. Auto-index threshold: {:,} unique value/s. Auto-unique index: {} Auto-index dates: {} ...".format(
-                auto_index_threshold, auto_unique_index, auto_index_dates
+                conf.AUTO_INDEX_THRESHOLD, conf.AUTO_UNIQUE_INDEX, conf.AUTO_INDEX_DATES
             )
         )
         index_cur = raw_connection.cursor()
 
         # if auto_index_threshold == -1
         # we index all the columns
-        if auto_index_threshold == -1:
-            auto_index_threshold = record_count
+        if conf.AUTO_INDEX_THRESHOLD == -1:
+            conf.AUTO_INDEX_THRESHOLD = record_count
 
         index_count = 0
         for idx, cardinality in enumerate(headers_cardinality):
             curr_col = headers[idx]
-            if auto_index_threshold > 0 or auto_index_dates or auto_unique_index:
-                if cardinality == record_count and auto_unique_index:
+            if (
+                conf.AUTO_INDEX_THRESHOLD > 0
+                or conf.AUTO_INDEX_DATES
+                or conf.AUTO_UNIQUE_INDEX
+            ):
+                if cardinality == record_count and conf.AUTO_UNIQUE_INDEX:
                     # all the values are unique for this column, create a unique index
-                    if preview_rows > 0:
-                        unique_value_count = min(preview_rows, cardinality)
+                    if conf.PREVIEW_ROWS > 0:
+                        unique_value_count = min(conf.PREVIEW_ROWS, cardinality)
                     else:
                         unique_value_count = cardinality
                     logger.info(
@@ -1770,8 +2226,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                             )
                         )
                     index_count += 1
-                elif cardinality <= auto_index_threshold or (
-                    auto_index_dates and (curr_col in datetimecols_list)
+                elif cardinality <= conf.AUTO_INDEX_THRESHOLD or (
+                    conf.AUTO_INDEX_DATES and (curr_col in datetimecols_list)
                 ):
                     # cardinality <= auto_index_threshold or its a date and auto_index_date is true
                     # create an index
@@ -1830,7 +2286,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     end_msg = f"""
     DATAPUSHER+ JOB DONE!
       Download: {fetch_elapsed:,.2f}
-      Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
+      Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
+      Formulae processing: {formulae_elapsed:,.2f}
       COPYing: {copy_elapsed:,.2f}
       Metadata updates: {metadata_elapsed:,.2f}
       Indexing: {index_elapsed:,.2f}

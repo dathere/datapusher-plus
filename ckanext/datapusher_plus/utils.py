@@ -1,3 +1,6 @@
+# encoding: utf-8
+# flake8: noqa: E501
+
 from __future__ import division
 from __future__ import absolute_import
 

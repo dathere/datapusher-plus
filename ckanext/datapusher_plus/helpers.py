@@ -1,4 +1,6 @@
 # encoding: utf-8
+# flake8: noqa: E501
+
 from __future__ import annotations
 
 
@@ -6,10 +8,8 @@ import json
 import logging
 import datetime
 from typing import Any
-from sqlalchemy.orm import Query
 
 import ckan.plugins.toolkit as toolkit
-from ckan import model as ckan_model
 
 from ckanext.datapusher_plus.model import Jobs, Metadata, Logs
 import ckanext.datapusher_plus.job_exceptions as jex
@@ -21,27 +21,24 @@ log = logging.getLogger(__name__)
 
 def datapusher_status(resource_id: str):
     try:
-        return toolkit.get_action('datapusher_status')(
-            {}, {'resource_id': resource_id})
+        return toolkit.get_action("datapusher_status")({}, {"resource_id": resource_id})
     except toolkit.ObjectNotFound:
-        return {
-            'status': 'unknown'
-        }
+        return {"status": "unknown"}
 
 
 def datapusher_status_description(status: dict[str, Any]):
 
     CAPTIONS = {
-        'complete': _('Complete'),
-        'pending': _('Pending'),
-        'submitting': _('Submitting'),
-        'error': _('Error'),
+        "complete": _("Complete"),
+        "pending": _("Pending"),
+        "submitting": _("Submitting"),
+        "error": _("Error"),
     }
 
-    DEFAULT_STATUS = _('Not Uploaded Yet')
+    DEFAULT_STATUS = _("Not Uploaded Yet")
 
     try:
-        job_status = status['task_info']['status']
+        job_status = status["task_info"]["status"]
         return CAPTIONS.get(job_status, job_status.capitalize())
     except (KeyError, TypeError):
         return DEFAULT_STATUS
@@ -131,6 +128,7 @@ def get_job(job_id, limit=None, use_aps_id=False):
 
     return result_dict
 
+
 def add_pending_job(
     job_id, api_key, job_type, job_key=None, data=None, metadata=None, result_url=None
 ):
@@ -191,8 +189,21 @@ def add_pending_job(
 
     if not metadata:
         metadata = {}
-    
-    job = Jobs(job_id, job_type, "pending", data, None, None, None, None, None, result_url, api_key, job_key)
+
+    job = Jobs(
+        job_id,
+        job_type,
+        "pending",
+        data,
+        None,
+        None,
+        None,
+        None,
+        None,
+        result_url,
+        api_key,
+        job_key,
+    )
     try:
         job.save()
     except Exception as e:
@@ -288,17 +299,16 @@ def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
     if "data" in job_dict:
         job_dict["data"] = str(job_dict["data"])
 
-    
     try:
         job = Jobs.get(job_id)
         if not job:
             raise Exception("Job not found")
-        #dicticize the job
+        # dicticize the job
         jobs_dict = job.as_dict()
         jobs_dict.update(job_dict)
 
         Jobs.update(jobs_dict)
-        
+
     except Exception as e:
         log.error("Failed to update job %s: %s", job_id, e)
         raise e
@@ -373,8 +383,3 @@ def delete_api_key(job_id):
 def set_aps_job_id(job_id, aps_job_id):
 
     update_job(job_id, {"aps_job_id": aps_job_id})
-
-
-
-
-

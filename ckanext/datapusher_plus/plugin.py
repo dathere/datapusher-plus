@@ -1,4 +1,6 @@
 # encoding: utf-8
+# flake8: noqa: E501
+
 from __future__ import annotations
 
 from ckan.common import CKANConfig
@@ -71,6 +73,9 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
 
     # IResourceController
 
+    # def before_resource_create(self, context, resource_dict: dict[str, Any]):
+    #     self._submit_to_datapusher(resource_dict)
+
     def after_resource_create(self, context, resource_dict: dict[str, Any]):
         self._submit_to_datapusher(resource_dict)
 
@@ -83,14 +88,14 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         context = {"model": model, "ignore_auth": True, "defer_commit": True}
 
         resource_format = resource_dict.get("format")
-        supported_formats = tk.config.get(
-            "ckan.datapusher.formats") or tk.config.get(
-                "ckanext.datapusher_plus.formats"
+        supported_formats = tk.config.get("ckan.datapusher.formats") or tk.config.get(
+            "ckanext.datapusher_plus.formats"
         )
         if not supported_formats:
             log.debug(
                 "No supported formats configured,\
-                    using DataPusher Plus internals")
+                    using DataPusher Plus internals"
+            )
             supported_formats = ["csv", "xls", "xlsx", "tsv"]
 
         submit = (

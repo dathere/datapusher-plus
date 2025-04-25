@@ -1,8 +1,7 @@
 # encoding: utf-8
+# flake8: noqa: E501
 
 from __future__ import annotations
-
-
 
 import logging
 from typing import cast
@@ -14,18 +13,18 @@ import ckan.plugins.toolkit as tk
 import ckanext.datastore.backend as datastore_backend
 from ckan.cli import error_shout
 
-if tk.check_ckan_version('2.10'):
+if tk.check_ckan_version("2.10"):
     from ckan.types import Context
 
 log = logging.getLogger(__name__)
 
 question = (
-    u"Data in any datastore resource that isn't in their source files "
-    u"(e.g. data added using the datastore API) will be permanently "
-    u"lost. Are you sure you want to proceed?"
+    "Data in any datastore resource that isn't in their source files "
+    "(e.g. data added using the datastore API) will be permanently "
+    "lost. Are you sure you want to proceed?"
 )
 requires_confirmation = click.option(
-    u'--yes', u'-y', is_flag=True, help=u'Always answer yes to questions'
+    "--yes", "-y", is_flag=True, help="Always answer yes to questions"
 )
 
 
