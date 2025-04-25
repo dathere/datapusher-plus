@@ -6,11 +6,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## What's Changed
-* twdh-0.6-release by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/175
-* Update cli.py to work with CKAN 2.9 by @minhajuddin2510 in https://github.com/dathere/datapusher-plus/pull/176
-* DP+ v2.0.0 - The Data Resource Upload First (DRUF) Workflow by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/177
+## [2.0.0] - 2025-04-25
 
+## Highlights
+Data Resource Upload First (DRUF) Workflow is here!
+A workflow that flips the old CKAN traditional data ingestion on its head.
+ * Instead of filling out the metadata first and then uploading the data, users upload data resources first 
+ * In a few seconds, even for very large datasets, analysis and validation is done while precompiling statistical metadata
+ * This precompiled metadata are then used by formulas defined in the scheming yaml files to either precompute other metadata fields and/or to offer metadata suggestions
+ * Formulas use the same powerful Jinja2 template engine that powers CKAN's templating system.
+ * It comes with an extensible library of Jinja2 filters/functions that can be used in formulas ala Excel.
+
+The DRUF reinvents CKAN data ingestion - making it easier for Data Publishers to ensure their data catalog has high-quality, high-resolution metadata that actually reflects the and describes the data in the catalog.
+
+---
+
+### Added
+* Data Resource Upload First (DRUF) Workflow
+  * Enhanced resource validation for DRUF workflow
+  * Formulas for precomputing metadata/metadata sugggestions
+  * Spatial file support - supports GeoJSON and Shapefiles
+* Support for CKAN 2.9 compatibility in CLI operations
+* Enhanced error handling and logging for resource uploads
+
+### Changed
+* Updated CLI interface to work with CKAN 2.9
+* Refactored resource upload process to support DRUF workflow
+* Improved error messages and user feedback
+* Enhanced configuration handling
+
+### Fixed
+* Various bug fixes and improvements for CKAN 2.9 compatibility
+* Resource upload process reliability improvements
+
+### Contributors
+* @tino097
+* @minhajuddin2510
+* @jqnatividad
 
 **Full Changelog**: https://github.com/dathere/datapusher-plus/compare/1.0.4...2.0.0
 
