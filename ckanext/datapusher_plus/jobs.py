@@ -784,9 +784,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                     existing_resource, existing_resource_id = resource_exists(
                         resource["package_id"], simplified_resource_name
                     )
-                    logger.info(
-                        f"package {resource['package_id']} resource {existing_resource_id}..."
-                    )
 
                     if existing_resource:
                         logger.info(
