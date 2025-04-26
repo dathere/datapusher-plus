@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# flake8: noqa: E501
+
 # Always prefer setuptools over distutils
 from setuptools import setup, find_packages
 from codecs import open  # To use a consistent encoding
@@ -16,9 +18,9 @@ setup(
     # Versions should comply with PEP440.  For a discussion on single-sourcing
     # the version across setup.py and the project code, see
     # http://packaging.python.org/en/latest/tutorial.html#version
-    version='1.0.0-alpha',
+    version='2.0.0',
 
-    description="A standalone web service that parses the contents of a CKAN site's data files (CSV, TSV, Excel and ODS) and pushes them into its DataStore. Accelerated by qsv.",
+    description="Next-generation, extensible Data Ingestion framework for CKAN. Accelerated by qsv.",
     long_description=long_description,
     long_description_content_type='text/markdown',
 
@@ -92,8 +94,7 @@ setup(
         [babel.extractors]
         ckan = ckan.lib.extract:extract_ckan
 
-    '''
-    ,
+    ''',
     message_extractors={
         'ckanext': [
             ('**.py', 'python', None),
