@@ -25,10 +25,9 @@ POSTGRES_BIGINT_MIN = -9223372036854775808
 # QSV version requirements
 MINIMUM_QSV_VERSION = "4.0.0"
 
-# Logging verbosity (0 = None, 1 = INFO, 2 = DEBUG)
-UPLOAD_LOG_VERBOSITY = tk.asint(
-    tk.config.get("ckanext.datapusher_plus.upload_log_verbosity", 1)
-)
+# Logging level
+# DEBUG, INFO, WARNING, ERROR, CRITICAL
+UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "INFO")
 
 # PII screening settings
 PII_SCREENING = tk.asbool(tk.config.get("ckanext.datastore_plus.pii_screening", False))

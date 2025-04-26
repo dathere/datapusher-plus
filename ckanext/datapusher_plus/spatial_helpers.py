@@ -22,7 +22,6 @@ def simplify_polygon(
     relative_tolerance: float,
     log: logging.Logger,
     to_meter_proj: Optional[callable] = None,
-    verbosity: int = 1,
 ) -> Union[Polygon, MultiPolygon]:
     """Helper function to simplify polygon geometries while preserving topology.
 
@@ -33,13 +32,15 @@ def simplify_polygon(
         to_meter_proj: Optional transform function to convert coordinates to meters
     """
     if isinstance(geom, MultiPolygon):
-        if verbosity >= 2:
-            log.debug("Processing MultiPolygon with {} parts".format(len(geom.geoms)))
+        log.debug("Processing MultiPolygon with {} parts".format(len(geom.geoms)))
         # Handle each polygon in the multipolygon separately
         simplified_polys = []
         for poly in geom.geoms:
             simplified_poly = simplify_polygon(
-                poly, relative_tolerance, log, to_meter_proj, verbosity
+                poly,
+                relative_tolerance,
+                log,
+                to_meter_proj,
             )
             if simplified_poly and not simplified_poly.is_empty:
                 simplified_polys.append(simplified_poly)
@@ -64,21 +65,20 @@ def simplify_polygon(
             diagonal = ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
             abs_tolerance = float(diagonal) * float(relative_tolerance)
 
-            if verbosity >= 2:
-                log.debug(
-                    "  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
-                        minx, miny, maxx, maxy
-                    )
+            log.debug(
+                "  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
+                    minx, miny, maxx, maxy
                 )
-                log.debug("  Geometry diagonal length: {:.2f}".format(float(diagonal)))
-                log.debug(
-                    "  Relative tolerance: {:.4f}% of diagonal".format(
-                        float(relative_tolerance) * 100
-                    )
+            )
+            log.debug("  Geometry diagonal length: {:.2f}".format(float(diagonal)))
+            log.debug(
+                "  Relative tolerance: {:.4f}% of diagonal".format(
+                    float(relative_tolerance) * 100
                 )
-                log.debug(
-                    "  Absolute tolerance: {:.2f} meters".format(float(abs_tolerance))
-                )
+            )
+            log.debug(
+                "  Absolute tolerance: {:.2f} meters".format(float(abs_tolerance))
+            )
         except Exception as e:
             log.debug(f"  Error calculating bounds/tolerance: {str(e)}")
             return geom
@@ -102,8 +102,7 @@ def simplify_polygon(
                 abs_tolerance, preserve_topology=True
             )
         except Exception as e:
-            if verbosity >= 2:
-                log.debug(f"  Error processing exterior ring: {str(e)}")
+            log.debug(f"  Error processing exterior ring: {str(e)}")
             return geom
 
         # Only proceed if the simplified exterior is valid
@@ -119,10 +118,9 @@ def simplify_polygon(
                             fx, fy = float(x), float(y)
                             interior_coords.append((fx, fy))
                         except (ValueError, TypeError) as e:
-                            if verbosity >= 2:
-                                log.debug(
-                                    f"    Error converting interior {ring_idx} coordinate {i}: (x={x}, y={y}), Error: {str(e)}"
-                                )
+                            log.debug(
+                                f"    Error converting interior {ring_idx} coordinate {i}: (x={x}, y={y}), Error: {str(e)}"
+                            )
                             continue
 
                     if interior_coords:
@@ -136,10 +134,7 @@ def simplify_polygon(
                         ):
                             simplified_interiors.append(simplified_interior)
                 except Exception as e:
-                    if verbosity >= 2:
-                        log.debug(
-                            f"  Error processing interior ring {ring_idx}: {str(e)}"
-                        )
+                    log.debug(f"  Error processing interior ring {ring_idx}: {str(e)}")
                     continue
 
             # Create new polygon with simplified exterior and interiors
@@ -156,21 +151,15 @@ def simplify_polygon(
                                 lambda x, y: (x, y), new_poly
                             )  # Transform back to original CRS
                         except Exception as e:
-                            if verbosity >= 2:
-                                log.debug(
-                                    f"  Transform back from meters failed: {str(e)}"
-                                )
+                            log.debug(f"  Transform back from meters failed: {str(e)}")
                             return geom
                     return new_poly
                 else:
-                    if verbosity >= 2:
-                        log.debug("Created polygon is invalid")
+                    log.debug("Created polygon is invalid")
             except Exception as e:
-                if verbosity >= 2:
-                    log.debug(f"  Failed to create simplified polygon: {str(e)}")
+                log.debug(f"  Failed to create simplified polygon: {str(e)}")
     except Exception as e:
-        if verbosity >= 2:
-            log.debug(f"  Simplification error: {str(e)}")
+        log.debug(f"  Simplification error: {str(e)}")
 
     # If anything fails, return original geometry
     return geom
@@ -181,7 +170,6 @@ def simplify_and_convert_to_csv(
     output_csv_path: Optional[Union[str, Path]] = None,
     tolerance: float = 0.001,  # Now represents a relative tolerance (0.1%)
     task_logger: Optional[logging.Logger] = None,
-    verbosity: int = 1,
 ) -> Tuple[bool, Optional[str]]:
     """
     Simplify and convert a spatial file (Shapefile, GeoJSON, etc.) to CSV format.
@@ -194,7 +182,6 @@ def simplify_and_convert_to_csv(
         output_csv_path: Path to the output CSV file (optional, defaults to input path with .csv extension)
         tolerance: Relative simplification tolerance as a percentage (default: 0.001 or 0.1% of geometry size)
         task_logger: Optional logger to use for logging (if not provided, module logger will be used)
-        verbosity: Logging verbosity level (0=None, 1=INFO, 2=DEBUG), defaults to 1
 
     Returns:
         Tuple containing:
@@ -273,17 +260,15 @@ def simplify_and_convert_to_csv(
         for i, feat in enumerate(features):
             try:
                 # Create geometry and simplify
-                if verbosity >= 2:
-                    log.debug(f"Feature {i} simplification:")
-                    log.debug(f"  Raw geometry: {feat['geometry']}")
+                log.debug(f"Feature {i} simplification:")
+                log.debug(f"  Raw geometry: {feat['geometry']}")
 
                 # Convert GeoJSON geometry to Shapely geometry
                 try:
                     original_geom = shape(feat["geometry"])
-                    if verbosity >= 2:
-                        log.debug(
-                            f"  Geometry type: {original_geom.geom_type}  Is valid: {original_geom.is_valid}  Is empty: {original_geom.is_empty}"
-                        )
+                    log.debug(
+                        f"  Geometry type: {original_geom.geom_type}  Is valid: {original_geom.is_valid}  Is empty: {original_geom.is_empty}"
+                    )
                 except Exception as e:
                     log.warning(
                         f"Could not create Shapely geometry for feature {i}: {str(e)}"
@@ -294,11 +279,8 @@ def simplify_and_convert_to_csv(
                 try:
                     original_wkt = dumps(original_geom)
                     vertex_count = len(original_wkt.split(","))
-                    if verbosity >= 2:
-                        log.debug(
-                            f"  Original WKT (first 50 chars): {original_wkt[:50]}"
-                        )
-                        log.debug(f"  Original vertices: {vertex_count}")
+                    log.debug(f"  Original WKT (first 50 chars): {original_wkt[:50]}")
+                    log.debug(f"  Original vertices: {vertex_count}")
                 except Exception as e:
                     log.warning(
                         f"Could not convert geometry to WKT for feature {i}: {str(e)}"
@@ -308,37 +290,33 @@ def simplify_and_convert_to_csv(
                 # Handle polygon geometries specially
                 if isinstance(original_geom, (Polygon, MultiPolygon)):
                     simplified = simplify_polygon(
-                        original_geom, tolerance, log, to_meter_proj, verbosity
+                        original_geom, tolerance, log, to_meter_proj
                     )
                 else:
                     # For non-polygon geometries, try direct simplification
                     try:
                         if to_meter_proj:
                             original_geom = transform(to_meter_proj, original_geom)
-                            if verbosity >= 2:
-                                log.debug("  Transformed to meters")
+                            log.debug("  Transformed to meters")
 
                         # Calculate absolute tolerance based on geometry size
                         minx, miny, maxx, maxy = original_geom.bounds
                         diagonal = ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
                         abs_tolerance = float(diagonal) * float(tolerance)
 
-                        if verbosity >= 2:
-                            log.debug(
-                                "  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
-                                    minx, miny, maxx, maxy
-                                )
+                        log.debug(
+                            "  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
+                                minx, miny, maxx, maxy
                             )
-                            log.debug(
-                                "  Geometry diagonal length: {:.2f}".format(
-                                    float(diagonal)
-                                )
+                        )
+                        log.debug(
+                            "  Geometry diagonal length: {:.2f}".format(float(diagonal))
+                        )
+                        log.debug(
+                            "  Absolute tolerance: {:.2f} meters".format(
+                                float(abs_tolerance)
                             )
-                            log.debug(
-                                "  Absolute tolerance: {:.2f} meters".format(
-                                    float(abs_tolerance)
-                                )
-                            )
+                        )
 
                         # Get coordinates and ensure they're float
                         coords = []
@@ -353,8 +331,7 @@ def simplify_and_convert_to_csv(
                                 continue
 
                         if coords:
-                            if verbosity >= 2:
-                                log.debug(f"  Processed {len(coords)} coordinates")
+                            log.debug(f"  Processed {len(coords)} coordinates")
                             coords = np.array(coords, dtype=np.float64)
                             original_geom = type(original_geom)(coords)
                             simplified = original_geom.simplify(
@@ -362,13 +339,11 @@ def simplify_and_convert_to_csv(
                             )
                             if to_meter_proj:
                                 simplified = transform(lambda x, y: (x, y), simplified)
-                                if verbosity >= 2:
-                                    log.debug("  Transformed back from meters")
+                                log.debug("  Transformed back from meters")
                         else:
-                            if verbosity >= 2:
-                                log.info(
-                                    "  No valid coordinates found, using original geometry"
-                                )
+                            log.debug(
+                                "  No valid coordinates found, using original geometry"
+                            )
                             simplified = original_geom
                     except Exception as e:
                         log.debug(f"  Simplification failed: {str(e)}")
@@ -378,14 +353,12 @@ def simplify_and_convert_to_csv(
                 try:
                     simplified_wkt = dumps(simplified)
                     simplified_vertex_count = len(simplified_wkt.split(","))
-                    if verbosity >= 2:
-                        log.info(f"  Simplified vertices: {simplified_vertex_count}")
+                    log.debug(f"  Simplified vertices: {simplified_vertex_count}")
 
                     if vertex_count > 0:  # Avoid division by zero
                         reduction = (1 - simplified_vertex_count / vertex_count) * 100
                         total_reduction += reduction
-                        if verbosity >= 2:
-                            log.info("  Reduction: {:.1f}%".format(float(reduction)))
+                        log.debug("  Reduction: {:.1f}%".format(float(reduction)))
 
                     simplified_geoms.append(simplified_wkt)
                     valid_attributes.append(feat["properties"])
