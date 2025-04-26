@@ -316,10 +316,9 @@ class FormulaProcessor:
         if not formula_fields:
             return
 
-        if conf.UPLOAD_LOG_VERBOSITY >= 1:
-            self.logger.info(
-                f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
-            )
+        self.logger.info(
+            f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
+        )
 
         jinja2_formulae = {}
         for schema_field in formula_fields:
@@ -327,10 +326,9 @@ class FormulaProcessor:
             template = schema_field[formula_type]
             jinja2_formulae[field_name] = template
 
-            if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                self.logger.debug(
-                    f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
-                )
+            self.logger.debug(
+                f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
+            )
 
         context = {"package": self.package, "resource": self.resource_fields_stats}
         context.update(jinja2_formulae)
@@ -344,10 +342,9 @@ class FormulaProcessor:
                 rendered_formula = formula.render(**context)
                 updates[field_name] = rendered_formula
 
-                if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                    self.logger.debug(
-                        f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
-                    )
+                self.logger.debug(
+                    f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
+                )
             except Exception as e:
                 self.logger.error(
                     f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
@@ -445,9 +442,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     handler = utils.StoringHandler(task_id, input)
     logger = logging.getLogger(task_id)
     logger.addHandler(handler)
+
     # also show logs on stderr
     logger.addHandler(logging.StreamHandler())
-    logger.setLevel(logging.DEBUG)
+    log_level = getattr(logging, conf.UPLOAD_LOG_LEVEL.upper())
+
+    # set the log level to the config upload_log_level
+    logger.setLevel(logging.INFO)
+    logger.info(f"Setting log level to {logging.getLevelName(int(log_level))}")
+    logger.setLevel(log_level)
 
     # check if conf.QSV_BIN and conf.FILE_BIN exists
     # qsv_path = Path(conf.QSV_BIN)
@@ -478,8 +481,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_semver = qsv_version_info[
         qsv_version_info.find(" ") : qsv_version_info.find("-")
     ].lstrip()
-    if conf.UPLOAD_LOG_VERBOSITY >= 1:
-        logger.info("qsv version found: {}".format(qsv_semver))
+
+    logger.info("qsv version found: {}".format(qsv_semver))
     try:
         if semver.compare(qsv_semver, conf.MINIMUM_QSV_VERSION) < 0:
             raise utils.JobError(
@@ -520,8 +523,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     timer_start = time.perf_counter()
 
     # fetch the resource data
-    if conf.UPLOAD_LOG_VERBOSITY >= 1:
-        logger.info("Fetching from: {0}...".format(resource_url))
+    logger.info("Fetching from: {0}...".format(resource_url))
     headers = {}
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
@@ -538,8 +540,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 scheme=rewrite_url.scheme, netloc=rewrite_url.netloc
             )
             resource_url = new_url.geturl()
-            if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info("Rewritten resource url to: {0}".format(resource_url))
+            logger.info("Rewritten resource url to: {0}".format(resource_url))
 
     try:
         kwargs = {
@@ -600,11 +601,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             # download the file
             if cl:
-                if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                    logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+                logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
             else:
-                if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                    logger.info("Downloading file of unknown size...")
+                logger.info("Downloading file of unknown size...")
 
             with open(tmp, "wb") as tmp_file:
                 for chunk in response.iter_content(conf.CHUNK_SIZE):
@@ -666,6 +665,20 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             DataSize(length), fetch_elapsed
         )
     )
+
+    # # Check if the file is a zip file
+    # if resource_format.upper() == "ZIP":
+    #     logger.info("ZIP file detected...")
+    #     # get the zip file's metadata
+    #     # zip_metadata = zipfile.ZipFile(tmp, "r").infolist()
+    #     # logger.info("ZIP file metadata: {}".format(zip_metadata))
+
+    #     # # get the zip file's contents
+    #     # zip_contents = zipfile.ZipFile(tmp, "r").namelist()
+    #     # logger.info("ZIP file contents: {}".format(zip_contents))
+
+    #     extracted_metadata = dph.extract_zip_or_metadata(tmp, os.path.join(temp_dir, "zip_metadata.csv"))
+    #     logger.info("Extracted metadata: {}".format(extracted_metadata))
 
     # ===================================================================================
     # ANALYZE WITH QSV
@@ -862,16 +875,12 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
         # if resource_format is CSV we don't need to normalize
         if resource_format.upper() == "CSV":
-            if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info(
-                    "Normalizing/UTF-8 transcoding {}...".format(resource_format)
-                )
+            logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
         else:
             # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
-            if conf.UPLOAD_LOG_VERBOSITY >= 1:
-                logger.info(
-                    "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
-                )
+            logger.info(
+                "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
+            )
 
         qsv_input_utf_8_encoded_csv = os.path.join(
             temp_dir, "qsv_input_utf_8_encoded.csv"
@@ -884,10 +893,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             capture_output=True,
             text=True,
         )
-        if conf.UPLOAD_LOG_VERBOSITY >= 1:
-            logger.info(
-                "Identified encoding of the file: {}".format(file_encoding.stdout)
-            )
+        logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
 
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
@@ -1258,10 +1264,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if type_override in list(conf.TYPE_MAPPING.values()):
                     h["type"] = type_override
 
-    if conf.UPLOAD_LOG_VERBOSITY >= 1:
-        logger.info(
-            "Determined headers and types: {headers}...".format(headers=headers_dicts)
-        )
+    logger.info(
+        "Determined headers and types: {headers}...".format(headers=headers_dicts)
+    )
 
     # save stats to the datastore by loading qsv_stats_csv directly using COPY
     stats_table = sql.Identifier(resource_id + "-druf-stats")
@@ -1318,13 +1323,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy stats CSV to /tmp directory for debugging purposes
-    if conf.UPLOAD_LOG_VERBOSITY >= 2:
+    more_debug_info = logger.getEffectiveLevel() >= logging.DEBUG
+    if more_debug_info:
         try:
             debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
             shutil.copy2(qsv_stats_csv, debug_stats_path)
-            logger.info(f"Copied stats CSV to {debug_stats_path} for debugging")
+            logger.debug(f"Copied stats CSV to {debug_stats_path} for debugging")
         except Exception as e:
-            logger.warning(f"Failed to copy stats CSV to /tmp for debugging: {e}")
+            logger.debug(f"Failed to copy stats CSV to /tmp for debugging: {e}")
 
     try:
         with open(qsv_stats_csv, "r") as f:
@@ -1373,13 +1379,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy frequency CSV to /tmp directory for debugging purposes
-    if conf.UPLOAD_LOG_VERBOSITY >= 2:
+    if more_debug_info:
         try:
             debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
             shutil.copy2(qsv_freq_csv, debug_freq_path)
-            logger.info(f"Copied frequency CSV to {debug_freq_path} for debugging")
+            logger.debug(f"Copied frequency CSV to {debug_freq_path} for debugging")
         except Exception as e:
-            logger.warning(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
+            logger.debug(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
 
     # load the frequency table using COPY
     copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
@@ -1833,8 +1839,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     package_id = resource["package_id"]
     scheming_yaml, package = get_scheming_yaml(package_id, scheming_yaml_type="dataset")
 
-    if conf.UPLOAD_LOG_VERBOSITY >= 2:
-        logger.debug(f"package: {package}")
+    logger.debug(f"package: {package}")
 
     # Initialize the formula processor
     formula_processor = FormulaProcessor(
@@ -1853,8 +1858,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         package.update(package_updates)
         try:
             patched_package = patch_package(package)
-            if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                logger.debug(f"Package after patching: {patched_package}")
+            logger.debug(f"Package after patching: {patched_package}")
             package = patched_package
             logger.info("PACKAGE formulae processed...")
         except Exception as e:
@@ -1882,8 +1886,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             revised_package = revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
-            if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                logger.debug(f"Package after revising: {revised_package}")
+            logger.debug(f"Package after revising: {revised_package}")
             package = revised_package
             logger.info("PACKAGE suggestion formulae processed...")
         except Exception as e:
@@ -1912,8 +1915,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             revised_package = revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
-            if conf.UPLOAD_LOG_VERBOSITY >= 2:
-                logger.debug(f"Package after revising: {revised_package}")
+            logger.debug(f"Package after revising: {revised_package}")
             package = revised_package
             logger.info("RESOURCE suggestion formulae processed...")
         except Exception as e:
