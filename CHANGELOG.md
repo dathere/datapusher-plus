@@ -8,17 +8,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2025-04-25
 
-## Highlights
-Data Resource Upload First (DRUF) Workflow is here!
+## 🎉 Data Resource Upload First (DRUF) Workflow is finally here! 🎉 
 A workflow that flips the old CKAN traditional data ingestion on its head.
  * Instead of filling out the metadata first and then uploading the data, users upload data resources first 
  * In a few seconds, even for very large datasets, analysis and validation is done while precompiling statistical metadata
- * This precompiled metadata are then used by formulas defined in the scheming yaml files to either precompute other metadata fields and/or to offer metadata suggestions
- * Formulas use the same powerful Jinja2 template engine that powers CKAN's templating system.
- * It comes with an extensible library of Jinja2 filters/functions that can be used in formulas ala Excel.
+ * This precompiled metadata are then used by Metadata Formulae defined in the [scheming](https://github.com/ckan/ckanext-scheming?tab=readme-ov-file#ckanext-scheming) yaml files to either precompute other metadata fields (on both package & resource levels) or to offer metadata suggestions
+ * Metadata Formulae use the same powerful Jinja2 template engine that powers CKAN's templating system.
+ * It comes with an extensible library of Jinja2 filters/functions that can be used in Metadata Formulae ala Excel.
 
-The DRUF reinvents CKAN data ingestion - making it easier for Data Publishers to ensure their data catalog has high-quality, high-resolution metadata that actually reflects the and describes the data in the catalog.
+The DRUF reinvents CKAN data ingestion - by automatically calculating/suggesting "**Automagical Metadata**" - high-quality, high-resolution metadata that reflects and describes what's **INSIDE** the dataset (e.g. summary stats; frequency table; spatial extent, date range, outliers, etc. calculated with Metadata Formulae) in addition to metadata about the dataset **FILE** (e.g. last updated, size of the file, owner, format, license, etc - what's normally found in traditional data catalogs).
 
+Future improvements planned:
+- **"entry-time" Metadata Formulae**
+In addition to the two formula types (`formula` to set a metadata field directly during creation/update; and `suggestion_formula` to suggest values using the Bootstap Popover UI), we'll add the ability to allow Data Publishers to enter formulas while they're entering metadata - fully embracing the Excel formula UI/UX aesthetic.
+- **DCAT3-optimized reference profiles**
+Following implementation guidance for both [DCAT-US v3](https://doi-do.github.io/dcat-us/) and [DCAT-AP 3](https://semiceu.github.io/DCAT-AP/releases/3.0.0/) scheming profiles with Metadata Formulae to compute recommended and optional properties that allow publishers to more fully take advantage of DCAT3 features and improvements - metadata properties that are often too laborious to manually compile.
+- **Co-Curator AI**
+"Automagical metadata" is the perfect context for AI engines - as it summarizes even very large datasets in just a few kilobytes. It allows the Co-Curator[^1] to suggest tags, descriptions, links to related data sets and chat about the corpus WHILE the Data Publisher is curating the data.
+- **Inline Data Validation**
+Optional ability to [infer an initial JSON Schema validation file](https://github.com/dathere/qsv?tab=readme-ov-file#schema_deeplink), and then [validate future updates](https://github.com/dathere/qsv?tab=readme-ov-file#validate_deeplink) to the dataset using it, leveraging the same blazing-fast qsv engine (validating up to 340,000 records/per second[^2]). 
+- **Customizable DRUF Data ingestion pipeline**
+Currently, there are [numerous configuration settings](https://github.com/dathere/datapusher-plus/blob/main/ckanext/datapusher_plus/config.py) to fine-tune the DRUF data-ingestion pipeline. However, the built-in default pipeline can only be customized to a limit without customizing the code. We will expose hooks that CKAN operators can take advantage of to tailor their DRUF pipelines to meet their requirements, while preserving the ability to access the precompiled statistical metadata that DP+ maintains.
+- **Dynamic loading of Formula filters/functions**
+So users can share custom Jinja2 filters and functions they developed for their Metadata Formulae.
+- **Inline Data Enrichment**
+Data can be optionally enriched while it's being ingested from other reference datasets within the same CKAN instance or external sources (e.g. enriched against high value curated sources like the Census; geocoding, etc.)
+- **and more!**
+It took a while for us to bake 2.0.0, but we look forward to picking up the pace and co-innovating with the CKAN ecosystem.
+
+
+> NOTE: To fully experience the DRUF workflow, you'll need to use [scheming dataset form pages](https://excess.org/scheming-formpages/) and apply some CKAN core changes. A detailed installation procedure will be published on the Wiki shortly.
+
+[^1]: Inspired by the [Curator in Ready Player One](https://hero.fandom.com/wiki/Curator)
+[^2]: `validate_index benchmark` -  https://qsv.dathere.com/benchmarks
 ---
 
 ### Added
