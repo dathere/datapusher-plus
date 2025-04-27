@@ -408,6 +408,7 @@ def extract_zip_or_metadata(
             - file_count: Number of files in the ZIP
             - result_path: Path to the extracted file or metadata CSV
             - unzipped_format: Format of the extracted file (e.g., "csv", "json", etc.)
+    """
     import os
 
     logger = task_logger if task_logger is not None else logger
@@ -447,7 +448,9 @@ def extract_zip_or_metadata(
                     )
 
             # Otherwise, write metadata CSV
-            logger.info(f"ZIP file contains {file_count} file/s. Saving ZIP metadata...")
+            logger.info(
+                f"ZIP file contains {file_count} file/s. Saving ZIP metadata..."
+            )
             with open(result_path, "w", newline="") as csv_file:
                 fieldnames = [
                     "filename",
