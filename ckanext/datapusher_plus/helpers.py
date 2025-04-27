@@ -404,11 +404,10 @@ def extract_zip_or_metadata(
         task_logger: Optional logger to use for logging (if not provided, module logger will be used)
 
     Returns:
-        tuple: (int, str) - (file_count, result_path)
+        tuple: (int, str, str) - (file_count, result_path, unzipped_format)
             - file_count: Number of files in the ZIP
             - result_path: Path to the extracted file or metadata CSV
-            - unzipped_format: Format of the extracted file
-    """
+            - unzipped_format: Format of the extracted file (e.g., "csv", "json", etc.)
     import os
 
     logger = task_logger if task_logger is not None else logger
