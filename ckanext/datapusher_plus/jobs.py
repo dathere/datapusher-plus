@@ -702,18 +702,21 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ----------------- is it a spreadsheet? ---------------
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
-    format = resource.get("format").upper()
-    if format in spreadsheet_extensions or unzipped_format in spreadsheet_extensions:
+    file_format = resource.get("format").upper()
+    if (
+        file_format in spreadsheet_extensions
+        or unzipped_format in spreadsheet_extensions
+    ):
         # if so, export spreadsheet as a CSV file
         default_excel_sheet = conf.DEFAULT_EXCEL_SHEET
-        format = unzipped_format if unzipped_format != "" else format
+        file_format = unzipped_format if unzipped_format != "" else file_format
         logger.info(
-            "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
+            "Converting {} sheet {} to CSV...".format(file_format, default_excel_sheet)
         )
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove it
         # and create a hardlink to the file we got from CKAN
-        qsv_spreadsheet = os.path.join(temp_dir, "qsv_spreadsheet." + format)
+        qsv_spreadsheet = os.path.join(temp_dir, "qsv_spreadsheet." + file_format)
         os.link(tmp, qsv_spreadsheet)
 
         # run `qsv excel` and export it to a CSV
@@ -744,7 +747,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # get some file info and log it by running `file`
             # just in case the file is not actually a spreadsheet or is encrypted
             # so the user has some actionable info
-            file_format = subprocess.run(
+            file_metadata = subprocess.run(
                 [conf.FILE_BIN, qsv_spreadsheet],
                 check=True,
                 capture_output=True,
@@ -753,7 +756,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
             logger.warning(
                 "Is the file encrypted or is not a spreadsheet?\nFILE ATTRIBUTES: {}".format(
-                    file_format.stdout
+                    file_metadata.stdout
                 )
             )
 
