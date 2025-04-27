@@ -3,20 +3,24 @@
 
 from __future__ import annotations
 
-
+import os
 import json
+import zipfile
+import csv
 import logging
 import datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional, Union
 
 import ckan.plugins.toolkit as toolkit
 
 from ckanext.datapusher_plus.model import Jobs, Metadata, Logs
 import ckanext.datapusher_plus.job_exceptions as jex
+import ckanext.datapusher_plus.config as conf
 
 _ = toolkit._
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def datapusher_status(resource_id: str):
@@ -310,7 +314,7 @@ def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
         Jobs.update(jobs_dict)
 
     except Exception as e:
-        log.error("Failed to update job %s: %s", job_id, e)
+        logger.error("Failed to update job %s: %s", job_id, e)
         raise e
 
 
@@ -383,3 +387,120 @@ def delete_api_key(job_id):
 def set_aps_job_id(job_id, aps_job_id):
 
     update_job(job_id, {"aps_job_id": aps_job_id})
+
+
+def extract_zip_or_metadata(
+    zip_path: Union[str, Path],
+    output_dir: Optional[Union[str, Path]] = None,
+    task_logger: Optional[logging.Logger] = None,
+):
+    """
+    Extract metadata from ZIP archive and save to CSV file.
+    If the ZIP file contains only one item of a supported format, extract it directly.
+
+    Args:
+        zip_path: Path to the ZIP file
+        output_dir: Directory to save the extracted or metadata file (defaults to zip_path's directory)
+        task_logger: Optional logger to use for logging (if not provided, module logger will be used)
+
+    Returns:
+        tuple: (int, str, str) - (file_count, result_path, unzipped_format)
+            - file_count: Number of files in the ZIP
+            - result_path: Path to the extracted file or metadata CSV
+            - unzipped_format: Format of the extracted file (e.g., "csv", "json", etc.)
+    """
+    import os
+
+    logger = task_logger if task_logger is not None else logger
+
+    if output_dir is None:
+        output_dir = os.path.dirname(zip_path)
+    # Default result path for metadata
+    result_path = os.path.join(output_dir, "zip_metadata.csv")
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zip_file:
+            file_list = [info for info in zip_file.infolist() if not info.is_dir()]
+            file_count = len(file_list)
+
+            if file_count == 1:
+                file_info = file_list[0]
+                file_name = file_info.filename
+                file_ext = os.path.splitext(file_name)[1][1:].upper()
+
+                if file_ext in [fmt.upper() for fmt in conf.FORMATS]:
+                    logger.info(
+                        f"ZIP contains a single supported file: {file_name}. Extracting directly for analysis..."
+                    )
+                    # Extract to output_dir with correct extension
+                    result_path = os.path.join(output_dir, f"zip_data.{file_ext}")
+                    with zip_file.open(file_name) as source, open(
+                        result_path, "wb"
+                    ) as target:
+                        target.write(source.read())
+                    logger.debug(
+                        f"Successfully extracted '{file_name}' to '{result_path}'"
+                    )
+                    return file_count, result_path, file_ext
+                else:
+                    logger.warning(
+                        f"ZIP contains a single file that is not supported: {file_name}"
+                    )
+
+            # Otherwise, write metadata CSV
+            logger.info(
+                f"ZIP file contains {file_count} file/s. Saving ZIP metadata..."
+            )
+            with open(result_path, "w", newline="") as csv_file:
+                fieldnames = [
+                    "filename",
+                    "compressed_size",
+                    "file_size",
+                    "compression_ratio",
+                    "date_time",
+                    "create_system",
+                    "create_version",
+                    "extract_version",
+                    "flag_bits",
+                    "internal_attr",
+                    "external_attr",
+                    "CRC",
+                    "compress_type",
+                ]
+                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+                writer.writeheader()
+                for file_info in file_list:
+                    if file_info.file_size > 0:
+                        compression_ratio = (
+                            file_info.compress_size / file_info.file_size
+                        ) * 100
+                    else:
+                        compression_ratio = 0
+                    date_time = datetime.datetime(*file_info.date_time).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    writer.writerow(
+                        {
+                            "filename": file_info.filename,
+                            "compressed_size": file_info.compress_size,
+                            "file_size": file_info.file_size,
+                            "compression_ratio": f"{compression_ratio:.2f}%",
+                            "date_time": date_time,
+                            "create_system": file_info.create_system,
+                            "create_version": file_info.create_version,
+                            "extract_version": file_info.extract_version,
+                            "flag_bits": file_info.flag_bits,
+                            "internal_attr": file_info.internal_attr,
+                            "external_attr": file_info.external_attr,
+                            "CRC": file_info.CRC,
+                            "compress_type": file_info.compress_type,
+                        }
+                    )
+                return file_count, result_path, "CSV"
+
+    except zipfile.BadZipFile:
+        logger.error(f"Error: '{zip_path}' is not a valid ZIP file.")
+        return 0, "", ""
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        return 0, "", ""
