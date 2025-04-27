@@ -666,19 +666,25 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         )
     )
 
-    # # Check if the file is a zip file
-    # if resource_format.upper() == "ZIP":
-    #     logger.info("ZIP file detected...")
-    #     # get the zip file's metadata
-    #     # zip_metadata = zipfile.ZipFile(tmp, "r").infolist()
-    #     # logger.info("ZIP file metadata: {}".format(zip_metadata))
+    # Check if the file is a zip file
+    unzipped_format = ""
+    if resource_format.upper() == "ZIP":
+        logger.info("Processing ZIP file...")
 
-    #     # # get the zip file's contents
-    #     # zip_contents = zipfile.ZipFile(tmp, "r").namelist()
-    #     # logger.info("ZIP file contents: {}".format(zip_contents))
-
-    #     extracted_metadata = dph.extract_zip_or_metadata(tmp, os.path.join(temp_dir, "zip_metadata.csv"))
-    #     logger.info("Extracted metadata: {}".format(extracted_metadata))
+        file_count, extracted_path, unzipped_format = dph.extract_zip_or_metadata(
+            tmp, temp_dir, logger
+        )
+        if not file_count:
+            logger.error("ZIP file invalid or no files found in ZIP file.")
+            return
+        logger.info(
+            "More than one file in the ZIP file ({} files), saving metadata...".format(
+                file_count
+            )
+            if file_count > 1
+            else "Extracted {} file: {}".format(unzipped_format, extracted_path)
+        )
+        tmp = extracted_path
 
     # ===================================================================================
     # ANALYZE WITH QSV
@@ -697,16 +703,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
     format = resource.get("format").upper()
-    if format in spreadsheet_extensions:
+    if format in spreadsheet_extensions or unzipped_format in spreadsheet_extensions:
         # if so, export spreadsheet as a CSV file
         default_excel_sheet = conf.DEFAULT_EXCEL_SHEET
+        format = unzipped_format if unzipped_format != "" else format
         logger.info(
             "Converting {} sheet {} to CSV...".format(format, default_excel_sheet)
         )
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove it
         # and create a hardlink to the file we got from CKAN
-        qsv_spreadsheet = os.path.join(temp_dir, "qsv_spreadsheet." + resource_format)
+        qsv_spreadsheet = os.path.join(temp_dir, "qsv_spreadsheet." + format)
         os.link(tmp, qsv_spreadsheet)
 
         # run `qsv excel` and export it to a CSV
@@ -1300,7 +1307,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 stddev_length FLOAT,
                 variance_length FLOAT,
                 cv_length FLOAT,
-                mean FLOAT,
+                mean TEXT,
                 sem FLOAT,
                 geometric_mean FLOAT,
                 harmonic_mean FLOAT,
