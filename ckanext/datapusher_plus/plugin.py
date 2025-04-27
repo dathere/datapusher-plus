@@ -96,7 +96,18 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
                 "No supported formats configured,\
                     using DataPusher Plus internals"
             )
-            supported_formats = ["csv", "xls", "xlsx", "tsv"]
+            supported_formats = [
+                "csv",
+                "xls",
+                "xlsx",
+                "tsv",
+                "ssv",
+                "tab",
+                "ods",
+                "geojson",
+                "shp",
+                "zip",
+            ]
 
         submit = (
             resource_format
