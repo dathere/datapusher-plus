@@ -29,6 +29,14 @@ MINIMUM_QSV_VERSION = "4.0.0"
 # DEBUG, INFO, WARNING, ERROR, CRITICAL
 UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "INFO")
 
+# Supported formats
+FORMATS = tk.config.get(
+    "ckanext.datapusher_plus.formats",
+    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "zip"],
+)
+if isinstance(FORMATS, str):
+    FORMATS = FORMATS.split()
+
 # PII screening settings
 PII_SCREENING = tk.asbool(tk.config.get("ckanext.datastore_plus.pii_screening", False))
 PII_FOUND_ABORT = tk.asbool(
@@ -55,7 +63,7 @@ MAX_CONTENT_LENGTH = tk.asint(
     tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
 )
 CHUNK_SIZE = tk.asint(tk.config.get("ckanext.datapusher_plus.chunk_size", "1048576"))
-DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 1))
+DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 0))
 SORT_AND_DUPE_CHECK = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check", True)
 )
@@ -94,7 +102,7 @@ QSV_STATS_STRING_MAX_LENGTH = tk.asint(
 TYPE_MAPPING = json.loads(
     tk.config.get(
         "ckanext.datapusher_plus.type_mapping",
-        '{"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}',
+        '{"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}',
     )
 )
 
