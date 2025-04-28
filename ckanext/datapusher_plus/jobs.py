@@ -53,6 +53,7 @@ import ckanext.datapusher_plus.jinja2_helpers as j2h
 from ckanext.datapusher_plus.job_exceptions import HTTPError
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.spatial_helpers as sh
+from ckanext.datapusher_plus.logging_utils import trace, TRACE
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
@@ -764,7 +765,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         excel_export_msg = qsv_excel.stderr
         logger.info("{}...".format(excel_export_msg))
         tmp = qsv_excel_csv
-    elif resource_format.upper() in ["SHP", "SHP.ZIP", "GEOJSON"]:
+    elif resource_format.upper() in ["SHP", "QGIS", "GEOJSON"]:
         logger.info("SHAPEFILE or GEOJSON file detected...")
 
         qsv_spatial_file = os.path.join(
@@ -776,15 +777,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if conf.AUTO_SPATIAL_SIMPLIFICATION:
             # Try to convert spatial file to CSV using spatial_helpers
             logger.info(
-                "Converting spatial file to CSV with a simplification tolerance of {}...".format(
+                "Converting spatial file to CSV with a simplification relative tolerance of {}...".format(
                     conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE
                 )
             )
 
             try:
                 # Use the convert_to_csv function from spatial_helpers
-                success, error_message = sh.simplify_and_convert_to_csv(
+                success, error_message = sh.process_spatial_file(
                     qsv_spatial_file,
+                    resource_format,
                     output_csv_path=qsv_spatial_csv,
                     tolerance=conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE,
                     task_logger=logger,
