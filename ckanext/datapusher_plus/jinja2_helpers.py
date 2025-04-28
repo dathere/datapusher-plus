@@ -8,6 +8,67 @@ from jinja2 import DictLoader, Environment
 
 log = logging.getLogger(__name__)
 
+class FormulaProcessor:
+    def __init__(self, scheming_yaml, package, resource_fields_stats, logger):
+        self.scheming_yaml = scheming_yaml
+        self.package = package
+        self.resource_fields_stats = resource_fields_stats
+        self.logger = logger
+
+    def process_formulae(
+        self, entity_type: str, fields_key: str, formula_type: str = "formula"
+    ):
+        """
+        Generic formula processor for both package and resource fields
+
+        Args:
+            entity_type: 'package' or 'resource'
+            fields_key: Key in scheming_yaml for fields ('dataset_fields' or 'resource_fields')
+            formula_type: Type of formula ('formula' or 'suggestion_formula')
+        """
+        formula_fields = [
+            field for field in self.scheming_yaml[fields_key] if field.get(formula_type)
+        ]
+
+        if not formula_fields:
+            return
+
+        self.logger.info(
+            f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
+        )
+
+        jinja2_formulae = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            template = schema_field[formula_type]
+            jinja2_formulae[field_name] = template
+
+            self.logger.debug(
+                f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
+            )
+
+        context = {"package": self.package, "resource": self.resource_fields_stats}
+        context.update(jinja2_formulae)
+        jinja2_env = create_jinja2_env(context)
+
+        updates = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            try:
+                formula = jinja2_env.get_template(field_name)
+                rendered_formula = formula.render(**context)
+                updates[field_name] = rendered_formula
+
+                self.logger.debug(
+                    f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
+                )
+            except Exception as e:
+                self.logger.error(
+                    f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
+                )
+
+        return updates
+
 
 def create_jinja2_env(context):
     """Create a configured Jinja2 environment with all filters and globals."""
