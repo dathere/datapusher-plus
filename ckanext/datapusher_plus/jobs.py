@@ -38,6 +38,7 @@ import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.spatial_helpers as sh
 import ckanext.datapusher_plus.datastore_utils as dsu
 from ckanext.datapusher_plus.logging_utils import trace, TRACE
+from ckanext.datapusher_plus.qsv_utils import QSVCommand
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
@@ -159,36 +160,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if not conf.FILE_BIN.is_file():
         raise utils.JobError("{} not found.".format(conf.FILE_BIN))
 
-    # make sure qsv binary variant is up-to-date
-    try:
-        qsv_version = subprocess.run(
-            [conf.QSV_BIN, "--version"],
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("qsv version check error: {}".format(e))
-    qsv_version_info = str(qsv_version.stdout)
-    if not qsv_version_info:
-        # Sample response
-        # qsvdp 4.0.0-mimalloc-geocode;Luau 0.663;self_update...
-        raise utils.JobError(
-            f"We expect qsv version info to be returned. Command: {conf.QSV_BIN} --version. Response: {qsv_version_info}"
-        )
-    qsv_semver = qsv_version_info[
-        qsv_version_info.find(" ") : qsv_version_info.find("-")
-    ].lstrip()
+    # Initialize QSVCommand
+    qsv = QSVCommand(logger=logger)
 
-    logger.info("qsv version found: {}".format(qsv_semver))
+    # Check qsv version
     try:
-        if semver.compare(qsv_semver, conf.MINIMUM_QSV_VERSION) < 0:
-            raise utils.JobError(
-                "At least qsv version {} required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
-                    conf.MINIMUM_QSV_VERSION, qsv_version_info
-                )
-            )
-    except ValueError as e:
-        raise utils.JobError("Cannot parse qsv version info: {}".format(e))
+        qsv.check_version()
+    except utils.JobError as e:
+        raise utils.JobError(f"qsv version check error: {e}")
 
     validate_input(input)
 
@@ -420,22 +399,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # use --trim option to trim column names and the data
         qsv_excel_csv = os.path.join(temp_dir, "qsv_excel.csv")
         try:
-            qsv_excel = subprocess.run(
-                [
-                    conf.QSV_BIN,
-                    "excel",
-                    qsv_spreadsheet,
-                    "--sheet",
-                    str(default_excel_sheet),
-                    "--trim",
-                    "--output",
-                    qsv_excel_csv,
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
+            qsv_excel = qsv.excel(
+                qsv_spreadsheet,
+                sheet=default_excel_sheet,
+                trim=True,
+                output_file=qsv_excel_csv,
             )
-        except subprocess.CalledProcessError as e:
+        except utils.JobError as e:
             logger.error(
                 "Upload aborted. Cannot export spreadsheet(?) to CSV: {}".format(e)
             )
@@ -549,24 +519,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # Run qsv geoconvert
             qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
             try:
-                subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "geoconvert",
-                        tmp,
-                        "geojson",
-                        "csv",
-                        "--max-length",
-                        str(conf.QSV_STATS_STRING_MAX_LENGTH),
-                        "--output",
-                        qsv_geoconvert_csv,
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
+                qsv.geoconvert(
+                    tmp,
+                    resource_format,
+                    "csv",
+                    max_length=conf.QSV_STATS_STRING_MAX_LENGTH,
+                    output_file=qsv_geoconvert_csv,
                 )
-            except subprocess.CalledProcessError as e:
-                logger.error(f"qsv geoconvert failed: {e.stderr}")
+            except utils.JobError as e:
+                logger.error(f"qsv geoconvert failed: {e}")
                 raise
 
             tmp = qsv_geoconvert_csv
@@ -639,19 +600,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         else:
             qsv_input_utf_8_encoded_csv = tmp
         try:
-            qsv_input = subprocess.run(
-                [
-                    conf.QSV_BIN,
-                    "input",
-                    tmp,
-                    "--trim-headers",
-                    "--output",
-                    qsv_input_csv,
-                ],
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            # return as we can't push an invalid CSV file
+            qsv.input(tmp, trim_headers=True, output_file=qsv_input_csv)
+        except utils.JobError as e:
             logger.error(
                 "Job aborted as the file cannot be normalized/transcoded: {}.".format(e)
             )
@@ -666,14 +616,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # If it passes validation, we can handle it with confidence downstream as a "normal" CSV.
     logger.info("Validating CSV...")
     try:
-        subprocess.run(
-            [conf.QSV_BIN, "validate", tmp], check=True, capture_output=True, text=True
-        )
-    except subprocess.CalledProcessError as e:
-        # return as we can't push an invalid CSV file
-        validate_error_msg = e.stderr
-        logger.error("Invalid CSV! Job aborted: {}.".format(validate_error_msg))
-        return
+        qsv.validate(tmp)
+    except utils.JobError as e:
+        logger.error(f"qsv validate failed: {e}")
+        raise
+
     logger.info("Well-formed, valid CSV file confirmed...")
 
     # --------------------- Sortcheck --------------------------
@@ -683,14 +630,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if conf.SORT_AND_DUPE_CHECK or conf.DEDUP:
         logger.info("Checking for duplicates and if the CSV is sorted...")
         try:
-            qsv_sortcheck = subprocess.run(
-                [conf.QSV_BIN, "sortcheck", tmp, "--json"],
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
+            qsv_sortcheck = qsv.sortcheck(tmp, json_output=True, uses_stdio=True)
+        except utils.JobError as e:
             raise utils.JobError("Sortcheck error: {}".format(e))
-        sortcheck_json = json.loads(str(qsv_sortcheck.stdout))
+        sortcheck_json = json.loads(str(qsv_sortcheck["stdout"]))
         is_sorted = sortcheck_json["sorted"]
         record_count = int(sortcheck_json["record_count"])
         unsorted_breaks = int(sortcheck_json["unsorted_breaks"])
@@ -707,34 +650,21 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if conf.DEDUP and dupe_count > 0:
         qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
         logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
-        qsv_extdedup_cmd = [conf.QSV_BIN, "extdedup", tmp, qsv_dedup_csv]
 
         try:
-            qsv_extdedup = subprocess.run(
-                qsv_extdedup_cmd,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
+            qsv.extdedup(tmp, qsv_dedup_csv)
+        except utils.JobError as e:
             raise utils.JobError("Check for duplicates error: {}".format(e))
-        dupe_count = int(str(qsv_extdedup.stderr).strip())
-        if dupe_count > 0:
-            tmp = qsv_dedup_csv
-            logger.warning("{:,} duplicates found and removed.".format(dupe_count))
-    elif dupe_count > 0:
-        logger.warning("{:,} duplicates found but not deduping...".format(dupe_count))
+
+        tmp = qsv_dedup_csv
+        logger.info("Deduped CSV saved to {}".format(qsv_dedup_csv))
 
     # ----------------------- Headers & Safenames ---------------------------
     # get existing header names, so we can use them for data dictionary labels
     # should we need to change the column name to make it "db-safe"
     try:
-        qsv_headers = subprocess.run(
-            [conf.QSV_BIN, "headers", "--just-names", tmp],
-            capture_output=True,
-            check=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as e:
+        qsv_headers = qsv.headers(tmp, just_names=True)
+    except utils.JobError as e:
         raise utils.JobError("Cannot scan CSV headers: {}".format(e))
     original_headers = str(qsv_headers.stdout).strip()
     original_header_dict = {
@@ -746,23 +676,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_safenames_csv = os.path.join(temp_dir, "qsv_safenames.csv")
     logger.info('Checking for "database-safe" header names...')
     try:
-        qsv_safenames = subprocess.run(
-            [
-                conf.QSV_BIN,
-                "safenames",
-                tmp,
-                "--mode",
-                "json",
-                "--reserved",
-                conf.RESERVED_COLNAMES,
-                "--prefix",
-                conf.UNSAFE_PREFIX,
-            ],
-            capture_output=True,
-            text=True,
+        qsv_safenames = qsv.safenames(
+            tmp,
+            mode="json",
+            reserved=conf.RESERVED_COLNAMES,
+            prefix=conf.UNSAFE_PREFIX,
+            uses_stdio=True,
         )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("Safenames error: {}".format(e))
+    except utils.JobError as e:
+        raise utils.JobError("Cannot scan CSV headers: {}".format(e))
 
     unsafe_json = json.loads(str(qsv_safenames.stdout))
     unsafe_headers = unsafe_json["unsafe_headers"]
@@ -773,21 +695,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 len(unsafe_headers), unsafe_headers
             )
         )
-        qsv_safenames = subprocess.run(
-            [
-                conf.QSV_BIN,
-                "safenames",
-                tmp,
-                "--mode",
-                "conditional",
-                "--output",
-                qsv_safenames_csv,
-            ],
-            capture_output=True,
-            text=True,
+        qsv_safenames = qsv.safenames(
+            tmp, mode="conditional", output_file=qsv_safenames_csv
         )
-        tmp = qsv_safenames_csv
     else:
+        tmp = qsv_safenames_csv
         logger.info("No unsafe header names found...")
 
     # ---------------------- Type Inferencing -----------------------
@@ -797,8 +709,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # are all accelerated/multithreaded when an index is present
     try:
         qsv_index_file = tmp + ".idx"
-        subprocess.run([conf.QSV_BIN, "index", tmp], check=True)
-    except subprocess.CalledProcessError as e:
+        qsv.index(tmp)
+    except utils.JobError as e:
         raise utils.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
@@ -806,12 +718,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if not conf.SORT_AND_DUPE_CHECK:
         # get record count, this is instantaneous with an index
         try:
-            qsv_count = subprocess.run(
-                [conf.QSV_BIN, "count", tmp], capture_output=True, check=True, text=True
-            )
-        except subprocess.CalledProcessError as e:
+            qsv_count = qsv.count(tmp)
+            record_count = int(str(qsv_count.stdout).strip())
+        except utils.JobError as e:
             raise utils.JobError("Cannot count records in CSV: {}".format(e))
-        record_count = int(str(qsv_count.stdout).strip())
 
     # its empty, nothing to do
     if record_count == 0:
@@ -832,26 +742,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     headers_max = []
     headers_cardinality = []
     qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
-    qsv_stats_cmd = [
-        conf.QSV_BIN,
-        "stats",
-        tmp,
-        "--infer-dates",
-        "--dates-whitelist",
-        "all",
-        "--stats-jsonl",
-        "--output",
-        qsv_stats_csv,
-    ]
-
-    if conf.PREFER_DMY:
-        qsv_stats_cmd.append("--prefer-dmy")
-
-    # global conf.AUTO_INDEX_THRESHOLD
-    if conf.AUTO_INDEX_THRESHOLD:
-        qsv_stats_cmd.append("--cardinality")
-    if conf.SUMMARY_STATS_OPTIONS:
-        qsv_stats_cmd.append(conf.SUMMARY_STATS_OPTIONS)
 
     try:
         # If the file is a spatial format, we need to use --max-length
@@ -860,10 +750,29 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if spatial_format_flag:
             env = os.environ.copy()
             env["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
-            qsv_stats = subprocess.run(qsv_stats_cmd, check=True, env=env)
+            qsv_stats = qsv.stats(
+                tmp,
+                infer_dates=True,
+                dates_whitelist="all",
+                stats_jsonl=True,
+                prefer_dmy=conf.PREFER_DMY,
+                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
+                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
+                output_file=qsv_stats_csv,
+                env=env,
+            )
         else:
-            qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
-    except subprocess.CalledProcessError as e:
+            qsv_stats = qsv.stats(
+                tmp,
+                infer_dates=True,
+                dates_whitelist="all",
+                stats_jsonl=True,
+                prefer_dmy=conf.PREFER_DMY,
+                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
+                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
+                output_file=qsv_stats_csv,
+            )
+    except utils.JobError as e:
         raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
@@ -1053,18 +962,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ----------------------- Frequency Table ---------------------------
     # compile a frequency table for each column
     qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
-    qsv_freq_cmd = [
-        conf.QSV_BIN,
-        "frequency",
-        "--limit",
-        "0",
-        tmp,
-        "--output",
-        qsv_freq_csv,
-    ]
+
     try:
-        qsv_freq = subprocess.run(qsv_freq_cmd, check=True)
-    except subprocess.CalledProcessError as e:
+        qsv.frequency(tmp, limit=0, output_file=qsv_freq_csv)
+    except utils.JobError as e:
         raise utils.JobError("Cannot create a frequency table: {}".format(e))
 
     # save frequency table to the datastore by loading qsv_freq_csv directly using COPY
@@ -1123,19 +1024,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info("Preparing {:,}-row preview...".format(conf.PREVIEW_ROWS))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
-                qsv_slice = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "slice",
-                        "--len",
-                        str(conf.PREVIEW_ROWS),
-                        tmp,
-                        "--output",
-                        qsv_slice_csv,
-                    ],
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
+                qsv.slice(tmp, length=conf.PREVIEW_ROWS, output_file=qsv_slice_csv)
+            except utils.JobError as e:
                 raise utils.JobError("Cannot create a preview slice: {}".format(e))
             rows_to_copy = conf.PREVIEW_ROWS
             tmp = qsv_slice_csv
@@ -1147,21 +1037,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
-                qsv_slice = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "slice",
-                        "--start",
-                        "-1",
-                        "--len",
-                        str(slice_len),
-                        tmp,
-                        "--output",
-                        qsv_slice_csv,
-                    ],
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
+                qsv.slice(tmp, start=-1, length=slice_len, output_file=qsv_slice_csv)
+            except utils.JobError as e:
                 raise utils.JobError(
                     "Cannot create a preview slice from the end: {}".format(e)
                 )
@@ -1175,24 +1052,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_applydp_csv = os.path.join(temp_dir, "qsv_applydp.csv")
         datecols = ",".join(datetimecols_list)
 
-        qsv_applydp_cmd = [
-            conf.QSV_BIN,
-            "datefmt",
-            datecols,
-            tmp,
-            "--output",
-            qsv_applydp_csv,
-        ]
-        if conf.PREFER_DMY:
-            qsv_applydp_cmd.append("--prefer-dmy")
         logger.info(
             'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
                 datecols, conf.PREFER_DMY
             )
         )
         try:
-            qsv_applydp = subprocess.run(qsv_applydp_cmd, check=True)
-        except subprocess.CalledProcessError as e:
+            qsv.datefmt(
+                datecols, tmp, prefer_dmy=conf.PREFER_DMY, output_file=qsv_applydp_csv
+            )
+        except utils.JobError as e:
             raise utils.JobError("Applydp error: {}".format(e))
         tmp = qsv_applydp_csv
 
@@ -1243,19 +1112,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if conf.PII_QUICK_SCREEN:
             logger.info("Quickly scanning for PII using {}...".format(pii_regex_file))
             try:
-                qsv_searchset = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "searchset",
-                        "--ignore-case",
-                        "--quick",
-                        pii_regex_fname,
-                        tmp,
-                    ],
-                    capture_output=True,
-                    text=True,
+                qsv_searchset = qsv.searchset(
+                    pii_regex_fname,
+                    tmp,
+                    ignore_case=True,
+                    quick=True,
                 )
-            except subprocess.CalledProcessError as e:
+            except utils.JobError as e:
                 raise utils.JobError("Cannot quickly search CSV for PII: {}".format(e))
             pii_candidate_row = str(qsv_searchset.stderr)
             if pii_candidate_row:
@@ -1265,24 +1128,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info("Scanning for PII using {}...".format(pii_regex_file))
             qsv_searchset_csv = os.path.join(temp_dir, "qsv_searchset.csv")
             try:
-                qsv_searchset = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "searchset",
-                        "--ignore-case",
-                        "--flag",
-                        "PII_info",
-                        "--flag-matches-only",
-                        "--json",
-                        pii_regex_file,
-                        tmp,
-                        "--output",
-                        qsv_searchset_csv,
-                    ],
-                    capture_output=True,
-                    text=True,
+                qsv_searchset = qsv.searchset(
+                    pii_regex_file,
+                    tmp,
+                    ignore_case=True,
+                    flag="PII_info",
+                    flag_matches_only=True,
+                    json_output=True,
+                    output_file=qsv_searchset_csv,
                 )
-            except subprocess.CalledProcessError as e:
+            except utils.JobError as e:
                 raise utils.JobError("Cannot search CSV for PII: {}".format(e))
             pii_json = json.loads(str(qsv_searchset.stderr))
             pii_total_matches = int(pii_json["total_matches"])
@@ -1346,18 +1201,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # run stats on pii preview CSV to get header names and infer data types
             # we don't need summary statistics, so use the --typesonly option
             try:
-                qsv_pii_stats = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "stats",
-                        "--typesonly",
-                        qsv_searchset_csv,
-                    ],
-                    capture_output=True,
-                    check=True,
-                    text=True,
+                qsv_pii_stats = qsv.stats(
+                    qsv_searchset_csv,
+                    infer_dates=False,
+                    dates_whitelist="all",
+                    stats_jsonl=False,
+                    prefer_dmy=False,
+                    cardinality=False,
+                    summary_stats_options=None,
+                    output_file=None,
                 )
-            except subprocess.CalledProcessError as e:
+            except utils.JobError as e:
                 raise utils.JobError(
                     "Cannot run stats on PII preview CSV: {}".format(e)
                 )
@@ -1771,18 +1625,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # run stats on stats CSV to get header names and infer data types
         # we don't need summary statistics, so use the --typesonly option
         try:
-            qsv_stats_stats = subprocess.run(
-                [
-                    conf.QSV_BIN,
-                    "stats",
-                    "--typesonly",
-                    qsv_stats_csv,
-                ],
-                capture_output=True,
-                check=True,
-                text=True,
+            qsv_stats_stats = qsv.stats(
+                qsv_stats_csv,
+                typesonly=True,
             )
-        except subprocess.CalledProcessError as e:
+        except utils.JobError as e:
             raise utils.JobError("Cannot run stats on CSV stats: {}".format(e))
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
