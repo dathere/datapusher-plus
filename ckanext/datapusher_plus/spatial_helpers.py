@@ -182,35 +182,40 @@ def process_spatial_file(
     task_logger: Optional[logging.Logger] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Simplify and convert a spatial file (Zipped Shapefile, GeoJSON, etc.) to CSV format.
+    Simplifies and converts a spatial file (e.g., zipped Shapefile, GeoJSON) to CSV format.
 
-    This function reads a spatial file, simplifies its geometries, and exports
-    the attributes and simplified geometries to a CSV file.
-
-    If the input file is a Zipped Shapefile, it will be unzipped, and it will look for the .shp file
-    and process it accordingly.
+    This function reads a spatial file, simplifies its geometries using a relative tolerance,
+    and exports the attributes and simplified geometries to a CSV file. If the input is a zipped
+    Shapefile, it will be unzipped and the .shp file will be processed. The function supports
+    logging via an optional logger.
 
     Args:
-        input_path: Path to the input spatial file
-        output_csv_path: Path to the output CSV file (optional, defaults to input path with .csv extension)
-        tolerance: Relative simplification tolerance as a percentage (default: 0.001 or 0.1% of geometry size)
-        task_logger: Optional logger to use for logging (if not provided, module logger will be used)
+        input_path (Union[str, Path]): Path to the input spatial file. Can be a zipped Shapefile,
+            a .shp, or a GeoJSON file.
+        resource_format (str): The format of the spatial file (e.g., "SHP", "QGIS", "GEOJSON").
+        output_csv_path (Optional[Union[str, Path]], optional): Path to the output CSV file.
+            If not provided, defaults to the input path with a .csv extension.
+        tolerance (float, optional): Relative simplification tolerance as a fraction of the
+            geometry's diagonal (e.g., 0.001 means 0.1% of the geometry size). Default is 0.001.
+        task_logger (Optional[logging.Logger], optional): Logger to use for logging progress and
+            errors. If not provided, a module-level logger is used.
 
     Returns:
-        Tuple containing:
-            - Boolean indicating success (True) or failure (False)
-            - Error message if failed, None if successful
+        Tuple[bool, Optional[str]]:
+            - success (bool): True if the conversion was successful, False otherwise.
+            - error_message (Optional[str]): Error message if failed, or None if successful.
 
-    Example:
-        success, error = convert_to_csv("data.shp", "output.csv", tolerance=0.05)
-        if success:
-            print("Conversion successful")
-        else:
-            print(f"Conversion failed: {error}")
+    Notes:
+        - The function will attempt to transform coordinates to meters for simplification if
+          the source CRS is geographic (e.g., WGS84).
+        - If the input is a zipped Shapefile, only the first .shp file found will be processed.
+        - The output CSV will contain all attribute columns plus a "geometry" column with WKT.
+        - If any features cannot be processed, they will be skipped and a warning will be logged.
     """
     # Use the provided logger or fall back to the module logger
     log = task_logger if task_logger is not None else logger
 
+    zip_temp_dir = None
     try:
         input_path = Path(input_path)
         if not input_path.exists():
@@ -221,7 +226,6 @@ def process_spatial_file(
         else:
             output_csv_path = Path(output_csv_path)
 
-        zip_temp_dir = None
         log.debug(f"Processing spatial file: {input_path}")
         # Step 0: Check if the input file is a Zipped Shapefile
         # If it is, we need to unzip it and process the .shp file
@@ -251,7 +255,6 @@ def process_spatial_file(
                 input_path = shapefile_path
                 log.debug(f"Using unzipped shapefile: {shapefile_path}")
             else:
-                shutil.rmtree(zip_temp_dir)
                 return False, "No .shp file found in the zipped Shapefile"
 
         # Step 1: Read spatial features using Fiona
@@ -288,8 +291,6 @@ def process_spatial_file(
                     log.warning(f"Could not setup coordinate transformation: {str(e)}")
 
         if not features:
-            if zip_temp_dir:
-                shutil.rmtree(zip_temp_dir)
             return False, "No features found in the input file"
 
         log.info(f"Found {len(features)} features")
@@ -434,8 +435,6 @@ def process_spatial_file(
             )
 
         if not simplified_geoms:
-            if zip_temp_dir:
-                shutil.rmtree(zip_temp_dir)
             return False, "No features could be processed"
 
         avg_reduction = (
@@ -454,12 +453,11 @@ def process_spatial_file(
         # Step 4: Write to CSV
         df.to_csv(output_csv_path, index=False)
 
-        if zip_temp_dir:
-            shutil.rmtree(zip_temp_dir)
-
         return True, None
 
     except Exception as e:
+        return False, f"Error converting spatial file to CSV: {str(e)}"
+
+    finally:
         if zip_temp_dir:
             shutil.rmtree(zip_temp_dir)
-        return False, f"Error converting spatial file to CSV: {str(e)}"
