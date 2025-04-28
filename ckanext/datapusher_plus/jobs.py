@@ -49,20 +49,7 @@ import ckanext.datapusher_plus.jinja2_helpers as j2h
 from ckanext.datapusher_plus.job_exceptions import HTTPError
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.spatial_helpers as sh
-from ckanext.datapusher_plus.datastore_utils import (
-    delete_datastore_resource,
-    datastore_resource_exists,
-    delete_resource,
-    get_package,
-    get_resource,
-    get_scheming_yaml,
-    patch_package,
-    resource_exists,
-    revise_package,
-    send_resource_to_datastore,
-    upload_resource,
-    update_resource,
-)
+import ckanext.datapusher_plus.datastore_utils as dsu
 from ckanext.datapusher_plus.logging_utils import trace, TRACE
 
 if locale.getdefaultlocale()[0]:
@@ -81,78 +68,9 @@ def validate_input(input):
 
     if "resource_id" not in data:
         raise utils.JobError("No id provided.")
-    # if "ckan_url" not in data:
-    #     raise utils.JobError("No ckan_url provided.")
-    # if not input.get("api_key"):
-    #     raise utils.JobError("No CKAN API key provided")
-
-
-class FormulaProcessor:
-    def __init__(self, scheming_yaml, package, resource_fields_stats, logger):
-        self.scheming_yaml = scheming_yaml
-        self.package = package
-        self.resource_fields_stats = resource_fields_stats
-        self.logger = logger
-
-    def process_formulae(
-        self, entity_type: str, fields_key: str, formula_type: str = "formula"
-    ):
-        """
-        Generic formula processor for both package and resource fields
-
-        Args:
-            entity_type: 'package' or 'resource'
-            fields_key: Key in scheming_yaml for fields ('dataset_fields' or 'resource_fields')
-            formula_type: Type of formula ('formula' or 'suggestion_formula')
-        """
-        formula_fields = [
-            field for field in self.scheming_yaml[fields_key] if field.get(formula_type)
-        ]
-
-        if not formula_fields:
-            return
-
-        self.logger.info(
-            f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
-        )
-
-        jinja2_formulae = {}
-        for schema_field in formula_fields:
-            field_name = schema_field["field_name"]
-            template = schema_field[formula_type]
-            jinja2_formulae[field_name] = template
-
-            self.logger.debug(
-                f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
-            )
-
-        context = {"package": self.package, "resource": self.resource_fields_stats}
-        context.update(jinja2_formulae)
-        jinja2_env = j2h.create_jinja2_env(context)
-
-        updates = {}
-        for schema_field in formula_fields:
-            field_name = schema_field["field_name"]
-            try:
-                formula = jinja2_env.get_template(field_name)
-                rendered_formula = formula.render(**context)
-                updates[field_name] = rendered_formula
-
-                self.logger.debug(
-                    f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
-                )
-            except Exception as e:
-                self.logger.error(
-                    f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
-                )
-
-        return updates
 
 
 def callback_datapusher_hook(result_url, job_dict):
-    # api_key_from_job = job_dict.pop("api_key", None)
-    # if not api_key:
-    #     api_key = api_key_from_job
     api_token = utils.get_dp_plus_user_apitoken()
     headers = {"Content-Type": "application/json", "Authorization": api_token}
 
@@ -223,7 +141,6 @@ def push_to_datastore(input, task_id, dry_run=False):
     :type dry_run: boolean
 
     """
-
     # Ensure temporary files are removed after run
     with tempfile.TemporaryDirectory() as temp_dir:
         return _push_to_datastore(task_id, input, dry_run=dry_run, temp_dir=temp_dir)
@@ -249,7 +166,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.setLevel(log_level)
 
     # check if conf.QSV_BIN and conf.FILE_BIN exists
-    # qsv_path = Path(conf.QSV_BIN)
     if not Path(conf.QSV_BIN).is_file():
         raise utils.JobError("{} not found.".format(conf.QSV_BIN))
 
@@ -267,10 +183,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         raise utils.JobError("qsv version check error: {}".format(e))
     qsv_version_info = str(qsv_version.stdout)
     if not qsv_version_info:
-        """
-        Sample response
-        qsvdp 4.0.0-mimalloc-geocode;Luau 0.663;self_update...
-        """
+        # Sample response
+        # qsvdp 4.0.0-mimalloc-geocode;Luau 0.663;self_update...
         raise utils.JobError(
             f"We expect qsv version info to be returned. Command: {conf.QSV_BIN} --version. Response: {qsv_version_info}"
         )
@@ -296,11 +210,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     ckan_url = data["ckan_url"]
     resource_id = data["resource_id"]
     try:
-        resource = get_resource(resource_id)
+        resource = dsu.get_resource(resource_id)
     except utils.JobError:
         # try again in 5 seconds just incase CKAN is slow at adding resource
         time.sleep(5)
-        resource = get_resource(resource_id)
+        resource = dsu.get_resource(resource_id)
 
     # check if the resource url_type is a datastore
     if resource.get("url_type") == "datastore":
@@ -599,7 +513,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         + "_simplified"
                         + os.path.splitext(resource["name"])[1]
                     )
-                    existing_resource, existing_resource_id = resource_exists(
+                    existing_resource, existing_resource_id = dsu.resource_exists(
                         resource["package_id"], simplified_resource_name
                     )
 
@@ -607,7 +521,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         logger.info(
                             "Simplified resource already exists. Replacing it..."
                         )
-                        delete_resource(existing_resource_id)
+                        dsu.delete_resource(existing_resource_id)
                     else:
                         logger.info(
                             "Simplified resource does not exist. Uploading it..."
@@ -623,7 +537,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                             "mimetype": resource["mimetype"],
                             "mimetype_inner": resource["mimetype_inner"],
                         }
-                        upload_resource(new_simplified_resource, qsv_spatial_file)
+                        dsu.upload_resource(new_simplified_resource, qsv_spatial_file)
 
                     simplification_failed_flag = False
                 else:
@@ -988,7 +902,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
     # Get the field stats for each field in the headers list
-    existing = datastore_resource_exists(resource_id)
+    existing = dsu.datastore_resource_exists(resource_id)
     existing_info = None
     if existing:
         existing_info = dict(
@@ -1014,7 +928,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 res_id=resource_id
             )
         )
-        delete_datastore_resource(resource_id)
+        dsu.delete_datastore_resource(resource_id)
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
@@ -1319,11 +1233,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # a text file, with each line having a regex pattern, and an optional
         # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
         if conf.PII_REGEX_RESOURCE_ID:
-            pii_regex_resource_exist = datastore_resource_exists(
+            pii_regex_resource_exist = dsu.datastore_resource_exists(
                 conf.PII_REGEX_RESOURCE_ID
             )
             if pii_regex_resource_exist:
-                pii_resource = get_resource(conf.PII_REGEX_RESOURCE_ID)
+                pii_resource = dsu.get_resource(conf.PII_REGEX_RESOURCE_ID)
                 pii_regex_url = pii_resource["url"]
 
                 r = requests.get(pii_regex_url)
@@ -1421,7 +1335,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 cur_pii = raw_connection_pii.cursor()
 
             # check if the pii already exist
-            existing_pii = datastore_resource_exists(pii_resource_id)
+            existing_pii = dsu.datastore_resource_exists(pii_resource_id)
 
             # Delete existing pii preview before proceeding.
             if existing_pii:
@@ -1437,8 +1351,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if pii_alias_result:
                     existing_pii_alias_of = pii_alias_result[0]
 
-                    delete_datastore_resource(existing_pii_alias_of)
-                    delete_resource(existing_pii_alias_of)
+                    dsu.delete_datastore_resource(existing_pii_alias_of)
+                    dsu.delete_resource(existing_pii_alias_of)
 
             pii_alias = [pii_resource_id]
 
@@ -1473,7 +1387,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 "format": "CSV",
                 "mimetype": "text/csv",
             }
-            pii_response = send_resource_to_datastore(
+            pii_response = dsu.send_resource_to_datastore(
                 pii_resource,
                 resource_id=None,
                 headers=pii_stats_dict,
@@ -1518,7 +1432,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             pii_resource["pii_preview"] = True
             pii_resource["pii_of_resource"] = resource_id
             pii_resource["total_record_count"] = pii_rows_with_matches
-            update_resource(pii_resource)
+            dsu.update_resource(pii_resource)
 
             pii_msg = (
                 "{} PII candidate/s in {} row/s are available at {} for review".format(
@@ -1562,7 +1476,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
 
     # first, let's create an empty datastore table w/ guessed types
-    send_resource_to_datastore(
+    dsu.send_resource_to_datastore(
         resource=None,
         resource_id=resource["id"],
         headers=headers_dicts,
@@ -1644,12 +1558,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
-    scheming_yaml, package = get_scheming_yaml(package_id, scheming_yaml_type="dataset")
+    scheming_yaml, package = dsu.get_scheming_yaml(
+        package_id, scheming_yaml_type="dataset"
+    )
 
     logger.debug(f"package: {package}")
 
     # Initialize the formula processor
-    formula_processor = FormulaProcessor(
+    formula_processor = j2h.FormulaProcessor(
         scheming_yaml, package, resource_fields_stats, logger
     )
 
@@ -1664,7 +1580,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # Update package with formula results
         package.update(package_updates)
         try:
-            patched_package = patch_package(package)
+            patched_package = dsu.patch_package(package)
             logger.debug(f"Package after patching: {patched_package}")
             package = patched_package
             logger.info("PACKAGE formulae processed...")
@@ -1690,7 +1606,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if package_suggestions:
         revise_update_content = {"package": package_suggestions}
         try:
-            revised_package = revise_package(
+            revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
             logger.debug(f"Package after revising: {revised_package}")
@@ -1719,7 +1635,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             package["dpp_suggestions"] = revise_update_content["resource"]
 
         try:
-            revised_package = revise_package(
+            revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
             logger.debug(f"Package after revising: {revised_package}")
@@ -1751,7 +1667,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             "AUTO-ALIASING. Auto-alias-unique: {} ...".format(conf.AUTO_ALIAS_UNIQUE)
         )
         # get package info, so we can construct the alias
-        package = get_package(resource["package_id"])
+        package = dsu.get_package(resource["package_id"])
 
         resource_name = resource.get("name")
         package_name = package.get("name")
@@ -1819,7 +1735,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
-        existing_stats = datastore_resource_exists(stats_resource_id)
+        existing_stats = dsu.datastore_resource_exists(stats_resource_id)
         # Delete existing summary-stats before proceeding.
         if existing_stats:
             logger.info(
@@ -1834,8 +1750,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if stats_alias_result:
                 existing_stats_alias_of = stats_alias_result[0]
 
-                delete_datastore_resource(existing_stats_alias_of)
-                delete_resource(existing_stats_alias_of)
+                dsu.delete_datastore_resource(existing_stats_alias_of)
+                dsu.delete_resource(existing_stats_alias_of)
 
         stats_aliases = [stats_resource_id]
         if conf.AUTO_ALIAS:
@@ -1845,7 +1761,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # check if the summary-stats alias already exist. We need to do this as summary-stats resources
             # may end up having the same alias if AUTO_ALIAS_UNIQUE is False, so we need to drop the
             # existing summary stats-alias.
-            existing_alias_stats = datastore_resource_exists(auto_alias_stats_id)
+            existing_alias_stats = dsu.datastore_resource_exists(auto_alias_stats_id)
             # Delete existing auto-aliased summary-stats before proceeding.
             if existing_alias_stats:
                 logger.info(
@@ -1862,8 +1778,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if result:
                     existing_stats_alias_of = result[0]
 
-                    delete_datastore_resource(existing_stats_alias_of)
-                    delete_resource(existing_stats_alias_of)
+                    dsu.delete_datastore_resource(existing_stats_alias_of)
+                    dsu.delete_resource(existing_stats_alias_of)
 
         # run stats on stats CSV to get header names and infer data types
         # we don't need summary statistics, so use the --typesonly option
@@ -1897,7 +1813,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             "format": "CSV",
             "mimetype": "text/csv",
         }
-        stats_response = send_resource_to_datastore(
+        stats_response = dsu.send_resource_to_datastore(
             stats_resource,
             resource_id=None,
             headers=stats_stats_dict,
@@ -1940,7 +1856,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         stats_resource["id"] = new_stats_resource_id
         stats_resource["summary_statistics"] = True
         stats_resource["summary_of_resource"] = resource_id
-        update_resource(stats_resource)
+        dsu.update_resource(stats_resource)
 
     cur.close()
     raw_connection.commit()
@@ -1954,10 +1870,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         resource["preview"] = False
         resource["preview_rows"] = None
         resource["partial_download"] = False
-    update_resource(resource)
+    dsu.update_resource(resource)
 
     # tell CKAN to calculate_record_count and set alias if set
-    send_resource_to_datastore(
+    dsu.send_resource_to_datastore(
         resource=None,
         resource_id=resource["id"],
         headers=headers_dicts,
