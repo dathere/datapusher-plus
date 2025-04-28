@@ -25,7 +25,6 @@ import psycopg2
 from psycopg2 import sql
 from datasize import DataSize
 from dateutil.parser import parse as parsedate
-import semver
 import traceback
 import sqlalchemy as sa
 from rq import get_current_job

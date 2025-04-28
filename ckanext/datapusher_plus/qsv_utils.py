@@ -3,11 +3,11 @@
 
 import subprocess
 import logging
-import json
-import os
 from pathlib import Path
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.utils as utils
+
+from ckanext.datapusher_plus.logging_utils import trace, TRACE
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,15 @@ class QSVCommand:
         if not Path(self.qsv_bin).is_file():
             raise utils.JobError(f"{self.qsv_bin} not found.")
 
-    def _run_command(self, args, check=True, capture_output=True, text=True, env=None, uses_stdio=False):
+    def _run_command(
+        self,
+        args,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=None,
+        uses_stdio=False,
+    ):
         """
         Run a qsv command with the given arguments.
 
@@ -59,7 +67,7 @@ class QSVCommand:
         str_args = [str(arg) for arg in args]
 
         try:
-            self.logger.debug(f"Running qsv command: {' '.join(str_args)}")
+            self.logger.trace(f"Running qsv command: {' '.join(str_args)}")
             result = subprocess.run(
                 str_args, check=check, capture_output=capture_output, text=text, env=env
             )
@@ -226,7 +234,9 @@ class QSVCommand:
         """
         return self._run_command(["validate", input_file])
 
-    def sortcheck(self, input_file, json_output=False, capture_output=True, uses_stdio=False):
+    def sortcheck(
+        self, input_file, json_output=False, capture_output=True, uses_stdio=False
+    ):
         """
         Check if a CSV file is sorted and has duplicates.
 
@@ -245,7 +255,9 @@ class QSVCommand:
         if json_output:
             args.append("--json")
 
-        return self._run_command(args, capture_output=capture_output, uses_stdio=uses_stdio)
+        return self._run_command(
+            args, capture_output=capture_output, uses_stdio=uses_stdio
+        )
 
     def extdedup(self, input_file, output_file):
         """
@@ -285,7 +297,13 @@ class QSVCommand:
         return self._run_command(args)
 
     def safenames(
-        self, input_file, mode="json", reserved=None, prefix=None, output_file=None, uses_stdio=False
+        self,
+        input_file,
+        mode="json",
+        reserved=None,
+        prefix=None,
+        output_file=None,
+        uses_stdio=False,
     ):
         """
         Check and sanitize column names.
