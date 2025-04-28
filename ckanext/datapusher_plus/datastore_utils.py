@@ -159,7 +159,7 @@ def patch_package(package):
     return patched_package
 
 
-def revise_package(package_id, match={}, filter=None, update=None, include=None):
+def revise_package(package_id, match=None, filter=None, update=None, include=None):
     """
     Revise package metadata using the package_revise action API.
 
@@ -181,6 +181,7 @@ def revise_package(package_id, match={}, filter=None, update=None, include=None)
         raise ValueError("Package ID is required")
 
     # add package_id to match
+    match = match or {}
     match["id"] = package_id
 
     data_dict = {
