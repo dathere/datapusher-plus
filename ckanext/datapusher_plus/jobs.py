@@ -15,33 +15,20 @@ from urllib.parse import urlsplit
 from urllib.parse import urlparse
 import logging
 import uuid
+import sys
+import json
+import requests
+from pathlib import Path
 
 # Third-party imports
 import psycopg2
-from datasize import DataSize
-from dateutil.parser import parse as parsedate
-import json
-import requests
-import locale
-import logging
-import hashlib
-import time
-import tempfile
-import subprocess
-import csv
-import os
-import semver
-import sys
-import traceback
-
-import sqlalchemy as sa
-from pathlib import Path
-from datasize import DataSize
 from psycopg2 import sql
+from datasize import DataSize
 from dateutil.parser import parse as parsedate
-
+import semver
+import traceback
+import sqlalchemy as sa
 from rq import get_current_job
-import ckan.plugins.toolkit as tk
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
