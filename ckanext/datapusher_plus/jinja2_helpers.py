@@ -47,16 +47,18 @@ class FormulaProcessor:
                 f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
             )
 
-        context = {"package": self.package, "resource": self.resource_fields_stats}
-        context.update(jinja2_formulae)
+        context = {
+            "package": self.package,
+            "resource": self.resource_fields_stats,
+            "formulae": jinja2_formulae,
+        }
         jinja2_env = create_jinja2_env(context)
 
         updates = {}
         for schema_field in formula_fields:
             field_name = schema_field["field_name"]
             try:
-                formula = jinja2_env.get_template(field_name)
-                rendered_formula = formula.render(**context)
+                formula = jinja2_env.get_template(f"formulae.{field_name}")
                 updates[field_name] = rendered_formula
 
                 self.logger.debug(
