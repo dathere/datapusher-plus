@@ -101,11 +101,12 @@ def upload_resource(new_resource, file):
         "auth_user_obj": None,
     }
 
-    new_resource["upload"] = open(file, "rb")
-    try:
-        tk.get_action("resource_create")(context, new_resource)
-    except tk.ObjectNotFound:
-        raise utils.JobError("Creating resource failed.")
+    with open(file, "rb") as f:
+        new_resource["upload"] = f
+        try:
+            tk.get_action("resource_create")(context, new_resource)
+        except tk.ObjectNotFound:
+            raise utils.JobError("Creating resource failed.")
 
 
 def update_resource(resource):
