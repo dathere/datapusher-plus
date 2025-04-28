@@ -26,13 +26,13 @@ POSTGRES_BIGINT_MIN = -9223372036854775808
 MINIMUM_QSV_VERSION = "4.0.0"
 
 # Logging level
-# DEBUG, INFO, WARNING, ERROR, CRITICAL
+# TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
 UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "INFO")
 
 # Supported formats
 FORMATS = tk.config.get(
     "ckanext.datapusher_plus.formats",
-    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "zip"],
+    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "qgis", "zip"],
 )
 if isinstance(FORMATS, str):
     FORMATS = FORMATS.split()
@@ -128,7 +128,7 @@ DATASTORE_WRITE_URL = tk.config.get("ckan.datastore.write_url")
 
 # spatial simplification settings
 AUTO_SPATIAL_SIMPLIFICATION = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.auto_spatial_simplification", False)
+    tk.config.get("ckanext.datapusher_plus.auto_spatial_simplification", True)
 )
 SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
     "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE", "0.1"

@@ -106,6 +106,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
                 "ods",
                 "geojson",
                 "shp",
+                "qgis",
                 "zip",
             ]
 
