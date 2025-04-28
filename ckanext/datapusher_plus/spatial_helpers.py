@@ -1,6 +1,10 @@
 # -*- coding: utf-8 -*-
 # flake8: noqa: E501
 
+import os
+import shutil
+import uuid
+import zipfile
 import fiona
 import pandas as pd
 from shapely.geometry import shape, Polygon, MultiPolygon
@@ -12,6 +16,8 @@ import shapely
 import numpy as np
 from shapely.ops import transform
 import pyproj
+
+from ckanext.datapusher_plus.logging_utils import trace, TRACE
 
 # Create logger at module level as fallback
 logger = logging.getLogger(__name__)
@@ -32,7 +38,7 @@ def simplify_polygon(
         to_meter_proj: Optional transform function to convert coordinates to meters
     """
     if isinstance(geom, MultiPolygon):
-        log.debug("Processing MultiPolygon with {} parts".format(len(geom.geoms)))
+        log.trace("Processing MultiPolygon with {} parts".format(len(geom.geoms)))
         # Handle each polygon in the multipolygon separately
         simplified_polys = []
         for poly in geom.geoms:
@@ -65,22 +71,22 @@ def simplify_polygon(
             diagonal = ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
             abs_tolerance = float(diagonal) * float(relative_tolerance)
 
-            log.debug(
+            log.trace(
                 "  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
                     minx, miny, maxx, maxy
                 )
             )
-            log.debug("  Geometry diagonal length: {:.2f}".format(float(diagonal)))
-            log.debug(
+            log.trace("  Geometry diagonal length: {:.2f}".format(float(diagonal)))
+            log.trace(
                 "  Relative tolerance: {:.4f}% of diagonal".format(
                     float(relative_tolerance) * 100
                 )
             )
-            log.debug(
+            log.trace(
                 "  Absolute tolerance: {:.2f} meters".format(float(abs_tolerance))
             )
         except Exception as e:
-            log.debug(f"  Error calculating bounds/tolerance: {str(e)}")
+            log.trace(f"  Error calculating bounds/tolerance: {str(e)}")
             return geom
 
         # For single polygons, handle exterior and interior rings separately
@@ -151,31 +157,38 @@ def simplify_polygon(
                                 lambda x, y: (x, y), new_poly
                             )  # Transform back to original CRS
                         except Exception as e:
-                            log.debug(f"  Transform back from meters failed: {str(e)}")
+                            log.error(f"  Transform back from meters failed: {str(e)}")
                             return geom
                     return new_poly
                 else:
-                    log.debug("Created polygon is invalid")
+                    log.warning(
+                        "Created polygon is invalid - the simplified geometry failed validation. Returning original geometry."
+                    )
+                    return geom
             except Exception as e:
-                log.debug(f"  Failed to create simplified polygon: {str(e)}")
+                log.error(f"  Failed to create simplified polygon: {str(e)}")
     except Exception as e:
-        log.debug(f"  Simplification error: {str(e)}")
+        log.error(f"  Simplification error: {str(e)}")
 
     # If anything fails, return original geometry
     return geom
 
 
-def simplify_and_convert_to_csv(
+def process_spatial_file(
     input_path: Union[str, Path],
+    resource_format: str,
     output_csv_path: Optional[Union[str, Path]] = None,
     tolerance: float = 0.001,  # Now represents a relative tolerance (0.1%)
     task_logger: Optional[logging.Logger] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Simplify and convert a spatial file (Shapefile, GeoJSON, etc.) to CSV format.
+    Simplify and convert a spatial file (Zipped Shapefile, GeoJSON, etc.) to CSV format.
 
     This function reads a spatial file, simplifies its geometries, and exports
     the attributes and simplified geometries to a CSV file.
+
+    If the input file is a Zipped Shapefile, it will be unzipped, and it will look for the .shp file
+    and process it accordingly.
 
     Args:
         input_path: Path to the input spatial file
@@ -208,8 +221,41 @@ def simplify_and_convert_to_csv(
         else:
             output_csv_path = Path(output_csv_path)
 
+        zip_temp_dir = None
+        log.debug(f"Processing spatial file: {input_path}")
+        # Step 0: Check if the input file is a Zipped Shapefile
+        # If it is, we need to unzip it and process the .shp file
+        if resource_format.upper() == "SHP" or resource_format.upper() == "QGIS":
+            # Create a temporary directory for the unzipped files
+            zip_temp_dir = input_path.parent / f"temp_{uuid.uuid4()}"
+            zip_temp_dir.mkdir(exist_ok=True)
+
+            # Unzip the file
+            with zipfile.ZipFile(input_path, "r") as zip_ref:
+                zip_ref.extractall(zip_temp_dir)
+
+            # After extracting, find the .shp file in the temp dir
+            shp_files = [
+                f for f in os.listdir(zip_temp_dir) if f.lower().endswith(".shp")
+            ]
+
+            num_shp_files = len(shp_files)
+            if num_shp_files > 1:
+                shapefile_path = zip_temp_dir / shp_files[0]
+                input_path = shapefile_path
+                log.warning(
+                    f"Found {num_shp_files} .shp files in the zipped Shapefile. Using FIRST unzipped shapefile: {shapefile_path}"
+                )
+            elif num_shp_files == 1:
+                shapefile_path = zip_temp_dir / shp_files[0]
+                input_path = shapefile_path
+                log.debug(f"Using unzipped shapefile: {shapefile_path}")
+            else:
+                shutil.rmtree(zip_temp_dir)
+                return False, "No .shp file found in the zipped Shapefile"
+
         # Step 1: Read spatial features using Fiona
-        # log.info(f"Reading spatial features from {input_path}")
+        log.debug(f"Reading spatial features from {input_path}")
         with fiona.open(input_path) as src:
             features = list(src)
             # Get CRS information
@@ -242,6 +288,8 @@ def simplify_and_convert_to_csv(
                     log.warning(f"Could not setup coordinate transformation: {str(e)}")
 
         if not features:
+            if zip_temp_dir:
+                shutil.rmtree(zip_temp_dir)
             return False, "No features found in the input file"
 
         log.info(f"Found {len(features)} features")
@@ -260,17 +308,17 @@ def simplify_and_convert_to_csv(
         for i, feat in enumerate(features):
             try:
                 # Create geometry and simplify
-                log.debug(f"Feature {i} simplification:")
-                log.debug(f"  Raw geometry: {feat['geometry']}")
+                log.trace(f"Feature {i} simplification:")
+                log.trace(f"  Raw geometry: {feat['geometry']}")
 
                 # Convert GeoJSON geometry to Shapely geometry
                 try:
                     original_geom = shape(feat["geometry"])
-                    log.debug(
+                    log.trace(
                         f"  Geometry type: {original_geom.geom_type}  Is valid: {original_geom.is_valid}  Is empty: {original_geom.is_empty}"
                     )
                 except Exception as e:
-                    log.warning(
+                    log.error(
                         f"Could not create Shapely geometry for feature {i}: {str(e)}"
                     )
                     continue
@@ -279,8 +327,8 @@ def simplify_and_convert_to_csv(
                 try:
                     original_wkt = dumps(original_geom)
                     vertex_count = len(original_wkt.split(","))
-                    log.debug(f"  Original WKT (first 50 chars): {original_wkt[:50]}")
-                    log.debug(f"  Original vertices: {vertex_count}")
+                    log.trace(f"  Original WKT (first 50 chars): {original_wkt[:50]}")
+                    log.trace(f"  Original vertices: {vertex_count}")
                 except Exception as e:
                     log.warning(
                         f"Could not convert geometry to WKT for feature {i}: {str(e)}"
@@ -297,22 +345,22 @@ def simplify_and_convert_to_csv(
                     try:
                         if to_meter_proj:
                             original_geom = transform(to_meter_proj, original_geom)
-                            log.debug("  Transformed to meters")
+                            log.trace("  Transformed to meters")
 
                         # Calculate absolute tolerance based on geometry size
                         minx, miny, maxx, maxy = original_geom.bounds
                         diagonal = ((maxx - minx) ** 2 + (maxy - miny) ** 2) ** 0.5
                         abs_tolerance = float(diagonal) * float(tolerance)
 
-                        log.debug(
+                        log.trace(
                             "  Geometry bounds: minx={}, miny={}, maxx={}, maxy={}".format(
                                 minx, miny, maxx, maxy
                             )
                         )
-                        log.debug(
+                        log.trace(
                             "  Geometry diagonal length: {:.2f}".format(float(diagonal))
                         )
-                        log.debug(
+                        log.trace(
                             "  Absolute tolerance: {:.2f} meters".format(
                                 float(abs_tolerance)
                             )
@@ -325,13 +373,13 @@ def simplify_and_convert_to_csv(
                                 fx, fy = float(x), float(y)
                                 coords.append((fx, fy))
                             except (ValueError, TypeError) as e:
-                                log.debug(
+                                log.warning(
                                     f"    Error converting coordinate {i}: (x={x}, y={y}), Error: {str(e)}"
                                 )
                                 continue
 
                         if coords:
-                            log.debug(f"  Processed {len(coords)} coordinates")
+                            log.trace(f"  Processed {len(coords)} coordinates")
                             coords = np.array(coords, dtype=np.float64)
                             original_geom = type(original_geom)(coords)
                             simplified = original_geom.simplify(
@@ -339,26 +387,26 @@ def simplify_and_convert_to_csv(
                             )
                             if to_meter_proj:
                                 simplified = transform(lambda x, y: (x, y), simplified)
-                                log.debug("  Transformed back from meters")
+                                log.trace("  Transformed back from meters")
                         else:
-                            log.debug(
+                            log.trace(
                                 "  No valid coordinates found, using original geometry"
                             )
                             simplified = original_geom
                     except Exception as e:
-                        log.debug(f"  Simplification failed: {str(e)}")
+                        log.warning(f"  Simplification failed: {str(e)}")
                         simplified = original_geom
 
                 # Convert simplified geometry to WKT
                 try:
                     simplified_wkt = dumps(simplified)
                     simplified_vertex_count = len(simplified_wkt.split(","))
-                    log.debug(f"  Simplified vertices: {simplified_vertex_count}")
+                    log.trace(f"  Simplified vertices: {simplified_vertex_count}")
 
                     if vertex_count > 0:  # Avoid division by zero
                         reduction = (1 - simplified_vertex_count / vertex_count) * 100
                         total_reduction += reduction
-                        log.debug("  Reduction: {:.1f}%".format(float(reduction)))
+                        log.trace("  Reduction: {:.1f}%".format(float(reduction)))
 
                     simplified_geoms.append(simplified_wkt)
                     valid_attributes.append(feat["properties"])
@@ -373,7 +421,7 @@ def simplify_and_convert_to_csv(
                         simplified_geoms.append(original_wkt)
                         valid_attributes.append(feat["properties"])
                     except Exception as e2:
-                        log.error(f"Could not store original geometry: {str(e2)}")
+                        log.warning(f"Could not store original geometry: {str(e2)}")
 
             except Exception as e:
                 error_count += 1
@@ -386,6 +434,8 @@ def simplify_and_convert_to_csv(
             )
 
         if not simplified_geoms:
+            if zip_temp_dir:
+                shutil.rmtree(zip_temp_dir)
             return False, "No features could be processed"
 
         avg_reduction = (
@@ -398,18 +448,18 @@ def simplify_and_convert_to_csv(
         )
 
         # Step 3: Create DataFrame
-        # log.info("Creating DataFrame from attributes and geometries")
         df = pd.DataFrame(valid_attributes)
         df["geometry"] = simplified_geoms
 
         # Step 4: Write to CSV
-        # log.info(f"Writing to CSV: {output_csv_path}")
         df.to_csv(output_csv_path, index=False)
 
-        # log.info(f"Successfully saved simplified output to {output_csv_path}")
+        if zip_temp_dir:
+            shutil.rmtree(zip_temp_dir)
+
         return True, None
 
     except Exception as e:
-        error_msg = f"Error converting spatial file to CSV: {str(e)}"
-        log.error(error_msg)
-        return False, error_msg
+        if zip_temp_dir:
+            shutil.rmtree(zip_temp_dir)
+        return False, f"Error converting spatial file to CSV: {str(e)}"
