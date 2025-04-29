@@ -17,7 +17,7 @@ import numpy as np
 from shapely.ops import transform
 import pyproj
 
-from ckanext.datapusher_plus.logging_utils import trace, TRACE
+from ckanext.datapusher_plus.logging_utils import TRACE
 
 # Create logger at module level as fallback
 logger = logging.getLogger(__name__)

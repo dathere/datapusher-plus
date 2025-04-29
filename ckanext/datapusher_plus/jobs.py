@@ -10,16 +10,14 @@ import os
 import subprocess
 import tempfile
 import time
-from urllib.parse import urlsplit, urlparse, ParseResult
+from urllib.parse import urlsplit, urlparse
 import logging
 import uuid
 import sys
 import json
 import requests
-from requests.models import Response
 from pathlib import Path
 from typing import Dict, Any, Optional, Union, List, Tuple, TypeVar, cast
-from datetime import datetime
 
 # Third-party imports
 import psycopg2
@@ -29,7 +27,6 @@ from dateutil.parser import parse as parsedate
 import traceback
 import sqlalchemy as sa
 from rq import get_current_job
-from rq.job import Job
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
@@ -38,7 +35,7 @@ from ckanext.datapusher_plus.job_exceptions import HTTPError
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.spatial_helpers as sh
 import ckanext.datapusher_plus.datastore_utils as dsu
-from ckanext.datapusher_plus.logging_utils import trace, TRACE
+from ckanext.datapusher_plus.logging_utils import TRACE
 from ckanext.datapusher_plus.qsv_utils import QSVCommand
 
 if locale.getdefaultlocale()[0]:
@@ -61,7 +58,10 @@ def validate_input(input: Dict[str, Any]) -> None:
 
 def callback_datapusher_hook(result_url: str, job_dict: Dict[str, Any]) -> bool:
     api_token = utils.get_dp_plus_user_apitoken()
-    headers: Dict[str, str] = {"Content-Type": "application/json", "Authorization": api_token}
+    headers: Dict[str, str] = {
+        "Content-Type": "application/json",
+        "Authorization": api_token,
+    }
 
     try:
         result = requests.post(
@@ -122,7 +122,9 @@ def datapusher_plus_to_datastore(input: Dict[str, Any]) -> Optional[str]:
     return "error" if errored else None
 
 
-def push_to_datastore(input: Dict[str, Any], task_id: str, dry_run: bool = False) -> Optional[List[Dict[str, Any]]]:
+def push_to_datastore(
+    input: Dict[str, Any], task_id: str, dry_run: bool = False
+) -> Optional[List[Dict[str, Any]]]:
     """Download and parse a resource push its data into CKAN's DataStore.
 
     An asynchronous job that gets a resource from CKAN, downloads the
@@ -149,7 +151,7 @@ def _push_to_datastore(
     task_id: str,
     input: Dict[str, Any],
     dry_run: bool = False,
-    temp_dir: Optional[str] = None
+    temp_dir: Optional[str] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     # add job to dn  (datapusher_plus_jobs table)
     try:
@@ -920,10 +922,7 @@ def _push_to_datastore(
     # Save stats to the datastore
     try:
         qsv.save_stats_to_datastore(
-            qsv_stats_csv,
-            resource_id,
-            conf.DATASTORE_WRITE_URL,
-            logger=logger
+            qsv_stats_csv, resource_id, conf.DATASTORE_WRITE_URL, logger=logger
         )
     except utils.JobError as e:
         raise utils.JobError(f"Failed to save stats to datastore: {e}")
@@ -940,10 +939,7 @@ def _push_to_datastore(
     resource_fields_freqs = {}
     try:
         resource_fields_freqs = qsv.save_freq_to_datastore(
-            qsv_freq_csv,
-            resource_id,
-            conf.DATASTORE_WRITE_URL,
-            logger=logger
+            qsv_freq_csv, resource_id, conf.DATASTORE_WRITE_URL, logger=logger
         )
     except utils.JobError as e:
         raise utils.JobError(f"Failed to save frequency to datastore: {e}")

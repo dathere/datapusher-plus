@@ -12,7 +12,7 @@ from pathlib import Path
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.utils as utils
 
-from ckanext.datapusher_plus.logging_utils import trace, TRACE
+from ckanext.datapusher_plus.logging_utils import TRACE
 
 logger = logging.getLogger(__name__)
 
