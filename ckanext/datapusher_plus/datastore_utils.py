@@ -180,7 +180,8 @@ def revise_package(package_id, match=None, filter=None, update=None, include=Non
     if not package_id:
         raise ValueError("Package ID is required")
 
-    # add package_id to match
+    # If match dict wasn't provided, initialize it as empty dict
+    # Then add the package_id to ensure we're updating the correct package
     match = match or {}
     match["id"] = package_id
 
