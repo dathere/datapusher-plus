@@ -9,6 +9,83 @@ from jinja2 import DictLoader, Environment
 log = logging.getLogger(__name__)
 
 
+class FormulaProcessor:
+    def __init__(
+        self,
+        scheming_yaml,
+        package,
+        resource,
+        resource_fields_stats,
+        resource_fields_freqs,
+        logger,
+    ):
+        self.scheming_yaml = scheming_yaml
+        self.package = package
+        self.resource = resource
+        self.resource_fields_stats = resource_fields_stats
+        self.resource_fields_freqs = resource_fields_freqs
+        self.logger = logger
+
+    def process_formulae(
+        self, entity_type: str, fields_key: str, formula_type: str = "formula"
+    ):
+        """
+        Generic formula processor for both package and resource fields
+
+        Args:
+            entity_type: 'package' or 'resource'
+            fields_key: Key in scheming_yaml for fields ('dataset_fields' or 'resource_fields')
+            formula_type: Type of formula ('formula' or 'suggestion_formula')
+        """
+        formula_fields = [
+            field for field in self.scheming_yaml[fields_key] if field.get(formula_type)
+        ]
+
+        if not formula_fields:
+            return
+
+        self.logger.info(
+            f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
+        )
+
+        jinja2_formulae = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            template = schema_field[formula_type]
+            jinja2_formulae[field_name] = template
+
+            self.logger.debug(
+                f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
+            )
+
+        context = {
+            "package": self.package,
+            "resource": self.resource,
+            "dpps": self.resource_fields_stats,
+            "dppf": self.resource_fields_freqs,
+        }
+        self.logger.trace(f"Context: {context}")
+        jinja2_env = create_jinja2_env(jinja2_formulae)
+
+        updates = {}
+        for schema_field in formula_fields:
+            field_name = schema_field["field_name"]
+            try:
+                formula = jinja2_env.get_template(field_name)
+                rendered_formula = formula.render(**context)
+                updates[field_name] = rendered_formula
+
+                self.logger.debug(
+                    f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
+                )
+            except Exception as e:
+                self.logger.error(
+                    f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
+                )
+
+        return updates
+
+
 def create_jinja2_env(context):
     """Create a configured Jinja2 environment with all filters and globals."""
     env = Environment(loader=DictLoader(context))
@@ -31,14 +108,16 @@ def create_jinja2_env(context):
     globals = {
         "spatial_extent_wkt": spatial_extent_wkt,
         "spatial_extent_feature_collection": spatial_extent_feature_collection,
+        "get_frequency_top_values": get_frequency_top_values,
     }
     env.globals.update(globals)
 
     return env
 
 
+# ------------------
 # Jinja2 filters and functions
-# Helper function to truncate text to a specific length and append ellipsis.
+# IMPORTANT: Be sure to add the function to the filters dict in create_jinja2_env
 def truncate_with_ellipsis(text, length=50, ellipsis="..."):
     """Truncate text to a specific length and append ellipsis."""
     if not text or len(text) <= length:
@@ -130,7 +209,9 @@ def calculate_bbox_area(min_lon, min_lat, max_lon, max_lat):
     return width * height * (earth_radius**2)
 
 
+# ------------------
 # Jinja2 Functions
+# IMPORTANT: Be sure to add the function to the globals dict in create_jinja2_env
 def spatial_extent_wkt(
     min_lon: float, min_lat: float, max_lon: float, max_lat: float
 ) -> str:
@@ -172,3 +253,23 @@ def spatial_extent_feature_collection(
         '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"User Drawn Polygon 1","type":"draw"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
     """
     return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[{bbox[0]} {bbox[1]}, {bbox[0]} {bbox[3]}, {bbox[2]} {bbox[3]}, {bbox[2]} {bbox[1]}, {bbox[0]} {bbox[1]}]]}}, "properties": {{}}}}]}}'
+
+
+def get_frequency_top_values(
+    resource_fields_freqs: dict, field: str, count: int = 10
+) -> list[dict]:
+    """Get the top values for a field from the frequency data.
+
+    Args:
+        resource_fields_freqs: Dictionary containing frequency data for all fields
+        field: The field to get the top values for
+        count: The number of top values to return, defaults to 10
+
+    Returns:
+        List of dictionaries containing value, count and percentage for top values
+    """
+    if field not in resource_fields_freqs:
+        return []
+
+    # The data is already sorted by frequency in descending order from qsv frequency
+    return resource_fields_freqs[field][:count]

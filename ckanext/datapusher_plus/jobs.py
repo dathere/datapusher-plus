@@ -3,7 +3,6 @@
 
 # Standard library imports
 import csv
-import datetime
 import hashlib
 import locale
 import mimetypes
@@ -12,40 +11,23 @@ import shutil
 import subprocess
 import tempfile
 import time
-import decimal
 from urllib.parse import urlsplit
 from urllib.parse import urlparse
 import logging
 import uuid
+import sys
+import json
+import requests
+from pathlib import Path
 
 # Third-party imports
 import psycopg2
-from datasize import DataSize
-from dateutil.parser import parse as parsedate
-import json
-import requests
-import datetime
-import locale
-import logging
-import decimal
-import hashlib
-import time
-import tempfile
-import subprocess
-import csv
-import os
-import semver
-import sys
-import traceback
-
-import sqlalchemy as sa
-from pathlib import Path
-from datasize import DataSize
 from psycopg2 import sql
+from datasize import DataSize
 from dateutil.parser import parse as parsedate
-
+import traceback
+import sqlalchemy as sa
 from rq import get_current_job
-import ckan.plugins.toolkit as tk
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
@@ -53,228 +35,15 @@ import ckanext.datapusher_plus.jinja2_helpers as j2h
 from ckanext.datapusher_plus.job_exceptions import HTTPError
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.spatial_helpers as sh
+import ckanext.datapusher_plus.datastore_utils as dsu
 from ckanext.datapusher_plus.logging_utils import trace, TRACE
+from ckanext.datapusher_plus.qsv_utils import QSVCommand
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
 else:
     locale.setlocale(locale.LC_ALL, "")
-
-
-class DatastoreEncoder(json.JSONEncoder):
-    # Custom JSON encoder
-    def default(self, obj):
-        if isinstance(obj, datetime.datetime):
-            return obj.isoformat()
-        if isinstance(obj, decimal.Decimal):
-            return str(obj)
-
-        return json.JSONEncoder.default(self, obj)
-
-
-def delete_datastore_resource(resource_id):
-    try:
-        tk.get_action("datastore_delete")(
-            {"ignore_auth": True}, {"resource_id": resource_id, "force": True}
-        )
-    except tk.ObjectNotFound:
-        raise utils.JobError("Deleting existing datastore failed.")
-
-
-def delete_resource(resource_id):
-    try:
-        tk.get_action("resource_delete")(
-            {"ignore_auth": True}, {"id": resource_id, "force": True}
-        )
-    except tk.ObjectNotFound:
-        raise utils.JobError("Deleting existing resource failed.")
-
-
-def datastore_resource_exists(resource_id):
-
-    data_dict = {
-        "resource_id": resource_id,
-        "limit": 0,
-        "include_total": False,
-    }
-
-    context = {"ignore_auth": True}
-
-    try:
-        result = tk.get_action("datastore_search")(context, data_dict)
-        return result
-    except tk.ObjectNotFound:
-        return False
-
-
-def send_resource_to_datastore(
-    resource,
-    resource_id,
-    headers,
-    records,
-    aliases,
-    calculate_record_count,
-):
-    """
-    Stores records in CKAN datastore
-    """
-
-    if resource_id:
-        # used to create the "main" resource
-        request = {
-            "resource_id": resource_id,
-            "fields": headers,
-            "force": True,
-            "records": records,
-            "aliases": aliases,
-            "calculate_record_count": calculate_record_count,
-        }
-    else:
-        # used to create the "stats" resource
-        request = {
-            "resource": resource,
-            "fields": headers,
-            "force": True,
-            "aliases": aliases,
-            "calculate_record_count": calculate_record_count,
-        }
-    try:
-        resource_dict = tk.get_action("datastore_create")(
-            {"ignore_auth": True}, request
-        )
-        return resource_dict
-    except Exception as e:
-        raise utils.JobError("Error sending data to datastore ({!s}).".format(e))
-
-
-def upload_resource(new_resource, file):
-    """
-    Uploads a new resource to CKAN
-    """
-    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
-    context = {
-        "package_id": new_resource["package_id"],
-        "ignore_auth": True,
-        "user": site_user["name"],
-        "auth_user_obj": None,
-    }
-
-    new_resource["upload"] = open(file, "rb")
-    try:
-        tk.get_action("resource_create")(context, new_resource)
-    except tk.ObjectNotFound:
-        raise utils.JobError("Creating resource failed.")
-
-
-def update_resource(resource):
-    """
-    Updates resource metadata
-    """
-    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
-    context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
-    try:
-        tk.get_action("resource_update")(context, resource)
-    except tk.ObjectNotFound:
-        raise utils.JobError("Updating existing resource failed.")
-
-
-def get_resource(resource_id):
-    """
-    Gets available information about the resource from CKAN
-    """
-    resource_dict = tk.get_action("resource_show")(
-        {"ignore_auth": True}, {"id": resource_id}
-    )
-
-    return resource_dict
-
-
-def get_package(package_id):
-    """
-    Gets available information about a package from CKAN
-    """
-    dataset_dict = tk.get_action("package_show")(
-        {"ignore_auth": True}, {"id": package_id}
-    )
-
-    return dataset_dict
-
-
-def resource_exists(package_id, resource_name):
-    """
-    Checks if a resource name exists in a package
-    Returns:
-        False if package or resource not found
-        (True, resource_id) if resource found
-    """
-    package = get_package(package_id)
-    if not package:
-        return False, None
-    for resource in package["resources"]:
-        if resource["name"] == resource_name:
-            return True, resource["id"]
-    return False, None
-
-
-def patch_package(package):
-    """
-    Patches package metadata
-    """
-    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
-    context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
-    patched_package = tk.get_action("package_patch")(context, package)
-    return patched_package
-
-
-def revise_package(package_id, match={}, filter=None, update=None, include=None):
-    """
-    Revises package metadata using the package_revise action API.
-
-    Args:
-        package_id (str): The ID of the package to revise
-        match (dict, optional): Fields that must match the current version of the package
-        filter (list, optional): List of fields to remove from the package
-        update (dict, optional): Fields to update to new values
-        include (list, optional): List of fields to include in the response
-
-    Returns:
-        dict: The revised package metadata
-    """
-    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
-    context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
-
-    # package_id is required
-    if not package_id:
-        raise ValueError("Package ID is required")
-
-    # add package_id to match
-    match["id"] = package_id
-
-    data_dict = {
-        "match": match,
-        "filter": filter or [],  # Must be a list
-        "update": update or {},
-        "include": include or [],  # Must be a list
-    }
-
-    revised_package = tk.get_action("package_revise")(context, data_dict)
-    return revised_package
-
-
-def get_scheming_yaml(package_id, scheming_yaml_type="dataset"):
-    """
-    Gets the scheming yaml for a package
-    """
-    package = get_package(package_id)
-    if not package:
-        raise utils.JobError("Package not found")
-
-    scheming_yaml = tk.get_action("scheming_dataset_schema_show")(
-        {"ignore_auth": True}, {"type": scheming_yaml_type}
-    )
-
-    return scheming_yaml, package
 
 
 def validate_input(input):
@@ -286,78 +55,9 @@ def validate_input(input):
 
     if "resource_id" not in data:
         raise utils.JobError("No id provided.")
-    # if "ckan_url" not in data:
-    #     raise utils.JobError("No ckan_url provided.")
-    # if not input.get("api_key"):
-    #     raise utils.JobError("No CKAN API key provided")
-
-
-class FormulaProcessor:
-    def __init__(self, scheming_yaml, package, resource_fields_stats, logger):
-        self.scheming_yaml = scheming_yaml
-        self.package = package
-        self.resource_fields_stats = resource_fields_stats
-        self.logger = logger
-
-    def process_formulae(
-        self, entity_type: str, fields_key: str, formula_type: str = "formula"
-    ):
-        """
-        Generic formula processor for both package and resource fields
-
-        Args:
-            entity_type: 'package' or 'resource'
-            fields_key: Key in scheming_yaml for fields ('dataset_fields' or 'resource_fields')
-            formula_type: Type of formula ('formula' or 'suggestion_formula')
-        """
-        formula_fields = [
-            field for field in self.scheming_yaml[fields_key] if field.get(formula_type)
-        ]
-
-        if not formula_fields:
-            return
-
-        self.logger.info(
-            f"Found {len(formula_fields)} {entity_type.upper()} field/s with {formula_type} in the scheming_yaml"
-        )
-
-        jinja2_formulae = {}
-        for schema_field in formula_fields:
-            field_name = schema_field["field_name"]
-            template = schema_field[formula_type]
-            jinja2_formulae[field_name] = template
-
-            self.logger.debug(
-                f'Jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {template}'
-            )
-
-        context = {"package": self.package, "resource": self.resource_fields_stats}
-        context.update(jinja2_formulae)
-        jinja2_env = j2h.create_jinja2_env(context)
-
-        updates = {}
-        for schema_field in formula_fields:
-            field_name = schema_field["field_name"]
-            try:
-                formula = jinja2_env.get_template(field_name)
-                rendered_formula = formula.render(**context)
-                updates[field_name] = rendered_formula
-
-                self.logger.debug(
-                    f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
-                )
-            except Exception as e:
-                self.logger.error(
-                    f'Error evaluating jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
-                )
-
-        return updates
 
 
 def callback_datapusher_hook(result_url, job_dict):
-    # api_key_from_job = job_dict.pop("api_key", None)
-    # if not api_key:
-    #     api_key = api_key_from_job
     api_token = utils.get_dp_plus_user_apitoken()
     headers = {"Content-Type": "application/json", "Authorization": api_token}
 
@@ -428,7 +128,6 @@ def push_to_datastore(input, task_id, dry_run=False):
     :type dry_run: boolean
 
     """
-
     # Ensure temporary files are removed after run
     with tempfile.TemporaryDirectory() as temp_dir:
         return _push_to_datastore(task_id, input, dry_run=dry_run, temp_dir=temp_dir)
@@ -446,7 +145,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # also show logs on stderr
     logger.addHandler(logging.StreamHandler())
-    log_level = getattr(logging, conf.UPLOAD_LOG_LEVEL.upper())
+
+    # set the log level to the config upload_log_level
+    try:
+        log_level = getattr(logging, conf.UPLOAD_LOG_LEVEL.upper())
+    except AttributeError:
+        # fallback to our custom TRACE level
+        log_level = TRACE
 
     # set the log level to the config upload_log_level
     logger.setLevel(logging.INFO)
@@ -454,45 +159,20 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     logger.setLevel(log_level)
 
     # check if conf.QSV_BIN and conf.FILE_BIN exists
-    # qsv_path = Path(conf.QSV_BIN)
     if not Path(conf.QSV_BIN).is_file():
         raise utils.JobError("{} not found.".format(conf.QSV_BIN))
 
     if not conf.FILE_BIN.is_file():
         raise utils.JobError("{} not found.".format(conf.FILE_BIN))
 
-    # make sure qsv binary variant is up-to-date
-    try:
-        qsv_version = subprocess.run(
-            [conf.QSV_BIN, "--version"],
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("qsv version check error: {}".format(e))
-    qsv_version_info = str(qsv_version.stdout)
-    if not qsv_version_info:
-        """
-        Sample response
-        qsvdp 4.0.0-mimalloc-geocode;Luau 0.663;self_update...
-        """
-        raise utils.JobError(
-            f"We expect qsv version info to be returned. Command: {conf.QSV_BIN} --version. Response: {qsv_version_info}"
-        )
-    qsv_semver = qsv_version_info[
-        qsv_version_info.find(" ") : qsv_version_info.find("-")
-    ].lstrip()
+    # Initialize QSVCommand
+    qsv = QSVCommand(logger=logger)
 
-    logger.info("qsv version found: {}".format(qsv_semver))
+    # Check qsv version
     try:
-        if semver.compare(qsv_semver, conf.MINIMUM_QSV_VERSION) < 0:
-            raise utils.JobError(
-                "At least qsv version {} required. Found {}. You can get the latest release at https://github.com/jqnatividad/qsv/releases/latest".format(
-                    conf.MINIMUM_QSV_VERSION, qsv_version_info
-                )
-            )
-    except ValueError as e:
-        raise utils.JobError("Cannot parse qsv version info: {}".format(e))
+        qsv.check_version()
+    except utils.JobError as e:
+        raise utils.JobError(f"qsv version check error: {e}")
 
     validate_input(input)
 
@@ -501,11 +181,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     ckan_url = data["ckan_url"]
     resource_id = data["resource_id"]
     try:
-        resource = get_resource(resource_id)
+        resource = dsu.get_resource(resource_id)
     except utils.JobError:
         # try again in 5 seconds just incase CKAN is slow at adding resource
         time.sleep(5)
-        resource = get_resource(resource_id)
+        resource = dsu.get_resource(resource_id)
 
     # check if the resource url_type is a datastore
     if resource.get("url_type") == "datastore":
@@ -724,22 +404,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # use --trim option to trim column names and the data
         qsv_excel_csv = os.path.join(temp_dir, "qsv_excel.csv")
         try:
-            qsv_excel = subprocess.run(
-                [
-                    conf.QSV_BIN,
-                    "excel",
-                    qsv_spreadsheet,
-                    "--sheet",
-                    str(default_excel_sheet),
-                    "--trim",
-                    "--output",
-                    qsv_excel_csv,
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
+            qsv_excel = qsv.excel(
+                qsv_spreadsheet,
+                sheet=default_excel_sheet,
+                trim=True,
+                output_file=qsv_excel_csv,
             )
-        except subprocess.CalledProcessError as e:
+        except utils.JobError as e:
             logger.error(
                 "Upload aborted. Cannot export spreadsheet(?) to CSV: {}".format(e)
             )
@@ -804,7 +475,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         + "_simplified"
                         + os.path.splitext(resource["name"])[1]
                     )
-                    existing_resource, existing_resource_id = resource_exists(
+                    existing_resource, existing_resource_id = dsu.resource_exists(
                         resource["package_id"], simplified_resource_name
                     )
 
@@ -812,7 +483,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                         logger.info(
                             "Simplified resource already exists. Replacing it..."
                         )
-                        delete_resource(existing_resource_id)
+                        dsu.delete_resource(existing_resource_id)
                     else:
                         logger.info(
                             "Simplified resource does not exist. Uploading it..."
@@ -828,7 +499,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                             "mimetype": resource["mimetype"],
                             "mimetype_inner": resource["mimetype_inner"],
                         }
-                        upload_resource(new_simplified_resource, qsv_spatial_file)
+                        dsu.upload_resource(new_simplified_resource, qsv_spatial_file)
 
                     simplification_failed_flag = False
                 else:
@@ -853,24 +524,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # Run qsv geoconvert
             qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
             try:
-                subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "geoconvert",
-                        tmp,
-                        "geojson",
-                        "csv",
-                        "--max-length",
-                        str(conf.QSV_STATS_STRING_MAX_LENGTH),
-                        "--output",
-                        qsv_geoconvert_csv,
-                    ],
-                    check=True,
-                    capture_output=True,
-                    text=True,
+                qsv.geoconvert(
+                    tmp,
+                    resource_format,
+                    "csv",
+                    max_length=conf.QSV_STATS_STRING_MAX_LENGTH,
+                    output_file=qsv_geoconvert_csv,
                 )
-            except subprocess.CalledProcessError as e:
-                logger.error(f"qsv geoconvert failed: {e.stderr}")
+            except utils.JobError as e:
+                logger.error(f"qsv geoconvert failed: {e}")
                 raise
 
             tmp = qsv_geoconvert_csv
@@ -943,19 +605,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         else:
             qsv_input_utf_8_encoded_csv = tmp
         try:
-            qsv_input = subprocess.run(
-                [
-                    conf.QSV_BIN,
-                    "input",
-                    tmp,
-                    "--trim-headers",
-                    "--output",
-                    qsv_input_csv,
-                ],
-                check=True,
-            )
-        except subprocess.CalledProcessError as e:
-            # return as we can't push an invalid CSV file
+            qsv.input(tmp, trim_headers=True, output_file=qsv_input_csv)
+        except utils.JobError as e:
             logger.error(
                 "Job aborted as the file cannot be normalized/transcoded: {}.".format(e)
             )
@@ -970,14 +621,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # If it passes validation, we can handle it with confidence downstream as a "normal" CSV.
     logger.info("Validating CSV...")
     try:
-        subprocess.run(
-            [conf.QSV_BIN, "validate", tmp], check=True, capture_output=True, text=True
-        )
-    except subprocess.CalledProcessError as e:
-        # return as we can't push an invalid CSV file
-        validate_error_msg = e.stderr
-        logger.error("Invalid CSV! Job aborted: {}.".format(validate_error_msg))
-        return
+        qsv.validate(tmp)
+    except utils.JobError as e:
+        logger.error(f"qsv validate failed: {e}")
+        raise
+
     logger.info("Well-formed, valid CSV file confirmed...")
 
     # --------------------- Sortcheck --------------------------
@@ -987,14 +635,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if conf.SORT_AND_DUPE_CHECK or conf.DEDUP:
         logger.info("Checking for duplicates and if the CSV is sorted...")
         try:
-            qsv_sortcheck = subprocess.run(
-                [conf.QSV_BIN, "sortcheck", tmp, "--json"],
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
+            qsv_sortcheck = qsv.sortcheck(tmp, json_output=True, uses_stdio=True)
+        except utils.JobError as e:
             raise utils.JobError("Sortcheck error: {}".format(e))
-        sortcheck_json = json.loads(str(qsv_sortcheck.stdout))
+        sortcheck_json = json.loads(str(qsv_sortcheck["stdout"]))
         is_sorted = sortcheck_json["sorted"]
         record_count = int(sortcheck_json["record_count"])
         unsorted_breaks = int(sortcheck_json["unsorted_breaks"])
@@ -1011,34 +655,21 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if conf.DEDUP and dupe_count > 0:
         qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
         logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
-        qsv_extdedup_cmd = [conf.QSV_BIN, "extdedup", tmp, qsv_dedup_csv]
 
         try:
-            qsv_extdedup = subprocess.run(
-                qsv_extdedup_cmd,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
+            qsv.extdedup(tmp, qsv_dedup_csv)
+        except utils.JobError as e:
             raise utils.JobError("Check for duplicates error: {}".format(e))
-        dupe_count = int(str(qsv_extdedup.stderr).strip())
-        if dupe_count > 0:
-            tmp = qsv_dedup_csv
-            logger.warning("{:,} duplicates found and removed.".format(dupe_count))
-    elif dupe_count > 0:
-        logger.warning("{:,} duplicates found but not deduping...".format(dupe_count))
+
+        tmp = qsv_dedup_csv
+        logger.info("Deduped CSV saved to {}".format(qsv_dedup_csv))
 
     # ----------------------- Headers & Safenames ---------------------------
     # get existing header names, so we can use them for data dictionary labels
     # should we need to change the column name to make it "db-safe"
     try:
-        qsv_headers = subprocess.run(
-            [conf.QSV_BIN, "headers", "--just-names", tmp],
-            capture_output=True,
-            check=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError as e:
+        qsv_headers = qsv.headers(tmp, just_names=True)
+    except utils.JobError as e:
         raise utils.JobError("Cannot scan CSV headers: {}".format(e))
     original_headers = str(qsv_headers.stdout).strip()
     original_header_dict = {
@@ -1050,23 +681,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_safenames_csv = os.path.join(temp_dir, "qsv_safenames.csv")
     logger.info('Checking for "database-safe" header names...')
     try:
-        qsv_safenames = subprocess.run(
-            [
-                conf.QSV_BIN,
-                "safenames",
-                tmp,
-                "--mode",
-                "json",
-                "--reserved",
-                conf.RESERVED_COLNAMES,
-                "--prefix",
-                conf.UNSAFE_PREFIX,
-            ],
-            capture_output=True,
-            text=True,
+        qsv_safenames = qsv.safenames(
+            tmp,
+            mode="json",
+            reserved=conf.RESERVED_COLNAMES,
+            prefix=conf.UNSAFE_PREFIX,
+            uses_stdio=True,
         )
-    except subprocess.CalledProcessError as e:
-        raise utils.JobError("Safenames error: {}".format(e))
+    except utils.JobError as e:
+        raise utils.JobError("Cannot scan CSV headers: {}".format(e))
 
     unsafe_json = json.loads(str(qsv_safenames.stdout))
     unsafe_headers = unsafe_json["unsafe_headers"]
@@ -1077,21 +700,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 len(unsafe_headers), unsafe_headers
             )
         )
-        qsv_safenames = subprocess.run(
-            [
-                conf.QSV_BIN,
-                "safenames",
-                tmp,
-                "--mode",
-                "conditional",
-                "--output",
-                qsv_safenames_csv,
-            ],
-            capture_output=True,
-            text=True,
+        qsv_safenames = qsv.safenames(
+            tmp, mode="conditional", output_file=qsv_safenames_csv
         )
-        tmp = qsv_safenames_csv
     else:
+        tmp = qsv_safenames_csv
         logger.info("No unsafe header names found...")
 
     # ---------------------- Type Inferencing -----------------------
@@ -1101,8 +714,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # are all accelerated/multithreaded when an index is present
     try:
         qsv_index_file = tmp + ".idx"
-        subprocess.run([conf.QSV_BIN, "index", tmp], check=True)
-    except subprocess.CalledProcessError as e:
+        qsv.index(tmp)
+    except utils.JobError as e:
         raise utils.JobError("Cannot index CSV: {}".format(e))
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
@@ -1110,12 +723,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     if not conf.SORT_AND_DUPE_CHECK:
         # get record count, this is instantaneous with an index
         try:
-            qsv_count = subprocess.run(
-                [conf.QSV_BIN, "count", tmp], capture_output=True, check=True, text=True
-            )
-        except subprocess.CalledProcessError as e:
+            qsv_count = qsv.count(tmp)
+            record_count = int(str(qsv_count.stdout).strip())
+        except utils.JobError as e:
             raise utils.JobError("Cannot count records in CSV: {}".format(e))
-        record_count = int(str(qsv_count.stdout).strip())
 
     # its empty, nothing to do
     if record_count == 0:
@@ -1136,26 +747,6 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     headers_max = []
     headers_cardinality = []
     qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
-    qsv_stats_cmd = [
-        conf.QSV_BIN,
-        "stats",
-        tmp,
-        "--infer-dates",
-        "--dates-whitelist",
-        "all",
-        "--stats-jsonl",
-        "--output",
-        qsv_stats_csv,
-    ]
-
-    if conf.PREFER_DMY:
-        qsv_stats_cmd.append("--prefer-dmy")
-
-    # global conf.AUTO_INDEX_THRESHOLD
-    if conf.AUTO_INDEX_THRESHOLD:
-        qsv_stats_cmd.append("--cardinality")
-    if conf.SUMMARY_STATS_OPTIONS:
-        qsv_stats_cmd.append(conf.SUMMARY_STATS_OPTIONS)
 
     try:
         # If the file is a spatial format, we need to use --max-length
@@ -1164,10 +755,29 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if spatial_format_flag:
             env = os.environ.copy()
             env["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
-            qsv_stats = subprocess.run(qsv_stats_cmd, check=True, env=env)
+            qsv_stats = qsv.stats(
+                tmp,
+                infer_dates=True,
+                dates_whitelist="all",
+                stats_jsonl=True,
+                prefer_dmy=conf.PREFER_DMY,
+                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
+                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
+                output_file=qsv_stats_csv,
+                env=env,
+            )
         else:
-            qsv_stats = subprocess.run(qsv_stats_cmd, check=True)
-    except subprocess.CalledProcessError as e:
+            qsv_stats = qsv.stats(
+                tmp,
+                infer_dates=True,
+                dates_whitelist="all",
+                stats_jsonl=True,
+                prefer_dmy=conf.PREFER_DMY,
+                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
+                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
+                output_file=qsv_stats_csv,
+            )
+    except utils.JobError as e:
         raise utils.JobError(
             "Cannot infer data types and compile statistics: {}".format(e)
         )
@@ -1193,7 +803,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
     # Get the field stats for each field in the headers list
-    existing = datastore_resource_exists(resource_id)
+    existing = dsu.datastore_resource_exists(resource_id)
     existing_info = None
     if existing:
         existing_info = dict(
@@ -1219,7 +829,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 res_id=resource_id
             )
         )
-        delete_datastore_resource(resource_id)
+        dsu.delete_datastore_resource(resource_id)
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
@@ -1335,14 +945,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy stats CSV to /tmp directory for debugging purposes
-    more_debug_info = logger.getEffectiveLevel() >= logging.DEBUG
-    if more_debug_info:
+    more_trace_info = logger.getEffectiveLevel() == TRACE
+    if more_trace_info:
         try:
             debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
             shutil.copy2(qsv_stats_csv, debug_stats_path)
-            logger.debug(f"Copied stats CSV to {debug_stats_path} for debugging")
+            logger.trace(f"Copied stats CSV to {debug_stats_path} for debugging")
         except Exception as e:
-            logger.debug(f"Failed to copy stats CSV to /tmp for debugging: {e}")
+            logger.trace(f"Failed to copy stats CSV to /tmp for debugging: {e}")
 
     try:
         with open(qsv_stats_csv, "r") as f:
@@ -1357,18 +967,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     # ----------------------- Frequency Table ---------------------------
     # compile a frequency table for each column
     qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
-    qsv_freq_cmd = [
-        conf.QSV_BIN,
-        "frequency",
-        "--limit",
-        "0",
-        tmp,
-        "--output",
-        qsv_freq_csv,
-    ]
+
     try:
-        qsv_freq = subprocess.run(qsv_freq_cmd, check=True)
-    except subprocess.CalledProcessError as e:
+        qsv.frequency(tmp, limit=10, output_file=qsv_freq_csv)
+    except utils.JobError as e:
         raise utils.JobError("Cannot create a frequency table: {}".format(e))
 
     # save frequency table to the datastore by loading qsv_freq_csv directly using COPY
@@ -1391,20 +993,42 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy frequency CSV to /tmp directory for debugging purposes
-    if more_debug_info:
+    if more_trace_info:
         try:
             debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
             shutil.copy2(qsv_freq_csv, debug_freq_path)
-            logger.debug(f"Copied frequency CSV to {debug_freq_path} for debugging")
+            logger.trace(f"Copied frequency CSV to {debug_freq_path} for debugging")
         except Exception as e:
-            logger.debug(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
+            logger.trace(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
 
     # load the frequency table using COPY
     copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
         freq_table
     )
+
+    resource_fields_freqs = {}
     try:
         with open(qsv_freq_csv, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                field = row["field"]
+                value = row["value"]
+                count = row["count"]
+                percentage = row["percentage"]
+
+                # Initialize list for field if it doesn't exist
+                if field not in resource_fields_freqs:
+                    resource_fields_freqs[field] = []
+
+                # Append the frequency data as a dict to the field's list
+                resource_fields_freqs[field].append(
+                    {"value": value, "count": count, "percentage": percentage}
+                )
+
+            logger.trace(f"Resource fields freqs: {resource_fields_freqs}")
+
+            # Rewind file for COPY operation
+            f.seek(0)
             cur_statsfreq.copy_expert(copy_sql, f)
     except IOError as e:
         raise utils.JobError("Could not open frequency CSV file: {}".format(e))
@@ -1427,19 +1051,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info("Preparing {:,}-row preview...".format(conf.PREVIEW_ROWS))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
-                qsv_slice = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "slice",
-                        "--len",
-                        str(conf.PREVIEW_ROWS),
-                        tmp,
-                        "--output",
-                        qsv_slice_csv,
-                    ],
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
+                qsv.slice(tmp, length=conf.PREVIEW_ROWS, output_file=qsv_slice_csv)
+            except utils.JobError as e:
                 raise utils.JobError("Cannot create a preview slice: {}".format(e))
             rows_to_copy = conf.PREVIEW_ROWS
             tmp = qsv_slice_csv
@@ -1451,21 +1064,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
-                qsv_slice = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "slice",
-                        "--start",
-                        "-1",
-                        "--len",
-                        str(slice_len),
-                        tmp,
-                        "--output",
-                        qsv_slice_csv,
-                    ],
-                    check=True,
-                )
-            except subprocess.CalledProcessError as e:
+                qsv.slice(tmp, start=-1, length=slice_len, output_file=qsv_slice_csv)
+            except utils.JobError as e:
                 raise utils.JobError(
                     "Cannot create a preview slice from the end: {}".format(e)
                 )
@@ -1479,24 +1079,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         qsv_applydp_csv = os.path.join(temp_dir, "qsv_applydp.csv")
         datecols = ",".join(datetimecols_list)
 
-        qsv_applydp_cmd = [
-            conf.QSV_BIN,
-            "datefmt",
-            datecols,
-            tmp,
-            "--output",
-            qsv_applydp_csv,
-        ]
-        if conf.PREFER_DMY:
-            qsv_applydp_cmd.append("--prefer-dmy")
         logger.info(
             'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
                 datecols, conf.PREFER_DMY
             )
         )
         try:
-            qsv_applydp = subprocess.run(qsv_applydp_cmd, check=True)
-        except subprocess.CalledProcessError as e:
+            qsv.datefmt(
+                datecols, tmp, prefer_dmy=conf.PREFER_DMY, output_file=qsv_applydp_csv
+            )
+        except utils.JobError as e:
             raise utils.JobError("Applydp error: {}".format(e))
         tmp = qsv_applydp_csv
 
@@ -1524,11 +1116,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # a text file, with each line having a regex pattern, and an optional
         # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
         if conf.PII_REGEX_RESOURCE_ID:
-            pii_regex_resource_exist = datastore_resource_exists(
+            pii_regex_resource_exist = dsu.datastore_resource_exists(
                 conf.PII_REGEX_RESOURCE_ID
             )
             if pii_regex_resource_exist:
-                pii_resource = get_resource(conf.PII_REGEX_RESOURCE_ID)
+                pii_resource = dsu.get_resource(conf.PII_REGEX_RESOURCE_ID)
                 pii_regex_url = pii_resource["url"]
 
                 r = requests.get(pii_regex_url)
@@ -1547,19 +1139,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         if conf.PII_QUICK_SCREEN:
             logger.info("Quickly scanning for PII using {}...".format(pii_regex_file))
             try:
-                qsv_searchset = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "searchset",
-                        "--ignore-case",
-                        "--quick",
-                        pii_regex_fname,
-                        tmp,
-                    ],
-                    capture_output=True,
-                    text=True,
+                qsv_searchset = qsv.searchset(
+                    pii_regex_fname,
+                    tmp,
+                    ignore_case=True,
+                    quick=True,
                 )
-            except subprocess.CalledProcessError as e:
+            except utils.JobError as e:
                 raise utils.JobError("Cannot quickly search CSV for PII: {}".format(e))
             pii_candidate_row = str(qsv_searchset.stderr)
             if pii_candidate_row:
@@ -1569,24 +1155,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info("Scanning for PII using {}...".format(pii_regex_file))
             qsv_searchset_csv = os.path.join(temp_dir, "qsv_searchset.csv")
             try:
-                qsv_searchset = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "searchset",
-                        "--ignore-case",
-                        "--flag",
-                        "PII_info",
-                        "--flag-matches-only",
-                        "--json",
-                        pii_regex_file,
-                        tmp,
-                        "--output",
-                        qsv_searchset_csv,
-                    ],
-                    capture_output=True,
-                    text=True,
+                qsv_searchset = qsv.searchset(
+                    pii_regex_file,
+                    tmp,
+                    ignore_case=True,
+                    flag="PII_info",
+                    flag_matches_only=True,
+                    json_output=True,
+                    output_file=qsv_searchset_csv,
                 )
-            except subprocess.CalledProcessError as e:
+            except utils.JobError as e:
                 raise utils.JobError("Cannot search CSV for PII: {}".format(e))
             pii_json = json.loads(str(qsv_searchset.stderr))
             pii_total_matches = int(pii_json["total_matches"])
@@ -1626,7 +1204,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 cur_pii = raw_connection_pii.cursor()
 
             # check if the pii already exist
-            existing_pii = datastore_resource_exists(pii_resource_id)
+            existing_pii = dsu.datastore_resource_exists(pii_resource_id)
 
             # Delete existing pii preview before proceeding.
             if existing_pii:
@@ -1642,26 +1220,25 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if pii_alias_result:
                     existing_pii_alias_of = pii_alias_result[0]
 
-                    delete_datastore_resource(existing_pii_alias_of)
-                    delete_resource(existing_pii_alias_of)
+                    dsu.delete_datastore_resource(existing_pii_alias_of)
+                    dsu.delete_resource(existing_pii_alias_of)
 
             pii_alias = [pii_resource_id]
 
             # run stats on pii preview CSV to get header names and infer data types
             # we don't need summary statistics, so use the --typesonly option
             try:
-                qsv_pii_stats = subprocess.run(
-                    [
-                        conf.QSV_BIN,
-                        "stats",
-                        "--typesonly",
-                        qsv_searchset_csv,
-                    ],
-                    capture_output=True,
-                    check=True,
-                    text=True,
+                qsv_pii_stats = qsv.stats(
+                    qsv_searchset_csv,
+                    infer_dates=False,
+                    dates_whitelist="all",
+                    stats_jsonl=False,
+                    prefer_dmy=False,
+                    cardinality=False,
+                    summary_stats_options=None,
+                    output_file=None,
                 )
-            except subprocess.CalledProcessError as e:
+            except utils.JobError as e:
                 raise utils.JobError(
                     "Cannot run stats on PII preview CSV: {}".format(e)
                 )
@@ -1678,7 +1255,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 "format": "CSV",
                 "mimetype": "text/csv",
             }
-            pii_response = send_resource_to_datastore(
+            pii_response = dsu.send_resource_to_datastore(
                 pii_resource,
                 resource_id=None,
                 headers=pii_stats_dict,
@@ -1723,7 +1300,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             pii_resource["pii_preview"] = True
             pii_resource["pii_of_resource"] = resource_id
             pii_resource["total_record_count"] = pii_rows_with_matches
-            update_resource(pii_resource)
+            dsu.update_resource(pii_resource)
 
             pii_msg = (
                 "{} PII candidate/s in {} row/s are available at {} for review".format(
@@ -1767,7 +1344,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
 
     # first, let's create an empty datastore table w/ guessed types
-    send_resource_to_datastore(
+    dsu.send_resource_to_datastore(
         resource=None,
         resource_id=resource["id"],
         headers=headers_dicts,
@@ -1849,13 +1426,20 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
-    scheming_yaml, package = get_scheming_yaml(package_id, scheming_yaml_type="dataset")
+    scheming_yaml, package = dsu.get_scheming_yaml(
+        package_id, scheming_yaml_type="dataset"
+    )
 
-    logger.debug(f"package: {package}")
+    logger.trace(f"package: {package}")
 
     # Initialize the formula processor
-    formula_processor = FormulaProcessor(
-        scheming_yaml, package, resource_fields_stats, logger
+    formula_processor = j2h.FormulaProcessor(
+        scheming_yaml,
+        package,
+        resource,
+        resource_fields_stats,
+        resource_fields_freqs,
+        logger,
     )
 
     # FIRST WE PROCESS THE FORMULAE THAT UPDATE THE
@@ -1869,7 +1453,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         # Update package with formula results
         package.update(package_updates)
         try:
-            patched_package = patch_package(package)
+            patched_package = dsu.patch_package(package)
             logger.debug(f"Package after patching: {patched_package}")
             package = patched_package
             logger.info("PACKAGE formulae processed...")
@@ -1893,12 +1477,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         "package", "dataset_fields", "suggestion_formula"
     )
     if package_suggestions:
+        logger.trace(f"package_suggestions: {package_suggestions}")
         revise_update_content = {"package": package_suggestions}
         try:
-            revised_package = revise_package(
+            revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
-            logger.debug(f"Package after revising: {revised_package}")
+            logger.trace(f"Package after revising: {revised_package}")
             package = revised_package
             logger.info("PACKAGE suggestion formulae processed...")
         except Exception as e:
@@ -1914,6 +1499,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         "resource", "resource_fields", "suggestion_formula"
     )
     if resource_suggestions:
+        logger.trace(f"resource_suggestions: {resource_suggestions}")
         resource_name = resource["name"]
         revise_update_content = {"resource": {resource_name: resource_suggestions}}
 
@@ -1924,10 +1510,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             package["dpp_suggestions"] = revise_update_content["resource"]
 
         try:
-            revised_package = revise_package(
+            revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
-            logger.debug(f"Package after revising: {revised_package}")
+            logger.trace(f"Package after revising: {revised_package}")
             package = revised_package
             logger.info("RESOURCE suggestion formulae processed...")
         except Exception as e:
@@ -1956,7 +1542,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             "AUTO-ALIASING. Auto-alias-unique: {} ...".format(conf.AUTO_ALIAS_UNIQUE)
         )
         # get package info, so we can construct the alias
-        package = get_package(resource["package_id"])
+        package = dsu.get_package(resource["package_id"])
 
         resource_name = resource.get("name")
         package_name = package.get("name")
@@ -2024,7 +1610,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         stats_resource_id = resource_id + "-stats"
 
         # check if the stats already exist
-        existing_stats = datastore_resource_exists(stats_resource_id)
+        existing_stats = dsu.datastore_resource_exists(stats_resource_id)
         # Delete existing summary-stats before proceeding.
         if existing_stats:
             logger.info(
@@ -2039,8 +1625,8 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if stats_alias_result:
                 existing_stats_alias_of = stats_alias_result[0]
 
-                delete_datastore_resource(existing_stats_alias_of)
-                delete_resource(existing_stats_alias_of)
+                dsu.delete_datastore_resource(existing_stats_alias_of)
+                dsu.delete_resource(existing_stats_alias_of)
 
         stats_aliases = [stats_resource_id]
         if conf.AUTO_ALIAS:
@@ -2050,7 +1636,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             # check if the summary-stats alias already exist. We need to do this as summary-stats resources
             # may end up having the same alias if AUTO_ALIAS_UNIQUE is False, so we need to drop the
             # existing summary stats-alias.
-            existing_alias_stats = datastore_resource_exists(auto_alias_stats_id)
+            existing_alias_stats = dsu.datastore_resource_exists(auto_alias_stats_id)
             # Delete existing auto-aliased summary-stats before proceeding.
             if existing_alias_stats:
                 logger.info(
@@ -2067,24 +1653,17 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 if result:
                     existing_stats_alias_of = result[0]
 
-                    delete_datastore_resource(existing_stats_alias_of)
-                    delete_resource(existing_stats_alias_of)
+                    dsu.delete_datastore_resource(existing_stats_alias_of)
+                    dsu.delete_resource(existing_stats_alias_of)
 
         # run stats on stats CSV to get header names and infer data types
         # we don't need summary statistics, so use the --typesonly option
         try:
-            qsv_stats_stats = subprocess.run(
-                [
-                    conf.QSV_BIN,
-                    "stats",
-                    "--typesonly",
-                    qsv_stats_csv,
-                ],
-                capture_output=True,
-                check=True,
-                text=True,
+            qsv_stats_stats = qsv.stats(
+                qsv_stats_csv,
+                typesonly=True,
             )
-        except subprocess.CalledProcessError as e:
+        except utils.JobError as e:
             raise utils.JobError("Cannot run stats on CSV stats: {}".format(e))
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
@@ -2102,7 +1681,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             "format": "CSV",
             "mimetype": "text/csv",
         }
-        stats_response = send_resource_to_datastore(
+        stats_response = dsu.send_resource_to_datastore(
             stats_resource,
             resource_id=None,
             headers=stats_stats_dict,
@@ -2145,7 +1724,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         stats_resource["id"] = new_stats_resource_id
         stats_resource["summary_statistics"] = True
         stats_resource["summary_of_resource"] = resource_id
-        update_resource(stats_resource)
+        dsu.update_resource(stats_resource)
 
     cur.close()
     raw_connection.commit()
@@ -2159,10 +1738,10 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         resource["preview"] = False
         resource["preview_rows"] = None
         resource["partial_download"] = False
-    update_resource(resource)
+    dsu.update_resource(resource)
 
     # tell CKAN to calculate_record_count and set alias if set
-    send_resource_to_datastore(
+    dsu.send_resource_to_datastore(
         resource=None,
         resource_id=resource["id"],
         headers=headers_dicts,
