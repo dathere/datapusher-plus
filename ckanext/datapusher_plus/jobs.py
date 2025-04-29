@@ -969,7 +969,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
 
     try:
-        qsv.frequency(tmp, limit=10, output_file=qsv_freq_csv)
+        qsv.frequency(tmp, limit=conf.QSV_FREQ_LIMIT, output_file=qsv_freq_csv)
     except utils.JobError as e:
         raise utils.JobError("Cannot create a frequency table: {}".format(e))
 
