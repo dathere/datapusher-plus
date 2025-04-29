@@ -4,10 +4,12 @@
 
 # DataPusher+
 
+> NOTE: v2 is a major revamp. Updated documentation will be available shortly.
+
 DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
 [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
 
-Datapusher+ is droping usage of [CKAN Service Provider][], with [Messytables] replaced by [qsv].
+More importantly, Datapusher+ is no longer a webservice, but a full-fledged CKAN extension. It drops usage of the deprecated [CKAN Service Provider][], with the unmaintained [Messytables] replaced by [qsv].
 
 [TNRIS](https://tnris.org)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
 of Datapusher+, specifically, to support a [Resource-first upload workflow](docs/RESOURCE_FIRST_WORKFLOW.md#Resource-first-Upload-Workflow).
