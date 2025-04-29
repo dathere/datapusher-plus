@@ -145,7 +145,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # also show logs on stderr
     logger.addHandler(logging.StreamHandler())
-    log_level = getattr(logging, conf.UPLOAD_LOG_LEVEL.upper())
+
+    # set the log level to the config upload_log_level
+    try:
+        log_level = getattr(logging, conf.UPLOAD_LOG_LEVEL.upper())
+    except AttributeError:
+        # fallback to our custom TRACE level
+        log_level = TRACE
 
     # set the log level to the config upload_log_level
     logger.setLevel(logging.INFO)
@@ -939,14 +945,14 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy stats CSV to /tmp directory for debugging purposes
-    more_debug_info = logger.getEffectiveLevel() >= logging.DEBUG
-    if more_debug_info:
+    more_trace_info = logger.getEffectiveLevel() == TRACE
+    if more_trace_info:
         try:
             debug_stats_path = os.path.join("/tmp", os.path.basename(qsv_stats_csv))
             shutil.copy2(qsv_stats_csv, debug_stats_path)
-            logger.debug(f"Copied stats CSV to {debug_stats_path} for debugging")
+            logger.trace(f"Copied stats CSV to {debug_stats_path} for debugging")
         except Exception as e:
-            logger.debug(f"Failed to copy stats CSV to /tmp for debugging: {e}")
+            logger.trace(f"Failed to copy stats CSV to /tmp for debugging: {e}")
 
     try:
         with open(qsv_stats_csv, "r") as f:
@@ -963,7 +969,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
 
     try:
-        qsv.frequency(tmp, limit=0, output_file=qsv_freq_csv)
+        qsv.frequency(tmp, limit=10, output_file=qsv_freq_csv)
     except utils.JobError as e:
         raise utils.JobError("Cannot create a frequency table: {}".format(e))
 
@@ -987,20 +993,42 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     )
 
     # Copy frequency CSV to /tmp directory for debugging purposes
-    if more_debug_info:
+    if more_trace_info:
         try:
             debug_freq_path = os.path.join("/tmp", os.path.basename(qsv_freq_csv))
             shutil.copy2(qsv_freq_csv, debug_freq_path)
-            logger.debug(f"Copied frequency CSV to {debug_freq_path} for debugging")
+            logger.trace(f"Copied frequency CSV to {debug_freq_path} for debugging")
         except Exception as e:
-            logger.debug(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
+            logger.trace(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
 
     # load the frequency table using COPY
     copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
         freq_table
     )
+
+    resource_fields_freqs = {}
     try:
         with open(qsv_freq_csv, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                field = row["field"]
+                value = row["value"]
+                count = row["count"]
+                percentage = row["percentage"]
+
+                # Initialize list for field if it doesn't exist
+                if field not in resource_fields_freqs:
+                    resource_fields_freqs[field] = []
+
+                # Append the frequency data as a dict to the field's list
+                resource_fields_freqs[field].append(
+                    {"value": value, "count": count, "percentage": percentage}
+                )
+
+            logger.trace(f"Resource fields freqs: {resource_fields_freqs}")
+
+            # Rewind file for COPY operation
+            f.seek(0)
             cur_statsfreq.copy_expert(copy_sql, f)
     except IOError as e:
         raise utils.JobError("Could not open frequency CSV file: {}".format(e))
@@ -1402,11 +1430,16 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         package_id, scheming_yaml_type="dataset"
     )
 
-    logger.debug(f"package: {package}")
+    logger.trace(f"package: {package}")
 
     # Initialize the formula processor
     formula_processor = j2h.FormulaProcessor(
-        scheming_yaml, package, resource_fields_stats, logger
+        scheming_yaml,
+        package,
+        resource,
+        resource_fields_stats,
+        resource_fields_freqs,
+        logger,
     )
 
     # FIRST WE PROCESS THE FORMULAE THAT UPDATE THE
@@ -1444,12 +1477,13 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         "package", "dataset_fields", "suggestion_formula"
     )
     if package_suggestions:
+        logger.trace(f"package_suggestions: {package_suggestions}")
         revise_update_content = {"package": package_suggestions}
         try:
             revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
-            logger.debug(f"Package after revising: {revised_package}")
+            logger.trace(f"Package after revising: {revised_package}")
             package = revised_package
             logger.info("PACKAGE suggestion formulae processed...")
         except Exception as e:
@@ -1465,6 +1499,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
         "resource", "resource_fields", "suggestion_formula"
     )
     if resource_suggestions:
+        logger.trace(f"resource_suggestions: {resource_suggestions}")
         resource_name = resource["name"]
         revise_update_content = {"resource": {resource_name: resource_suggestions}}
 
@@ -1478,7 +1513,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
-            logger.debug(f"Package after revising: {revised_package}")
+            logger.trace(f"Package after revising: {revised_package}")
             package = revised_package
             logger.info("RESOURCE suggestion formulae processed...")
         except Exception as e:
