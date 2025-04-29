@@ -10,14 +10,16 @@ import os
 import subprocess
 import tempfile
 import time
-from urllib.parse import urlsplit
-from urllib.parse import urlparse
+from urllib.parse import urlsplit, urlparse, ParseResult
 import logging
 import uuid
 import sys
 import json
 import requests
+from requests.models import Response
 from pathlib import Path
+from typing import Dict, Any, Optional, Union, List, Tuple, TypeVar, cast
+from datetime import datetime
 
 # Third-party imports
 import psycopg2
@@ -27,6 +29,7 @@ from dateutil.parser import parse as parsedate
 import traceback
 import sqlalchemy as sa
 from rq import get_current_job
+from rq.job import Job
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.helpers as dph
@@ -45,7 +48,7 @@ else:
     locale.setlocale(locale.LC_ALL, "")
 
 
-def validate_input(input):
+def validate_input(input: Dict[str, Any]) -> None:
     # Especially validate metadata which is provided by the user
     if "metadata" not in input:
         raise utils.JobError("Metadata missing")
@@ -56,9 +59,9 @@ def validate_input(input):
         raise utils.JobError("No id provided.")
 
 
-def callback_datapusher_hook(result_url, job_dict):
+def callback_datapusher_hook(result_url: str, job_dict: Dict[str, Any]) -> bool:
     api_token = utils.get_dp_plus_user_apitoken()
-    headers = {"Content-Type": "application/json", "Authorization": api_token}
+    headers: Dict[str, str] = {"Content-Type": "application/json", "Authorization": api_token}
 
     try:
         result = requests.post(
@@ -73,14 +76,19 @@ def callback_datapusher_hook(result_url, job_dict):
     return result.status_code == requests.codes.ok
 
 
-def datapusher_plus_to_datastore(input):
+def datapusher_plus_to_datastore(input: Dict[str, Any]) -> Optional[str]:
     """
     This is the main function that is called by the datapusher_plus worker
 
     Errors are caught and logged in the database
 
+    Args:
+        input: Dictionary containing metadata and other job information
+
+    Returns:
+        Optional[str]: Returns "error" if there was an error, None otherwise
     """
-    job_dict = dict(metadata=input["metadata"], status="running")
+    job_dict: Dict[str, Any] = dict(metadata=input["metadata"], status="running")
     callback_datapusher_hook(result_url=input["result_url"], job_dict=job_dict)
 
     job_id = get_current_job().id
@@ -114,25 +122,35 @@ def datapusher_plus_to_datastore(input):
     return "error" if errored else None
 
 
-def push_to_datastore(input, task_id, dry_run=False):
+def push_to_datastore(input: Dict[str, Any], task_id: str, dry_run: bool = False) -> Optional[List[Dict[str, Any]]]:
     """Download and parse a resource push its data into CKAN's DataStore.
 
     An asynchronous job that gets a resource from CKAN, downloads the
     resource's data file and, if the data file has changed since last time,
     parses the data and posts it into CKAN's DataStore.
 
-    :param dry_run: Fetch and parse the data file but don't actually post the
-        data to the DataStore, instead return the data headers and rows that
-        would have been posted.
-    :type dry_run: boolean
+    Args:
+        input: Dictionary containing metadata and other job information
+        task_id: Unique identifier for the task
+        dry_run: If True, fetch and parse the data file but don't actually post the
+            data to the DataStore, instead return the data headers and rows that
+            would have been posted.
 
+    Returns:
+        Optional[List[Dict[str, Any]]]: If dry_run is True, returns the headers and rows
+            that would have been posted. Otherwise returns None.
     """
     # Ensure temporary files are removed after run
     with tempfile.TemporaryDirectory() as temp_dir:
         return _push_to_datastore(task_id, input, dry_run=dry_run, temp_dir=temp_dir)
 
 
-def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
+def _push_to_datastore(
+    task_id: str,
+    input: Dict[str, Any],
+    dry_run: bool = False,
+    temp_dir: Optional[str] = None
+) -> Optional[List[Dict[str, Any]]]:
     # add job to dn  (datapusher_plus_jobs table)
     try:
         dph.add_pending_job(task_id, **input)
@@ -204,7 +222,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
 
     # fetch the resource data
     logger.info("Fetching from: {0}...".format(resource_url))
-    headers = {}
+    headers: Dict[str, str] = {}
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
         # otherwise we won't get file from private resources
@@ -223,7 +241,7 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             logger.info("Rewritten resource url to: {0}".format(resource_url))
 
     try:
-        kwargs = {
+        kwargs: Dict[str, Any] = {
             "headers": headers,
             "timeout": conf.TIMEOUT,
             "verify": conf.SSL_VERIFY,
