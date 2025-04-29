@@ -657,7 +657,7 @@ def _push_to_datastore(
             qsv_sortcheck = qsv.sortcheck(tmp, json_output=True, uses_stdio=True)
         except utils.JobError as e:
             raise utils.JobError("Sortcheck error: {}".format(e))
-        sortcheck_json = json.loads(str(qsv_sortcheck["stdout"]))
+        sortcheck_json = json.loads(str(qsv_sortcheck.stdout))
         is_sorted = sortcheck_json["sorted"]
         record_count = int(sortcheck_json["record_count"])
         unsorted_breaks = int(sortcheck_json["unsorted_breaks"])
