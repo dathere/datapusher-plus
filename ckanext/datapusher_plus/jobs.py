@@ -7,7 +7,6 @@ import hashlib
 import locale
 import mimetypes
 import os
-import shutil
 import subprocess
 import tempfile
 import time
