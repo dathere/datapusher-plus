@@ -628,8 +628,7 @@ class QSVCommand:
         )
 
         # Copy stats CSV to /tmp directory for debugging purposes
-        more_trace_info = logger.getEffectiveLevel() == TRACE
-        if more_trace_info:
+        if logger.isEnabledFor(TRACE):
             try:
                 debug_stats_path = os.path.join(
                     "/tmp", os.path.basename(stats_csv_file)
@@ -698,8 +697,7 @@ class QSVCommand:
         )
 
         # Copy frequency CSV to /tmp directory for debugging purposes
-        more_trace_info = logger.getEffectiveLevel() == TRACE
-        if more_trace_info:
+        if logger.isEnabledFor(TRACE):
             try:
                 debug_freq_path = os.path.join("/tmp", os.path.basename(freq_csv_file))
                 shutil.copy2(freq_csv_file, debug_freq_path)
