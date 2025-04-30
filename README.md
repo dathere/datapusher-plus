@@ -13,7 +13,8 @@ The Formulas have access to not just the `package` and `resource` fields (in the
 * `dpps` - with the "s" for stats.<br/>Each field will have an extensive list of summary statistics (by default: 
 type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_length, sum_length, avg_length, stddev_length, variance_length, cv_length, mean, sem, geometric_mean, harmonic_mean, stddev, variance, cv, nullcount, max_precision, sparsity, cardinality, uniqueness_ratio.) Check [here](https://github.com/dathere/qsv/wiki/Supplemental#stats-command-output-explanation) for all other available statistics.
 * `dppf` - with the "f" for frequency table.<br/>Each field will have its frequency table available sorted in descending order the top N (configurable, default 10) values, with a corresponding count & percentage. "Other (COUNT)" will be used as a "basket" for other values with COUNT set to other values beyond the top N. ID fields will be indicated by "<ALL_UNIQUE>" in the table.
-* `dpp` - inferred metadata. Currently, it can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
+* `dpp` - inferred metadata.<br/>
+Currently, it can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
   * its in a comma-separated priority-order list of lat/long name patterns
   * for latitude, if its of type "Float" with a range of -90.0 to 90.0, and
   * for longitude, if its a "Float" with a range of -180.0 to 180.0.
@@ -21,8 +22,8 @@ type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_leng
 Beyond the extensive list of built-in Jinja2 [filters](https://jinja.palletsprojects.com/en/stable/templates/#list-of-builtin-filters)/[functions](https://jinja.palletsprojects.com/en/stable/templates/#list-of-global-functions), DP+ also supports an extensive list of additional [custom filters/functions](https://github.com/dathere/datapusher-plus/blob/607e7c5e5d75c5dc7ac55d684522c7972bc33d1d/ckanext/datapusher_plus/jinja2_helpers.py#L171).
 
 There are two Formula types that are indicated by adding these keywords to the scheming yaml file:
- * `formula` - the formula will be evaluated at resource creation/update time and assigned to the corresponding package/resource field immediately.
- * `suggest_formula` - the formula will be evaluated at creation/update time and will be shown as a "suggestion" during metadata entry for the associated package/resource field using the Suggestion UI (indicated by a function symbol next to the metadata field name).
+ * `formula` - the formula will be evaluated at resource creation/update time and the result is assigned to the corresponding package/resource field immediately.
+ * `suggest_formula` - the formula will be evaluated at creation/update time and the result is stored in the `dpp_suggestions` package field as a compound JSON object. `dpp_suggestions` contains all the suggestion for both package and resource fields. This field is parsed to show "Suggestions" during metadata entry for the associated package/resource field using the Suggestion UI (indicated by a function symbol next to the metadata field name).
 
  Formulas that fail to evaluate will return with the `#ERROR!:` (reminiscent of Excel's `#VALUE!` function error) prefix followed by a detailed Jinja2 error message.
 
