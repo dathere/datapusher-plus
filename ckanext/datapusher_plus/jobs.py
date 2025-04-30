@@ -669,21 +669,39 @@ def _push_to_datastore(
     # get the record count, unsorted breaks and duplicate count as well
     if conf.SORT_AND_DUPE_CHECK or conf.DEDUP:
         logger.info("Checking for duplicates and if the CSV is sorted...")
+
         try:
             qsv_sortcheck = qsv.sortcheck(tmp, json_output=True, uses_stdio=True)
         except utils.JobError as e:
-            raise utils.JobError("Sortcheck error: {}".format(e))
-        sortcheck_json = json.loads(str(qsv_sortcheck.stdout))
-        is_sorted = sortcheck_json["sorted"]
-        record_count = int(sortcheck_json["record_count"])
-        unsorted_breaks = int(sortcheck_json["unsorted_breaks"])
-        dupe_count = int(sortcheck_json["dupe_count"])
-        sortcheck_msg = "Sorted: {}; Unsorted breaks: {:,}".format(
-            is_sorted, unsorted_breaks
-        )
-        # dupe count is only relevant if the file is sorted
+            raise utils.JobError(
+                f"Failed to check if CSV is sorted and has duplicates: {e}"
+            )
+
+        try:
+            # Handle both subprocess.CompletedProcess and dict outputs
+            stdout_content = (
+                qsv_sortcheck.stdout
+                if hasattr(qsv_sortcheck, "stdout")
+                else qsv_sortcheck.get("stdout")
+            )
+            sortcheck_json = json.loads(str(stdout_content))
+        except (json.JSONDecodeError, AttributeError) as e:
+            raise utils.JobError(f"Failed to parse sortcheck JSONoutput: {e}")
+
+        try:
+            # Extract and validate required fields
+            is_sorted = bool(sortcheck_json.get("sorted", False))
+            record_count = int(sortcheck_json.get("record_count", 0))
+            unsorted_breaks = int(sortcheck_json.get("unsorted_breaks", 0))
+            dupe_count = int(sortcheck_json.get("dupe_count", 0))
+        except (ValueError, TypeError) as e:
+            raise utils.JobError(f"Invalid numeric value in sortcheck output: {e}")
+
+        # Format the message with clear statistics
+        sortcheck_msg = f"Sorted: {is_sorted}; Unsorted breaks: {unsorted_breaks:,}"
         if is_sorted and dupe_count > 0:
-            sortcheck_msg = sortcheck_msg + " Duplicates: {:,}".format(dupe_count)
+            sortcheck_msg = f"{sortcheck_msg}; Duplicates: {dupe_count:,}"
+
         logger.info(sortcheck_msg)
 
     # --------------- Do we need to dedup? ------------------
