@@ -474,7 +474,7 @@ def _push_to_datastore(
 
             try:
                 # Use the convert_to_csv function from spatial_helpers
-                success, error_message = sh.process_spatial_file(
+                success, error_message, bounds = sh.process_spatial_file(
                     qsv_spatial_file,
                     resource_format,
                     output_csv_path=qsv_spatial_csv,
@@ -518,6 +518,22 @@ def _push_to_datastore(
                             "mimetype": resource["mimetype"],
                             "mimetype_inner": resource["mimetype_inner"],
                         }
+
+                        # Add bounds information if available
+                        if bounds:
+                            minx, miny, maxx, maxy = bounds
+                            new_simplified_resource.update(
+                                {
+                                    "spatial_extent": {
+                                        "type": "BoundingBox",
+                                        "coordinates": [[minx, miny], [maxx, maxy]],
+                                    }
+                                }
+                            )
+                            logger.info(
+                                f"Added spatial extent to resource metadata: {bounds}"
+                            )
+
                         dsu.upload_resource(new_simplified_resource, qsv_spatial_file)
 
                     simplification_failed_flag = False
