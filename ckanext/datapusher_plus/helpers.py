@@ -9,7 +9,7 @@ import csv
 import logging
 import datetime
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Dict, List, Tuple
 
 import ckan.plugins.toolkit as toolkit
 
@@ -22,14 +22,14 @@ _ = toolkit._
 logger = logging.getLogger(__name__)
 
 
-def datapusher_status(resource_id: str):
+def datapusher_status(resource_id: str) -> Dict[str, str]:
     try:
         return toolkit.get_action("datapusher_status")({}, {"resource_id": resource_id})
     except toolkit.ObjectNotFound:
         return {"status": "unknown"}
 
 
-def datapusher_status_description(status: dict[str, Any]):
+def datapusher_status_description(status: Dict[str, Any]) -> str:
 
     CAPTIONS = {
         "complete": _("Complete"),
@@ -47,7 +47,11 @@ def datapusher_status_description(status: dict[str, Any]):
         return DEFAULT_STATUS
 
 
-def get_job(job_id, limit=None, use_aps_id=False):
+def get_job(
+    job_id: Optional[str], 
+    limit: Optional[int] = None, 
+    use_aps_id: bool = False
+) -> Optional[Dict[str, Any]]:
     """Return the job with the given job_id as a dict.
 
     The dict also includes any metadata or logs associated with the job.
@@ -133,8 +137,14 @@ def get_job(job_id, limit=None, use_aps_id=False):
 
 
 def add_pending_job(
-    job_id, api_key, job_type, job_key=None, data=None, metadata=None, result_url=None
-):
+    job_id: str,
+    api_key: str,
+    job_type: str,
+    job_key: Optional[str] = None,
+    data: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    result_url: Optional[str] = None
+) -> None:
     """Add a new job with status "pending" to the jobs table.
 
     All code that adds jobs to the jobs table should go through this function.
@@ -233,7 +243,7 @@ def add_pending_job(
                 raise e
 
 
-def validate_error(error):
+def validate_error(error: Optional[Union[str, Dict[str, Any]]]) -> Optional[Dict[str, str]]:
     """Validate and return the given error object.
 
     Based on the given error object, return either None or a dict with a
@@ -273,7 +283,7 @@ def validate_error(error):
             )
 
 
-def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
+def update_job(job_id: str, job_dict: Dict[str, Any]) -> None:  # sourcery skip: raise-specific-error
     """Update the database row for the given job_id with the given job_dict.
 
     All functions that update rows in the jobs table do it by calling this
@@ -317,7 +327,7 @@ def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
         raise e
 
 
-def mark_job_as_completed(job_id, data=None):
+def mark_job_as_completed(job_id: str, data: Optional[Any] = None) -> None:
     """Mark a job as completed successfully.
 
     :param job_id: the job_id of the job to be updated
@@ -335,7 +345,7 @@ def mark_job_as_completed(job_id, data=None):
     update_job(job_id, update_dict)
 
 
-def mark_job_as_errored(job_id, error_object):
+def mark_job_as_errored(job_id: str, error_object: Union[str, Dict[str, str]]) -> None:
     """Mark a job as failed with an error.
 
     :param job_id: the job_id of the job to be updated
@@ -354,7 +364,7 @@ def mark_job_as_errored(job_id, error_object):
     update_job(job_id, update_dict)
 
 
-def mark_job_as_failed_to_post_result(job_id):
+def mark_job_as_failed_to_post_result(job_id: str) -> None:
     """Mark a job as 'failed to post result'.
 
     This happens when a job completes (either successfully or with an error)
@@ -372,7 +382,7 @@ def mark_job_as_failed_to_post_result(job_id):
     update_job(job_id, update_dict)
 
 
-def delete_api_key(job_id):
+def delete_api_key(job_id: str) -> None:
     """Delete the given job's API key from the database.
 
     The API key is used when posting the job's result to the client's callback
@@ -383,7 +393,7 @@ def delete_api_key(job_id):
     update_job(job_id, {"api_key": None})
 
 
-def set_aps_job_id(job_id, aps_job_id):
+def set_aps_job_id(job_id: str, aps_job_id: str) -> None:
 
     update_job(job_id, {"aps_job_id": aps_job_id})
 
