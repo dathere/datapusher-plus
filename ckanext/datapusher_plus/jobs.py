@@ -1386,7 +1386,7 @@ def _push_to_datastore(
 
     logger.trace(f"package: {package}")
 
-    # Initialize the formula processor
+    # FIRST, INITIALIZE THE FORMULA PROCESSOR
     formula_processor = j2h.FormulaProcessor(
         scheming_yaml,
         package,
@@ -1396,7 +1396,7 @@ def _push_to_datastore(
         logger,
     )
 
-    # FIRST WE PROCESS THE FORMULAE THAT UPDATE THE
+    # SECOND, WE PROCESS THE FORMULAE THAT UPDATE THE
     # PACKAGE AND RESOURCE FIELDS DIRECTLY
     # using the package_patch CKAN API so we only update the fields
     # with formulae
@@ -1424,7 +1424,7 @@ def _push_to_datastore(
         resource.update(resource_updates)
         logger.info("RESOURCE formulae processed...")
 
-    # NOW WE PROCESS THE SUGGESTIONS
+    # THIRD, WE PROCESS THE SUGGESTIONS THAT SHOW UP IN THE SUGGESTION POPOVER
     # we update the package dpp_suggestions field
     # from which the Suggestion popover UI will pick it up
     package_suggestions = formula_processor.process_formulae(
