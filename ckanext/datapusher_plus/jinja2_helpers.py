@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, Dict
 from jinja2 import DictLoader, Environment
+
+import ckanext.datapusher_plus.config as conf
 
 log = logging.getLogger(__name__)
 
@@ -19,11 +22,61 @@ class FormulaProcessor:
         resource_fields_freqs,
         logger,
     ):
+
+        # FIRST, INFER LATITUDE AND LONGITUDE COLUMN NAMES
+        # fetch LATITUDE_FIELDS and LONGITUDE_FIELDS from config
+        latitude_fields = [field.strip() for field in conf.LATITUDE_FIELDS.split(",")]
+        longitude_fields = [field.strip() for field in conf.LONGITUDE_FIELDS.split(",")]
+
+        logger.trace(f"Latitude Fields: {latitude_fields}")
+        logger.trace(f"Longitude Fields: {longitude_fields}")
+
+        dpp = {}
+        # then, check if any of the fields are present in the resource_fields_stats
+        # case-insensitive and is a float and whose values are between -90.0 and 90.0
+        # if found, set the dpp["LAT_FIELD"] to the field name
+        dpp["LAT_FIELD"] = None
+        for field in latitude_fields:
+            field = field.lower()
+            if field in [k.lower() for k in resource_fields_stats.keys()]:
+                # Get the original case field name by finding the matching key ignoring case
+                orig_field = next(
+                    k for k in resource_fields_stats.keys() if k.lower() == field
+                )
+                if (
+                    resource_fields_stats[orig_field]["stats"]["type"] == "Float"
+                    and float(resource_fields_stats[orig_field]["stats"]["min"])
+                    >= -90.0
+                    and float(resource_fields_stats[orig_field]["stats"]["max"]) <= 90.0
+                ):
+                    dpp["LAT_FIELD"] = orig_field
+                    break
+
+        # if found, set the dpp["LON_FIELD"] to the field name
+        dpp["LON_FIELD"] = None
+        for field in longitude_fields:
+            field = field.lower()
+            if field in [k.lower() for k in resource_fields_stats.keys()]:
+                # Get the original case field name by finding the matching key ignoring case
+                orig_field = next(
+                    k for k in resource_fields_stats.keys() if k.lower() == field
+                )
+                if (
+                    resource_fields_stats[orig_field]["stats"]["type"] == "Float"
+                    and float(resource_fields_stats[orig_field]["stats"]["min"])
+                    >= -180.0
+                    and float(resource_fields_stats[orig_field]["stats"]["max"])
+                    <= 180.0
+                ):
+                    dpp["LON_FIELD"] = orig_field
+                    break
+
         self.scheming_yaml = scheming_yaml
         self.package = package
         self.resource = resource
         self.resource_fields_stats = resource_fields_stats
         self.resource_fields_freqs = resource_fields_freqs
+        self.dpp = dpp
         self.logger = logger
 
     def process_formulae(
@@ -63,9 +116,10 @@ class FormulaProcessor:
             "resource": self.resource,
             "dpps": self.resource_fields_stats,
             "dppf": self.resource_fields_freqs,
+            "dpp": self.dpp,
         }
-        self.logger.trace(f"Context: {context}")
-        jinja2_env = create_jinja2_env(jinja2_formulae)
+        self.logger.trace(f"Environment Context: {context}")
+        jinja2_env = self.create_jinja2_env(jinja2_formulae)
 
         updates = {}
         for schema_field in formula_fields:
@@ -85,34 +139,33 @@ class FormulaProcessor:
 
         return updates
 
+    def create_jinja2_env(self, context: Dict[str, Any]) -> Environment:
+        """Create a configured Jinja2 environment with all filters and globals."""
+        env = Environment(loader=DictLoader(context))
 
-def create_jinja2_env(context):
-    """Create a configured Jinja2 environment with all filters and globals."""
-    env = Environment(loader=DictLoader(context))
+        # Add filters
+        filters = {
+            "truncate_with_ellipsis": truncate_with_ellipsis,
+            "format_number": format_number,
+            "format_bytes": format_bytes,
+            "format_date": format_date,
+            "calculate_percentage": calculate_percentage,
+            "get_unique_ratio": get_unique_ratio,
+            "format_range": format_range,
+            "format_coordinates": format_coordinates,
+            "calculate_bbox_area": calculate_bbox_area,
+        }
+        env.filters.update(filters)
 
-    # Add filters
-    filters = {
-        "truncate_with_ellipsis": truncate_with_ellipsis,
-        "format_number": format_number,
-        "format_bytes": format_bytes,
-        "format_date": format_date,
-        "calculate_percentage": calculate_percentage,
-        "get_unique_ratio": get_unique_ratio,
-        "format_range": format_range,
-        "format_coordinates": format_coordinates,
-        "calculate_bbox_area": calculate_bbox_area,
-    }
-    env.filters.update(filters)
+        # Add globals
+        globals = {
+            "spatial_extent_wkt": spatial_extent_wkt,
+            "spatial_extent_feature_collection": spatial_extent_feature_collection,
+            "get_frequency_top_values": get_frequency_top_values,
+        }
+        env.globals.update(globals)
 
-    # Add globals
-    globals = {
-        "spatial_extent_wkt": spatial_extent_wkt,
-        "spatial_extent_feature_collection": spatial_extent_feature_collection,
-        "get_frequency_top_values": get_frequency_top_values,
-    }
-    env.globals.update(globals)
-
-    return env
+        return env
 
 
 # ------------------
