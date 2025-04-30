@@ -79,9 +79,7 @@ class FormulaProcessor:
                     f'Evaluated jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {rendered_formula}'
                 )
             except Exception as e:
-                formula_error_msg = (
-                    f'ERROR: Cannot evaluate jinja2 {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
-                )
+                formula_error_msg = f'#ERROR!: {formula_type} for {entity_type.upper()} field "{field_name}": {str(e)}'
                 self.logger.error(formula_error_msg)
                 updates[field_name] = formula_error_msg
 
