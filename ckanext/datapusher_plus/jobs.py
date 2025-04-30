@@ -1383,7 +1383,7 @@ def _push_to_datastore(
     # FIRST WE PROCESS THE FORMULAE THAT UPDATE THE
     # PACKAGE AND RESOURCE FIELDS DIRECTLY
     # using the package_patch CKAN API so we only update the fields
-    # that with formulae
+    # with formulae
     package_updates = formula_processor.process_formulae(
         "package", "dataset_fields", "formula"
     )
@@ -1399,7 +1399,7 @@ def _push_to_datastore(
             logger.error(f"Error patching package: {str(e)}")
 
     # Process resource formulae
-    # as this is a direct update, we update the resource fields directly
+    # as this is a direct update, we update the resource dictionary directly
     resource_updates = formula_processor.process_formulae(
         "resource", "resource_fields", "formula"
     )
@@ -1415,6 +1415,14 @@ def _push_to_datastore(
         "package", "dataset_fields", "suggestion_formula"
     )
     if package_suggestions:
+        # check if package dpp_suggestions field does not exist
+        # if it does not exist, return an error
+        if "dpp_suggestions" not in package:
+            logger.error(
+                '"dpp_suggestions" field required but not found in package to process Suggestion Formulae. Ensure that your scheming.yaml file contains the "dpp_suggestions" field as a json_object.'
+            )
+            return
+
         logger.trace(f"package_suggestions: {package_suggestions}")
         revise_update_content = {"package": package_suggestions}
         try:
