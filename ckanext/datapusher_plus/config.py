@@ -134,3 +134,17 @@ AUTO_SPATIAL_SIMPLIFICATION = tk.asbool(
 SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
     "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE", "0.1"
 )
+
+# Latitude and longitude column names
+# multiple fields can be specified, separated by commas
+# matching columns will be from left to right and the jinja2
+# variable DPP_LATITUDE and DPP_LONGITUDE will be set to the
+# value of the first matching column
+LATITUDE_FIELDS = tk.config.get(
+    "ckanext.datapusher_plus.latitude_fields",
+    "latitude,lat",
+)
+LONGITUDE_FIELDS = tk.config.get(
+    "ckanext.datapusher_plus.longitude_fields",
+    "longitude,lon",
+)
