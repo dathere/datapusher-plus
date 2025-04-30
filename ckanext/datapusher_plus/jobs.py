@@ -1368,6 +1368,22 @@ def _push_to_datastore(
         package_id, scheming_yaml_type="dataset"
     )
 
+    # check if package dpp_suggestions field does not exist
+    # and there are "suggestion_formula" keys in the scheming_yaml
+    if "dpp_suggestions" not in package:
+        # Check for suggestion_formula in dataset_fields
+        has_suggestion_formula = any(
+            isinstance(field, dict)
+            and any(key.startswith("suggestion_formula") for key in field.keys())
+            for field in scheming_yaml["dataset_fields"]
+        )
+
+        if not has_suggestion_formula:
+            logger.error(
+                '"dpp_suggestions" field required but not found in package to process Suggestion Formulae. Ensure that your scheming.yaml file contains the "dpp_suggestions" field as a json_object.'
+            )
+            return
+
     logger.trace(f"package: {package}")
 
     # Initialize the formula processor
@@ -1415,14 +1431,6 @@ def _push_to_datastore(
         "package", "dataset_fields", "suggestion_formula"
     )
     if package_suggestions:
-        # check if package dpp_suggestions field does not exist
-        # if it does not exist, return an error
-        if "dpp_suggestions" not in package:
-            logger.error(
-                '"dpp_suggestions" field required but not found in package to process Suggestion Formulae. Ensure that your scheming.yaml file contains the "dpp_suggestions" field as a json_object.'
-            )
-            return
-
         logger.trace(f"package_suggestions: {package_suggestions}")
         revise_update_content = {"package": package_suggestions}
         try:
