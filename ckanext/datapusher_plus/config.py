@@ -139,7 +139,7 @@ SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
 # multiple fields can be specified, separated by commas
 # matching columns will be from left to right and the jinja2
 # variable dpp.LAT_FIELD and dpp.LON_FIELD will be set to the
-# value of the first matching column
+# value of the first matching column, case-insensitive
 LATITUDE_FIELDS = tk.config.get(
     "ckanext.datapusher_plus.latitude_fields",
     "latitude,lat",
