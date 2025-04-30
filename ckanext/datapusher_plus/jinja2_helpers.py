@@ -25,8 +25,8 @@ class FormulaProcessor:
 
         # FIRST, INFER LATITUDE AND LONGITUDE COLUMN NAMES
         # fetch LATITUDE_FIELDS and LONGITUDE_FIELDS from config
-        latitude_fields = conf.LATITUDE_FIELDS.split(",")
-        longitude_fields = conf.LONGITUDE_FIELDS.split(",")
+        latitude_fields = [field.strip() for field in conf.LATITUDE_FIELDS.split(",")]
+        longitude_fields = [field.strip() for field in conf.LONGITUDE_FIELDS.split(",")]
 
         logger.trace(f"Latitude Fields: {latitude_fields}")
         logger.trace(f"Longitude Fields: {longitude_fields}")
