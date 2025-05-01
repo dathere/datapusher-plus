@@ -25,7 +25,7 @@ type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_leng
   * `NO_DATE_FIELDS` (bool)
   * `DATETIME_FIELDS` - a list of inferred datetime columns
   * `NO_DATETIME_FIELDS` (bool)
-  * Latitude/Longitude metadata
+  * Latitude/Longitude metadata<br/>
     DP+ can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
       * its in a comma-separated priority-order list of lat/long name patterns
       * for latitude, if its of type "Float" with a range of -90.0 to 90.0, and
