@@ -221,6 +221,7 @@ def _push_to_datastore(
     # DOWNLOAD
     # ==========================================================================
     timer_start = time.perf_counter()
+    dataset_stats = {}
 
     # fetch the resource data
     logger.info("Fetching from: {0}...".format(resource_url))
@@ -331,6 +332,7 @@ def _push_to_datastore(
         )
 
     file_hash = m.hexdigest()
+    dataset_stats["ORIGINAL_FILE_SIZE"] = length
 
     # check if the resource metadata (like data dictionary data types)
     # has been updated since the last fetch
@@ -524,14 +526,14 @@ def _push_to_datastore(
                             minx, miny, maxx, maxy = bounds
                             new_simplified_resource.update(
                                 {
-                                    "spatial_extent": {
+                                    "dpp_spatial_extent": {
                                         "type": "BoundingBox",
                                         "coordinates": [[minx, miny], [maxx, maxy]],
                                     }
                                 }
                             )
                             logger.info(
-                                f"Added spatial extent to resource metadata: {bounds}"
+                                f"Added dpp_spatial_extent to resource metadata: {bounds}"
                             )
 
                         dsu.upload_resource(new_simplified_resource, qsv_spatial_file)
@@ -694,6 +696,10 @@ def _push_to_datastore(
             record_count = int(sortcheck_json.get("record_count", 0))
             unsorted_breaks = int(sortcheck_json.get("unsorted_breaks", 0))
             dupe_count = int(sortcheck_json.get("dupe_count", 0))
+            dataset_stats["IS_SORTED"] = is_sorted
+            dataset_stats["RECORD_COUNT"] = record_count
+            dataset_stats["UNSORTED_BREAKS"] = unsorted_breaks
+            dataset_stats["DUPE_COUNT"] = dupe_count
         except (ValueError, TypeError) as e:
             raise utils.JobError(f"Invalid numeric value in sortcheck output: {e}")
 
@@ -714,8 +720,11 @@ def _push_to_datastore(
         except utils.JobError as e:
             raise utils.JobError("Check for duplicates error: {}".format(e))
 
+        dataset_stats["DEDUPED"] = True
         tmp = qsv_dedup_csv
         logger.info("Deduped CSV saved to {}".format(qsv_dedup_csv))
+    else:
+        dataset_stats["DEDUPED"] = False
 
     # ----------------------- Headers & Safenames ---------------------------
     # get existing header names, so we can use them for data dictionary labels
@@ -778,6 +787,7 @@ def _push_to_datastore(
         try:
             qsv_count = qsv.count(tmp)
             record_count = int(str(qsv_count.stdout).strip())
+            dataset_stats["RECORD_COUNT"] = record_count
         except utils.JobError as e:
             raise utils.JobError("Cannot count records in CSV: {}".format(e))
 
@@ -811,7 +821,7 @@ def _push_to_datastore(
             qsv_stats = qsv.stats(
                 tmp,
                 infer_dates=True,
-                dates_whitelist="all",
+                dates_whitelist=conf.QSV_DATES_WHITELIST,
                 stats_jsonl=True,
                 prefer_dmy=conf.PREFER_DMY,
                 cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
@@ -823,7 +833,7 @@ def _push_to_datastore(
             qsv_stats = qsv.stats(
                 tmp,
                 infer_dates=True,
-                dates_whitelist="all",
+                dates_whitelist=conf.QSV_DATES_WHITELIST,
                 stats_jsonl=True,
                 prefer_dmy=conf.PREFER_DMY,
                 cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
@@ -1010,6 +1020,8 @@ def _push_to_datastore(
             rows_to_copy = slice_len
             tmp = qsv_slice_csv
 
+        dataset_stats["PREVIEW_FILE_SIZE"] = os.path.getsize(tmp)
+
     # ---------------- Normalize dates to RFC3339 format --------------------
     # if there are any datetime fields, normalize them to RFC3339 format
     # so we can readily insert them as timestamps into postgresql with COPY
@@ -1169,7 +1181,7 @@ def _push_to_datastore(
                 qsv_pii_stats = qsv.stats(
                     qsv_searchset_csv,
                     infer_dates=False,
-                    dates_whitelist="all",
+                    dates_whitelist=conf.QSV_DATES_WHITELIST,
                     stats_jsonl=False,
                     prefer_dmy=False,
                     cardinality=False,
@@ -1393,6 +1405,7 @@ def _push_to_datastore(
         resource,
         resource_fields_stats,
         resource_fields_freqs,
+        dataset_stats,
         logger,
     )
 

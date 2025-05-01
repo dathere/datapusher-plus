@@ -97,6 +97,18 @@ SUMMARY_STATS_WITH_PREVIEW = tk.asbool(
 QSV_STATS_STRING_MAX_LENGTH = tk.asint(
     tk.config.get("ckanext.datapusher_plus.qsv_stats_string_max_length", "32767")
 )
+# whitelist of case-insensitive dates patterns of column names to use for date inferencing
+# date inferencing will only be attempted on columns that match the patterns
+# "all" means to scan all columns as date candidates
+# date inferencing is an expensive operation, as we try to match on 19 different
+# date formats, so we only want to do it on columns that are likely to contain dates
+# the default is "date,time,due,open,close,created"
+# e.g. "created_date", "open_dt", "issue_closed", "DATE_DUE", "OPEN_DT", "CLOSED_DT", "OPEN_ISSUES"
+# will all be scanned as potential date columns. Note that OPEN_ISSUES is likely not a date
+# column, but it will still be scanned as a date candidate because it matches the pattern
+QSV_DATES_WHITELIST = tk.config.get(
+    "ckanext.datapusher_plus.qsv_dates_whitelist", "date,time,due,open,close,created"
+)
 QSV_FREQ_LIMIT = tk.asint(tk.config.get("ckanext.datapusher_plus.qsv_freq_limit", "10"))
 
 # Type mapping

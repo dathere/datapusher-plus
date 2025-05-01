@@ -20,6 +20,7 @@ class FormulaProcessor:
         resource,
         resource_fields_stats,
         resource_fields_freqs,
+        dataset_stats,
         logger,
     ):
 
@@ -70,6 +71,42 @@ class FormulaProcessor:
                 ):
                     dpp["LON_FIELD"] = orig_field
                     break
+
+        # if no latitude nor longitude fields are found,
+        # set dpp["NO_LAT_LON_FIELDS"] to True
+        if dpp["LAT_FIELD"] is None or dpp["LON_FIELD"] is None:
+            dpp["NO_LAT_LON_FIELDS"] = True
+        else:
+            dpp["NO_LAT_LON_FIELDS"] = False
+
+        # now, check if any date fields are present in the resource_fields_stats
+        # if found, set the dpp["DATE_FIELDS"] to the field name
+        dpp["DATE_FIELDS"] = []
+        for field in resource_fields_stats.keys():
+            if resource_fields_stats[field]["stats"]["type"] == "Date":
+                dpp["DATE_FIELDS"].append(field)
+
+        # if no date/datetime fields are found, set dpp["NO_DATE_FIELDS"] to True
+        if not dpp["DATE_FIELDS"]:
+            dpp["NO_DATE_FIELDS"] = True
+        else:
+            dpp["NO_DATE_FIELDS"] = False
+
+        # now, check if any datetime fields are present in the resource_fields_stats
+        # if found, set the dpp["DATETIME_FIELDS"] to the field name
+        dpp["DATETIME_FIELDS"] = []
+        for field in resource_fields_stats.keys():
+            if resource_fields_stats[field]["stats"]["type"] == "DateTime":
+                dpp["DATETIME_FIELDS"].append(field)
+
+        # if no datetime fields are found, set dpp["NO_DATETIME"] to True
+        if not dpp["DATETIME_FIELDS"]:
+            dpp["NO_DATETIME_FIELDS"] = True
+        else:
+            dpp["NO_DATETIME_FIELDS"] = False
+
+        # add dataset_stats to dpp
+        dpp["dataset_stats"] = dataset_stats
 
         self.scheming_yaml = scheming_yaml
         self.package = package
@@ -150,7 +187,6 @@ class FormulaProcessor:
             "format_bytes": format_bytes,
             "format_date": format_date,
             "calculate_percentage": calculate_percentage,
-            "get_unique_ratio": get_unique_ratio,
             "format_range": format_range,
             "format_coordinates": format_coordinates,
             "calculate_bbox_area": calculate_bbox_area,
@@ -182,7 +218,7 @@ def format_number(value, decimals=2):
     """Format numbers with thousands separator and decimal places
 
     Example:
-    {{ stats.population.sum | format_number }} -> 1,234,567.89
+    {{ dpps.population.stats.sum | format_number }} -> 1,234,567.89
     """
     return f"{float(value):,.{decimals}f}"
 
@@ -191,7 +227,7 @@ def format_bytes(bytes):
     """Format byte sizes into human readable format
 
     Example:
-    {{ stats.file_size.max | format_bytes }} -> 1.5 GB
+    {{ dpp.ORIGINAL_FILE_SIZE | format_bytes }} -> 1.5 GB
     """
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if bytes < 1024:
@@ -203,7 +239,7 @@ def format_date(value, format="%Y-%m-%d"):
     """Format dates in specified format
 
     Example:
-    {{ stats.created_date.max | format_date("%B %d, %Y") }} -> January 1, 2024
+    {{ dpps.created_date.stats.max | format_date("%B %d, %Y") }} -> January 1, 2024
     """
     return value.strftime(format)
 
@@ -212,25 +248,16 @@ def calculate_percentage(part, whole):
     """Calculate percentage
 
     Example:
-    {{ calculate_percentage(stats.nullcount, stats.total_rows) }} -> 12.5
+    {{ calculate_percentage(dpps.id.stats.nullcount, dpp.dataset_stats.RECORD_COUNT) }} -> 12.5
     """
     return (part / whole) * 100 if whole else 0
-
-
-def get_unique_ratio(field):
-    """Get ratio of unique values
-
-    Example:
-    {{ get_unique_ratio(stats.user_id) }} -> 0.95
-    """
-    return field.cardinality / field.total_rows if field.total_rows else 0
 
 
 def format_range(min_val, max_val, separator=" to "):
     """Format a range of values
 
     Example:
-    {{ format_range(stats.temperature.min, stats.temperature.max) }} -> "-10 to 35"
+    {{ format_range(dpps.temperature.stats.min, dpps.temperature.stats.max) }} -> "-10 to 35"
     """
     return f"{min_val}{separator}{max_val}"
 
@@ -239,7 +266,7 @@ def format_coordinates(lat, lon, precision=6):
     """Format coordinates nicely
 
     Example:
-    {{ format_coordinates(stats.latitude.mean, stats.longitude.mean) }}
+    {{ format_coordinates(dpps.latitude.stats.mean, dpps.longitude.stats.mean) }}
     -> "40.7128°N, 74.0060°W"
     """
     lat_dir = "N" if lat >= 0 else "S"
@@ -251,7 +278,7 @@ def calculate_bbox_area(min_lon, min_lat, max_lon, max_lat):
     """Calculate approximate area of bounding box in square kilometers
 
     Example:
-    {{ calculate_bbox_area(bbox.min_lon, bbox.min_lat, bbox.max_lon, bbox.max_lat) }}
+    {{ calculate_bbox_area(dpp.spatial_extent.min_lon, dpp.spatial_extent.min_lat, dpp.spatial_extent.max_lon, dpp.spatial_extent.max_lat) }}
     -> 1234.56
     """
     from math import radians, cos
@@ -320,6 +347,9 @@ def get_frequency_top_values(
 
     Returns:
         List of dictionaries containing value, count and percentage for top values
+
+    Example:
+    {{ get_frequency_top_values(dppf, 'record_id', 10) }} -> [{'value': '<ALL_UNIQUE>', 'count': 1000000, 'percentage': 100.0}]
     """
     if field not in resource_fields_freqs:
         return []
