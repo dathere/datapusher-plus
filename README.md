@@ -15,7 +15,7 @@ type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_leng
 * `dppf` - with the "f" for frequency table.<br/>Each field will have its frequency table available sorted in descending order the top N (configurable, default 10) values, with a corresponding count & percentage. "Other (COUNT)" will be used as a "basket" for other values with COUNT set to the count of other values beyond the top N. ID fields will be indicated by "<ALL_UNIQUE>" in the table.
 * `dpp` - additional inferred/calculated metadata.<br/>
   * `ORIGINAL_FILE_SIZE` (bytes)
-  * `PREVIEW_FILE_SIZZE` (bytes)
+  * `PREVIEW_FILE_SIZE` (bytes)
   * `RECORD_COUNT` (int)
   * `PREVIEW_RECORD_COUNT` (int)
   * `IS_SORTED` (bool)
