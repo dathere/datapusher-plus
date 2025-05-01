@@ -13,11 +13,25 @@ The Formulas have access to not just the `package` and `resource` fields (in the
 * `dpps` - with the "s" for stats.<br/>Each field will have an extensive list of summary statistics (by default: 
 type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_length, sum_length, avg_length, stddev_length, variance_length, cv_length, mean, sem, geometric_mean, harmonic_mean, stddev, variance, cv, nullcount, max_precision, sparsity, cardinality, uniqueness_ratio.) Check [here](https://github.com/dathere/qsv/wiki/Supplemental#stats-command-output-explanation) for all other available statistics.
 * `dppf` - with the "f" for frequency table.<br/>Each field will have its frequency table available sorted in descending order the top N (configurable, default 10) values, with a corresponding count & percentage. "Other (COUNT)" will be used as a "basket" for other values with COUNT set to the count of other values beyond the top N. ID fields will be indicated by "<ALL_UNIQUE>" in the table.
-* `dpp` - inferred metadata.<br/>
-Currently, it can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
-  * its in a comma-separated priority-order list of lat/long name patterns
-  * for latitude, if its of type "Float" with a range of -90.0 to 90.0, and
-  * for longitude, if its a "Float" with a range of -180.0 to 180.0.
+* `dpp` - additional inferred/calculated metadata.<br/>
+  * `ORIGINAL_FILE_SIZE` (bytes)
+  * `PREVIEW_FILE_SIZZE` (bytes)
+  * `RECORD_COUNT` (int)
+  * `PREVIEW_RECORD_COUNT` (int)
+  * `IS_SORTED` (bool)
+  * `DEDUPED` (bool)
+  * `DUPE_COUNT` (int: -1 if there are no dupes)
+  * `DATE_FIELDS` - a list of inferred date columns
+  * `NO_DATE_FIELDS` (bool)
+  * `DATETIME_FIELDS` - a list of inferred datetime columns
+  * `NO_DATETIME_FIELDS` (bool)
+  * Latitude/Longitude metadata
+    DP+ can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
+      * its in a comma-separated priority-order list of lat/long name patterns
+      * for latitude, if its of type "Float" with a range of -90.0 to 90.0, and
+      * for longitude, if its a "Float" with a range of -180.0 to 180.0.
+    * `LAT_FIELD` and `LON_FIELD` - lat/long columns
+    * `NO_LAT_LONG_FIELDS` (bool)
 
 Beyond the extensive list of built-in Jinja2 [filters](https://jinja.palletsprojects.com/en/stable/templates/#list-of-builtin-filters)/[functions](https://jinja.palletsprojects.com/en/stable/templates/#list-of-global-functions), DP+ also supports an extensive list of additional [custom filters/functions](https://github.com/dathere/datapusher-plus/blob/607e7c5e5d75c5dc7ac55d684522c7972bc33d1d/ckanext/datapusher_plus/jinja2_helpers.py#L171).
 
