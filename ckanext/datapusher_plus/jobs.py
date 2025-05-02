@@ -1021,6 +1021,7 @@ def _push_to_datastore(
             tmp = qsv_slice_csv
 
         dataset_stats["PREVIEW_FILE_SIZE"] = os.path.getsize(tmp)
+        dataset_stats["PREVIEW_RECORD_COUNT"] = rows_to_copy
 
     # ---------------- Normalize dates to RFC3339 format --------------------
     # if there are any datetime fields, normalize them to RFC3339 format
