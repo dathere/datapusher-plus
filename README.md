@@ -6,8 +6,7 @@
 
 > NOTE: v2 is a major revamp. Updated documentation will be available shortly.
 
-DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
-[ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher, super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file.
+DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher - super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file.
 
 The Formulas have access to not just the `package` and `resource` fields (in the same namespaces), it also has access to the following information in these additional namespaces that can be used in Jinja2 expressions:
 * `dpps` - with the "s" for stats.<br/>Each field will have an extensive list of summary statistics (by default: 
@@ -21,10 +20,12 @@ type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_leng
   * `IS_SORTED` (bool)
   * `DEDUPED` (bool)
   * `DUPE_COUNT` (int: -1 if there are no dupes)
-  * `DATE_FIELDS` - a list of inferred date columns
-  * `NO_DATE_FIELDS` (bool)
-  * `DATETIME_FIELDS` - a list of inferred datetime columns
-  * `NO_DATETIME_FIELDS` (bool)
+  * Date/DateTime metadata<br/>
+    DP+ can infer date/datetime columns - supporting 19 different formats. As it is a relatively expensive operation, it will only do so for candidate columns with names that fit a configurable pattern.
+      * `DATE_FIELDS` - a list of inferred date columns
+      * `NO_DATE_FIELDS` (bool)
+      * `DATETIME_FIELDS` - a list of inferred datetime columns
+      * `NO_DATETIME_FIELDS` (bool)
   * Latitude/Longitude metadata<br/>
     DP+ can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
       * its in a comma-separated priority-order list of lat/long name patterns
