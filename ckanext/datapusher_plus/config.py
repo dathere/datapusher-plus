@@ -54,7 +54,6 @@ PII_QUICK_SCREEN = tk.asbool(
 
 # Binary paths
 QSV_BIN = Path(tk.config.get("ckanext.datapusher_plus.qsv_bin"))
-FILE_BIN = Path(tk.config.get("ckanext.datapusher_plus.file_bin"))
 
 # Data processing settings
 PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "1000"))

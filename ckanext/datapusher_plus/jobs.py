@@ -177,12 +177,9 @@ def _push_to_datastore(
     logger.info(f"Setting log level to {logging.getLevelName(int(log_level))}")
     logger.setLevel(log_level)
 
-    # check if conf.QSV_BIN and conf.FILE_BIN exists
+    # check if conf.QSV_BIN exists
     if not Path(conf.QSV_BIN).is_file():
         raise utils.JobError("{} not found.".format(conf.QSV_BIN))
-
-    if not conf.FILE_BIN.is_file():
-        raise utils.JobError("{} not found.".format(conf.FILE_BIN))
 
     # Initialize QSVCommand
     qsv = QSVCommand(logger=logger)
@@ -432,28 +429,9 @@ def _push_to_datastore(
                 output_file=qsv_excel_csv,
             )
         except utils.JobError as e:
-            logger.error(
+            raise utils.JobError(
                 "Upload aborted. Cannot export spreadsheet(?) to CSV: {}".format(e)
             )
-
-            # it had a spreadsheet extension but `qsv excel` failed,
-            # get some file info and log it by running `file`
-            # just in case the file is not actually a spreadsheet or is encrypted
-            # so the user has some actionable info
-            file_metadata = subprocess.run(
-                [conf.FILE_BIN, qsv_spreadsheet],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-
-            logger.warning(
-                "Is the file encrypted or is not a spreadsheet?\nFILE ATTRIBUTES: {}".format(
-                    file_metadata.stdout
-                )
-            )
-
-            return
         excel_export_msg = qsv_excel.stderr
         logger.info("{}...".format(excel_export_msg))
         tmp = qsv_excel_csv
@@ -569,8 +547,7 @@ def _push_to_datastore(
                     output_file=qsv_geoconvert_csv,
                 )
             except utils.JobError as e:
-                logger.error(f"qsv geoconvert failed: {e}")
-                raise
+                raise utils.JobError(f"qsv geoconvert failed: {e}")
 
             tmp = qsv_geoconvert_csv
             logger.info("Geoconverted successfully")
@@ -630,10 +607,9 @@ def _push_to_datastore(
                     check=True,
                 )
             except subprocess.CalledProcessError as e:
-                logger.error(
+                raise utils.JobError(
                     f"Job aborted as the file cannot be re-encoded to UTF-8. {e.stderr}"
                 )
-                return
             f = open(qsv_input_utf_8_encoded_csv, "wb")
             f.write(cmd.stdout)
             f.close()
@@ -644,10 +620,9 @@ def _push_to_datastore(
         try:
             qsv.input(tmp, trim_headers=True, output_file=qsv_input_csv)
         except utils.JobError as e:
-            logger.error(
+            raise utils.JobError(
                 "Job aborted as the file cannot be normalized/transcoded: {}.".format(e)
             )
-            return
         tmp = qsv_input_csv
         logger.info("Normalized & transcoded...")
 
@@ -660,8 +635,7 @@ def _push_to_datastore(
     try:
         qsv.validate(tmp)
     except utils.JobError as e:
-        logger.error(f"qsv validate failed: {e}")
-        raise
+        raise utils.JobError(f"qsv validate failed: {e}")
 
     logger.info("Well-formed, valid CSV file confirmed...")
 
