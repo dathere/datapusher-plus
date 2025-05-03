@@ -408,7 +408,7 @@ def spatial_extent_feature_collection(
     context: dict,
     name: str = "Inferred Spatial Extent",
     bbox: list[float] = None,
-    type: str = "inferred",
+    feature_type: str = "inferred",
 ) -> str:
     """Convert a bounding box to a namedGeoJSON feature collection.
 
@@ -417,7 +417,7 @@ def spatial_extent_feature_collection(
         bbox: List of floats representing the bounding box [min_lon, min_lat, max_lon, max_lat]
               If the bbox is not provided, the spatial extent of the resource will be used if available
               Otherwise, the bbox will be calculated from the latitude and longitude fields
-        type: Type of the feature, defaults to "calculated"
+        feature_type: Type of the feature, defaults to "inferred"
 
     Returns:
         str: GeoJSON feature collection string
@@ -431,7 +431,7 @@ def spatial_extent_feature_collection(
         '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"Custom Name","type":"inferred"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
     """
     if bbox:
-        type = "calculated"
+        feature_type = "calculated"
         # validate bbox
         if len(bbox) != 4:
             return None
@@ -456,7 +456,7 @@ def spatial_extent_feature_collection(
                 else:
                     return None
 
-    return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[[{bbox[0]},{bbox[1]}], [{bbox[0]},{bbox[3]}], [{bbox[2]},{bbox[3]}], [{bbox[2]},{bbox[1]}], [{bbox[0]},{bbox[1]}]]]}}}}]}}'
+    return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{feature_type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[[{bbox[0]},{bbox[1]}], [{bbox[0]},{bbox[3]}], [{bbox[2]},{bbox[3]}], [{bbox[2]},{bbox[1]}], [{bbox[0]},{bbox[1]}]]]}}}}]}}'
 
 
 @pass_context
