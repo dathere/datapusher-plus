@@ -124,99 +124,101 @@ def screen_for_pii(
         pii_resource_id = resource["id"] + "-pii"
 
         try:
-            raw_connection_pii = psycopg2.connect(conf.DATASTORE_WRITE_URL)
+            with psycopg2.connect(conf.DATASTORE_WRITE_URL) as raw_connection_pii:
+                cur_pii = raw_connection_pii.cursor()
+
+                # check if the pii already exist
+                existing_pii = dsu.datastore_resource_exists(pii_resource_id)
+
+                # Delete existing pii preview before proceeding.
+                if existing_pii:
+                    logger.info('Deleting existing PII preview "%s".', pii_resource_id)
+
+                    cur_pii.execute(
+                        "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
+                        (pii_resource_id + "%",),
+                    )
+                    pii_alias_result = cur_pii.fetchone()
+                    if pii_alias_result:
+                        existing_pii_alias_of = pii_alias_result[0]
+
+                        dsu.delete_datastore_resource(existing_pii_alias_of)
+                        dsu.delete_resource(existing_pii_alias_of)
+
+                pii_alias = [pii_resource_id]
+
+                # run stats on pii preview CSV to get header names and infer data types
+                # we don't need summary statistics, so use the --typesonly option
+                try:
+                    qsv_pii_stats = qsv.stats(
+                        qsv_searchset_csv,
+                        infer_dates=False,
+                        dates_whitelist=conf.QSV_DATES_WHITELIST,
+                        stats_jsonl=False,
+                        prefer_dmy=False,
+                        cardinality=False,
+                        summary_stats_options=None,
+                        output_file=None,
+                    )
+                except utils.JobError as e:
+                    raise utils.JobError("Cannot run stats on PII preview CSV: %s", e)
+
+                pii_stats = str(qsv_pii_stats.stdout).strip()
+                pii_stats_dict = [
+                    dict(
+                        id=ele.split(",")[0], type=conf.TYPE_MAPPING[ele.split(",")[1]]
+                    )
+                    for idx, ele in enumerate(pii_stats.splitlines()[1:], 1)
+                ]
+
+                pii_resource = {
+                    "package_id": resource["package_id"],
+                    "name": resource["name"] + " - PII",
+                    "format": "CSV",
+                    "mimetype": "text/csv",
+                }
+                pii_response = dsu.send_resource_to_datastore(
+                    pii_resource,
+                    resource_id=None,
+                    headers=pii_stats_dict,
+                    records=None,
+                    aliases=pii_alias,
+                    calculate_record_count=False,
+                )
+
+                new_pii_resource_id = pii_response["result"]["resource_id"]
+
+                # now COPY the PII preview to the datastore
+                logger.info(
+                    'ADDING PII PREVIEW in "%s" with alias "%s"...',
+                    new_pii_resource_id,
+                    pii_alias,
+                )
+                col_names_list = [h["id"] for h in pii_stats_dict]
+                column_names = sql.SQL(",").join(
+                    sql.Identifier(c) for c in col_names_list
+                )
+
+                copy_sql = sql.SQL(
+                    "COPY {} ({}) FROM STDIN "
+                    "WITH (FORMAT CSV, "
+                    "HEADER 1, ENCODING 'UTF8');"
+                ).format(
+                    sql.Identifier(new_pii_resource_id),
+                    column_names,
+                )
+
+                with open(qsv_searchset_csv, "rb") as f:
+                    try:
+                        cur_pii.copy_expert(copy_sql, f)
+                    except psycopg2.Error as e:
+                        raise utils.JobError("Postgres COPY failed: %s", e)
+                    else:
+                        pii_copied_count = cur_pii.rowcount
+
+                raw_connection_pii.commit()
         except psycopg2.Error as e:
             raise utils.JobError("Could not connect to the Datastore: %s", e)
-        else:
-            cur_pii = raw_connection_pii.cursor()
-
-        # check if the pii already exist
-        existing_pii = dsu.datastore_resource_exists(pii_resource_id)
-
-        # Delete existing pii preview before proceeding.
-        if existing_pii:
-            logger.info('Deleting existing PII preview "%s".', pii_resource_id)
-
-            cur_pii.execute(
-                "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
-                (pii_resource_id + "%",),
-            )
-            pii_alias_result = cur_pii.fetchone()
-            if pii_alias_result:
-                existing_pii_alias_of = pii_alias_result[0]
-
-                dsu.delete_datastore_resource(existing_pii_alias_of)
-                dsu.delete_resource(existing_pii_alias_of)
-
-        pii_alias = [pii_resource_id]
-
-        # run stats on pii preview CSV to get header names and infer data types
-        # we don't need summary statistics, so use the --typesonly option
-        try:
-            qsv_pii_stats = qsv.stats(
-                qsv_searchset_csv,
-                infer_dates=False,
-                dates_whitelist=conf.QSV_DATES_WHITELIST,
-                stats_jsonl=False,
-                prefer_dmy=False,
-                cardinality=False,
-                summary_stats_options=None,
-                output_file=None,
-            )
-        except utils.JobError as e:
-            raise utils.JobError("Cannot run stats on PII preview CSV: %s", e)
-
-        pii_stats = str(qsv_pii_stats.stdout).strip()
-        pii_stats_dict = [
-            dict(id=ele.split(",")[0], type=conf.TYPE_MAPPING[ele.split(",")[1]])
-            for idx, ele in enumerate(pii_stats.splitlines()[1:], 1)
-        ]
-
-        pii_resource = {
-            "package_id": resource["package_id"],
-            "name": resource["name"] + " - PII",
-            "format": "CSV",
-            "mimetype": "text/csv",
-        }
-        pii_response = dsu.send_resource_to_datastore(
-            pii_resource,
-            resource_id=None,
-            headers=pii_stats_dict,
-            records=None,
-            aliases=pii_alias,
-            calculate_record_count=False,
-        )
-
-        new_pii_resource_id = pii_response["result"]["resource_id"]
-
-        # now COPY the PII preview to the datastore
-        logger.info(
-            'ADDING PII PREVIEW in "%s" with alias "%s"...',
-            new_pii_resource_id,
-            pii_alias,
-        )
-        col_names_list = [h["id"] for h in pii_stats_dict]
-        column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
-
-        copy_sql = sql.SQL(
-            "COPY {} ({}) FROM STDIN "
-            "WITH (FORMAT CSV, "
-            "HEADER 1, ENCODING 'UTF8');"
-        ).format(
-            sql.Identifier(new_pii_resource_id),
-            column_names,
-        )
-
-        with open(qsv_searchset_csv, "rb") as f:
-            try:
-                cur_pii.copy_expert(copy_sql, f)
-            except psycopg2.Error as e:
-                raise utils.JobError("Postgres COPY failed: %s", e)
-            else:
-                pii_copied_count = cur_pii.rowcount
-
-        raw_connection_pii.commit()
-        cur_pii.close()
 
         pii_resource["id"] = new_pii_resource_id
         pii_resource["pii_preview"] = True
