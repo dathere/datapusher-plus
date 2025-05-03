@@ -11,6 +11,19 @@ import ckanext.datapusher_plus.config as conf
 
 log = logging.getLogger(__name__)
 
+# At the top of jinja2_helpers.py
+JINJA2_FILTERS = []
+JINJA2_GLOBALS = []
+
+def jinja2_filter(func):
+    """Decorator to register a function as a Jinja2 filter."""
+    JINJA2_FILTERS.append(func)
+    return func
+
+def jinja2_global(func):
+    """Decorator to register a function as a Jinja2 global."""
+    JINJA2_GLOBALS.append(func)
+    return func
 
 class FormulaProcessor:
     def __init__(
@@ -180,34 +193,18 @@ class FormulaProcessor:
         """Create a configured Jinja2 environment with all filters and globals."""
         env = Environment(loader=DictLoader(context))
 
-        # Add filters
-        filters = {
-            "truncate_with_ellipsis": truncate_with_ellipsis,
-            "format_number": format_number,
-            "format_bytes": format_bytes,
-            "format_date": format_date,
-            "calculate_percentage": calculate_percentage,
-            "format_range": format_range,
-            "format_coordinates": format_coordinates,
-            "calculate_bbox_area": calculate_bbox_area,
-        }
-        env.filters.update(filters)
-
-        # Add globals
-        globals = {
-            "spatial_extent_wkt": spatial_extent_wkt,
-            "spatial_extent_feature_collection": spatial_extent_feature_collection,
-            "get_frequency_top_values": get_frequency_top_values,
-        }
-        env.globals.update(globals)
-
+        # Register filters
+        for func in JINJA2_FILTERS:
+            env.filters[func.__name__] = func
+        # Register globals
+        for func in JINJA2_GLOBALS:
+            env.globals[func.__name__] = func
         return env
-
 
 # ------------------
 # DP+ Jinja2 filters & functions
 # that can be used in scheming formulas
-# IMPORTANT: Be sure to add the filters & functions to the filters & globals dict in create_jinja2_env
+@jinja2_filter
 def truncate_with_ellipsis(text, length=50, ellipsis="..."):
     """Truncate text to a specific length and append ellipsis.
 
@@ -219,6 +216,7 @@ def truncate_with_ellipsis(text, length=50, ellipsis="..."):
     return text[:length] + ellipsis
 
 
+@jinja2_filter
 def format_number(value, decimals=2):
     """Format numbers with thousands separator and decimal places
 
@@ -228,6 +226,7 @@ def format_number(value, decimals=2):
     return f"{float(value):,.{decimals}f}"
 
 
+@jinja2_filter
 def format_bytes(bytes):
     """Format byte sizes into human readable format
 
@@ -240,6 +239,7 @@ def format_bytes(bytes):
         bytes /= 1024
 
 
+@jinja2_filter
 def format_date(value, format="%Y-%m-%d"):
     """Format dates in specified format
 
@@ -249,6 +249,7 @@ def format_date(value, format="%Y-%m-%d"):
     return value.strftime(format)
 
 
+@jinja2_filter
 def calculate_percentage(part, whole):
     """Calculate percentage
 
@@ -258,6 +259,7 @@ def calculate_percentage(part, whole):
     return (part / whole) * 100 if whole else 0
 
 
+@jinja2_filter
 def format_range(min_val, max_val, separator=" to "):
     """Format a range of values
 
@@ -267,6 +269,7 @@ def format_range(min_val, max_val, separator=" to "):
     return f"{min_val}{separator}{max_val}"
 
 
+@jinja2_filter
 def format_coordinates(lat, lon, precision=6):
     """Format coordinates nicely
 
@@ -282,8 +285,7 @@ def format_coordinates(lat, lon, precision=6):
 # ------------------
 # Jinja2 Global Functions
 # that can be used in scheming formulas
-# IMPORTANT: When adding a new function,
-# be sure to add the function to the globals dict in create_jinja2_env
+@jinja2_global
 @pass_context
 def calculate_bbox_area(
     context: dict,
@@ -346,6 +348,7 @@ def calculate_bbox_area(
     return width * height * (earth_radius**2)
 
 
+@jinja2_global
 @pass_context
 def spatial_extent_wkt(
     context: dict,
@@ -404,6 +407,7 @@ def spatial_extent_wkt(
     return wkt
 
 
+@jinja2_global
 @pass_context
 def spatial_extent_feature_collection(
     context: dict,
@@ -460,6 +464,7 @@ def spatial_extent_feature_collection(
     return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{feature_type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[[{bbox[0]},{bbox[1]}], [{bbox[0]},{bbox[3]}], [{bbox[2]},{bbox[3]}], [{bbox[2]},{bbox[1]}], [{bbox[0]},{bbox[1]}]]]}}}}]}}'
 
 
+@jinja2_global
 @pass_context
 def get_frequency_top_values(
     context: dict,
