@@ -15,15 +15,18 @@ log = logging.getLogger(__name__)
 JINJA2_FILTERS = []
 JINJA2_GLOBALS = []
 
+
 def jinja2_filter(func):
     """Decorator to register a function as a Jinja2 filter."""
     JINJA2_FILTERS.append(func)
     return func
 
+
 def jinja2_global(func):
     """Decorator to register a function as a Jinja2 global."""
     JINJA2_GLOBALS.append(func)
     return func
+
 
 class FormulaProcessor:
     def __init__(
@@ -200,6 +203,7 @@ class FormulaProcessor:
         for func in JINJA2_GLOBALS:
             env.globals[func.__name__] = func
         return env
+
 
 # ------------------
 # DP+ Jinja2 filters & functions
