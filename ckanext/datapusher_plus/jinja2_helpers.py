@@ -227,7 +227,10 @@ def format_number(value, decimals=2):
     Example:
     {{ dpps.population.stats.sum | format_number }} -> 1,234,567.89
     """
-    return f"{float(value):,.{decimals}f}"
+    try:
+        return f"{float(value):,.{decimals}f}"
+    except (TypeError, ValueError):
+        return value  # Return as-is if not a number
 
 
 @jinja2_filter
@@ -237,10 +240,16 @@ def format_bytes(bytes):
     Example:
     {{ dpp.ORIGINAL_FILE_SIZE | format_bytes }} -> 1.5 GB
     """
+    try:
+        bytes = float(bytes)
+    except (TypeError, ValueError):
+        return bytes  # Return as-is if not a number
+
     for unit in ["B", "KB", "MB", "GB", "TB"]:
         if bytes < 1024:
             return f"{bytes:.1f} {unit}"
         bytes /= 1024
+    return f"{bytes:.1f} PB"  # For very large numbers
 
 
 @jinja2_filter
@@ -250,7 +259,19 @@ def format_date(value, format="%Y-%m-%d"):
     Example:
     {{ dpps.created_date.stats.max | format_date("%B %d, %Y") }} -> January 1, 2024
     """
-    return value.strftime(format)
+    if value is None:
+        return value
+    try:
+        return value.strftime(format)
+    except AttributeError:
+        # Try to parse string to date
+        from datetime import datetime
+
+        try:
+            dt = datetime.fromisoformat(value)
+            return dt.strftime(format)
+        except Exception:
+            return value  # Return as-is if parsing fails
 
 
 @jinja2_filter
@@ -260,7 +281,12 @@ def calculate_percentage(part, whole):
     Example:
     {{ calculate_percentage(dpps.id.stats.nullcount, dpp.dataset_stats.RECORD_COUNT) }} -> 12.5
     """
-    return (part / whole) * 100 if whole else 0
+    try:
+        part = float(part)
+        whole = float(whole)
+        return (part / whole) * 100 if whole else 0
+    except (TypeError, ValueError, ZeroDivisionError):
+        return 0
 
 
 @jinja2_filter
