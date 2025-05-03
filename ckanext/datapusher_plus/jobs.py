@@ -37,6 +37,7 @@ import ckanext.datapusher_plus.spatial_helpers as sh
 import ckanext.datapusher_plus.datastore_utils as dsu
 from ckanext.datapusher_plus.logging_utils import TRACE
 from ckanext.datapusher_plus.qsv_utils import QSVCommand
+from ckanext.datapusher_plus.pii_screening import screen_for_pii
 
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
@@ -1031,222 +1032,15 @@ def _push_to_datastore(
     # field in one pass
     piiscreening_start = 0
     piiscreening_elapsed = 0
+    pii_found = False
+
     if conf.PII_SCREENING:
         piiscreening_start = time.perf_counter()
-        pii_found_abort = conf.PII_FOUND_ABORT
-
-        # DP+ comes with default regex patterns for PII (SSN, credit cards,
-        # email, bank account numbers, & phone number). The DP+ admin can
-        # use a custom set of regex patterns by pointing to a resource with
-        # a text file, with each line having a regex pattern, and an optional
-        # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
-        if conf.PII_REGEX_RESOURCE_ID:
-            pii_regex_resource_exist = dsu.datastore_resource_exists(
-                conf.PII_REGEX_RESOURCE_ID
-            )
-            if pii_regex_resource_exist:
-                pii_resource = dsu.get_resource(conf.PII_REGEX_RESOURCE_ID)
-                pii_regex_url = pii_resource["url"]
-
-                r = requests.get(pii_regex_url)
-                pii_regex_file = pii_regex_url.split("/")[-1]
-
-                p = Path(__file__).with_name("user-pii-regexes.txt")
-                with p.open("wb") as f:
-                    f.write(r.content)
-        else:
-            pii_regex_file = "default-pii-regexes.txt"
-            p = Path(__file__).with_name(pii_regex_file)
-
-        pii_found = False
-        pii_regex_fname = p.absolute()
-
-        if conf.PII_QUICK_SCREEN:
-            logger.info("Quickly scanning for PII using {}...".format(pii_regex_file))
-            try:
-                qsv_searchset = qsv.searchset(
-                    pii_regex_fname,
-                    tmp,
-                    ignore_case=True,
-                    quick=True,
-                )
-            except utils.JobError as e:
-                raise utils.JobError("Cannot quickly search CSV for PII: {}".format(e))
-            pii_candidate_row = str(qsv_searchset.stderr)
-            if pii_candidate_row:
-                pii_found = True
-
-        else:
-            logger.info("Scanning for PII using {}...".format(pii_regex_file))
-            qsv_searchset_csv = os.path.join(temp_dir, "qsv_searchset.csv")
-            try:
-                qsv_searchset = qsv.searchset(
-                    pii_regex_file,
-                    tmp,
-                    ignore_case=True,
-                    flag="PII_info",
-                    flag_matches_only=True,
-                    json_output=True,
-                    output_file=qsv_searchset_csv,
-                )
-            except utils.JobError as e:
-                raise utils.JobError("Cannot search CSV for PII: {}".format(e))
-            pii_json = json.loads(str(qsv_searchset.stderr))
-            pii_total_matches = int(pii_json["total_matches"])
-            pii_rows_with_matches = int(pii_json["rows_with_matches"])
-            if pii_total_matches > 0:
-                pii_found = True
-
-        if pii_found and pii_found_abort and not conf.PII_SHOW_CANDIDATES:
-            logger.error("PII Candidate/s Found!")
-            if conf.PII_QUICK_SCREEN:
-                raise utils.JobError(
-                    "PII CANDIDATE FOUND on row {}! Job aborted.".format(
-                        pii_candidate_row.rstrip()
-                    )
-                )
-            else:
-                raise utils.JobError(
-                    "PII CANDIDATE/S FOUND! Job aborted. Found {} PII candidate/s in {} row/s.".format(
-                        pii_total_matches, pii_rows_with_matches
-                    )
-                )
-        elif pii_found and conf.PII_SHOW_CANDIDATES and not conf.PII_QUICK_SCREEN:
-            # TODO: Create PII Candidates resource and set package to private if its not private
-            # ------------ Create PII Preview Resource ------------------
-            logger.warning(
-                "PII CANDIDATE/S FOUND! Found {} PII candidate/s in {} row/s. Creating PII preview...".format(
-                    pii_total_matches, pii_rows_with_matches
-                )
-            )
-            pii_resource_id = resource_id + "-pii"
-
-            try:
-                raw_connection_pii = psycopg2.connect(conf.DATASTORE_WRITE_URL)
-            except psycopg2.Error as e:
-                raise utils.JobError("Could not connect to the Datastore: {}".format(e))
-            else:
-                cur_pii = raw_connection_pii.cursor()
-
-            # check if the pii already exist
-            existing_pii = dsu.datastore_resource_exists(pii_resource_id)
-
-            # Delete existing pii preview before proceeding.
-            if existing_pii:
-                logger.info(
-                    'Deleting existing PII preview "{}".'.format(pii_resource_id)
-                )
-
-                cur_pii.execute(
-                    "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
-                    (pii_resource_id + "%",),
-                )
-                pii_alias_result = cur_pii.fetchone()
-                if pii_alias_result:
-                    existing_pii_alias_of = pii_alias_result[0]
-
-                    dsu.delete_datastore_resource(existing_pii_alias_of)
-                    dsu.delete_resource(existing_pii_alias_of)
-
-            pii_alias = [pii_resource_id]
-
-            # run stats on pii preview CSV to get header names and infer data types
-            # we don't need summary statistics, so use the --typesonly option
-            try:
-                qsv_pii_stats = qsv.stats(
-                    qsv_searchset_csv,
-                    infer_dates=False,
-                    dates_whitelist=conf.QSV_DATES_WHITELIST,
-                    stats_jsonl=False,
-                    prefer_dmy=False,
-                    cardinality=False,
-                    summary_stats_options=None,
-                    output_file=None,
-                )
-            except utils.JobError as e:
-                raise utils.JobError(
-                    "Cannot run stats on PII preview CSV: {}".format(e)
-                )
-
-            pii_stats = str(qsv_pii_stats.stdout).strip()
-            pii_stats_dict = [
-                dict(id=ele.split(",")[0], type=conf.TYPE_MAPPING[ele.split(",")[1]])
-                for idx, ele in enumerate(pii_stats.splitlines()[1:], 1)
-            ]
-
-            pii_resource = {
-                "package_id": resource["package_id"],
-                "name": resource["name"] + " - PII",
-                "format": "CSV",
-                "mimetype": "text/csv",
-            }
-            pii_response = dsu.send_resource_to_datastore(
-                pii_resource,
-                resource_id=None,
-                headers=pii_stats_dict,
-                records=None,
-                aliases=pii_alias,
-                calculate_record_count=False,
-            )
-
-            new_pii_resource_id = pii_response["result"]["resource_id"]
-
-            # now COPY the PII preview to the datastore
-            logger.info(
-                'ADDING PII PREVIEW in "{}" with alias "{}"...'.format(
-                    new_pii_resource_id,
-                    pii_alias,
-                )
-            )
-            col_names_list = [h["id"] for h in pii_stats_dict]
-            column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
-
-            copy_sql = sql.SQL(
-                "COPY {} ({}) FROM STDIN "
-                "WITH (FORMAT CSV, "
-                "HEADER 1, ENCODING 'UTF8');"
-            ).format(
-                sql.Identifier(new_pii_resource_id),
-                column_names,
-            )
-
-            with open(qsv_searchset_csv, "rb") as f:
-                try:
-                    cur_pii.copy_expert(copy_sql, f)
-                except psycopg2.Error as e:
-                    raise utils.JobError("Postgres COPY failed: {}".format(e))
-                else:
-                    pii_copied_count = cur_pii.rowcount
-
-            raw_connection_pii.commit()
-            cur_pii.close()
-
-            pii_resource["id"] = new_pii_resource_id
-            pii_resource["pii_preview"] = True
-            pii_resource["pii_of_resource"] = resource_id
-            pii_resource["total_record_count"] = pii_rows_with_matches
-            dsu.update_resource(pii_resource)
-
-            pii_msg = (
-                "{} PII candidate/s in {} row/s are available at {} for review".format(
-                    pii_total_matches,
-                    pii_copied_count,
-                    resource["url"][: resource["url"].find("/resource/")]
-                    + "/resource/"
-                    + new_pii_resource_id,
-                )
-            )
-            if pii_found_abort:
-                raise utils.JobError(pii_msg)
-            else:
-                logger.warning(pii_msg)
-                logger.warning(
-                    "PII CANDIDATE/S FOUND but proceeding with job per Datapusher+ configuration."
-                )
-        elif not pii_found:
-            logger.info("PII Scan complete. No PII candidate/s found.")
-
+        pii_found = screen_for_pii(tmp, resource, qsv, temp_dir, logger)
         piiscreening_elapsed = time.perf_counter() - piiscreening_start
+
+    dataset_stats["PII_SCREENING"] = conf.PII_SCREENING
+    dataset_stats["PII_FOUND"] = pii_found
 
     # delete the qsv index file manually
     # as it was created by qsv index, and not by tempfile
