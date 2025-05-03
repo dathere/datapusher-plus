@@ -65,9 +65,8 @@ class QSVCommand:
         Raises:
             utils.JobError: If the command fails and check is True
         """
-        # Ensure the first argument is the qsv binary
-        if args[0] != self.qsv_bin:
-            args = [self.qsv_bin] + args
+
+        args = [self.qsv_bin] + args
 
         # Convert all args to str to avoid TypeError with Path objects
         str_args = [str(arg) for arg in args]
