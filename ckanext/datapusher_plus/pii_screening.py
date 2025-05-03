@@ -51,12 +51,15 @@ def screen_for_pii(
             pii_resource = dsu.get_resource(conf.PII_REGEX_RESOURCE_ID)
             pii_regex_url = pii_resource["url"]
 
-            r = requests.get(pii_regex_url)
-            pii_regex_file = pii_regex_url.split("/")[-1]
-
-            p = Path(__file__).with_name("user-pii-regexes.txt")
-            with p.open("wb") as f:
-                f.write(r.content)
+            try:
+                r = requests.get(pii_regex_url)
+                r.raise_for_status()
+                pii_regex_file = pii_regex_url.split("/")[-1]
+                p = Path(__file__).with_name("user-pii-regexes.txt")
+                with p.open("wb") as f:
+                    f.write(r.content)
+            except requests.RequestException as e:
+                raise utils.JobError(f"Failed to fetch PII regex resource: {e}")
     else:
         pii_regex_file = "default-pii-regexes.txt"
         p = Path(__file__).with_name(pii_regex_file)
