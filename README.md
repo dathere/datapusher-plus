@@ -4,10 +4,45 @@
 
 # DataPusher+
 
-DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
-[ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
+> NOTE: v2 is a major revamp. Updated documentation will be available shortly.
 
-Datapusher+ is droping usage of [CKAN Service Provider][], with [Messytables] replaced by [qsv].
+DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher - super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file.
+
+The Formulas have access to not just the `package` and `resource` fields (in the same namespaces), it also has access to the following information in these additional namespaces that can be used in Jinja2 expressions:
+* `dpps` - with the "s" for stats.<br/>Each field will have an extensive list of summary statistics (by default: 
+type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_length, sum_length, avg_length, stddev_length, variance_length, cv_length, mean, sem, geometric_mean, harmonic_mean, stddev, variance, cv, nullcount, max_precision, sparsity, cardinality, uniqueness_ratio.) Check [here](https://github.com/dathere/qsv/wiki/Supplemental#stats-command-output-explanation) for all other available statistics.
+* `dppf` - with the "f" for frequency table.<br/>Each field will have its frequency table available sorted in descending order the top N (configurable, default 10) values, with a corresponding count & percentage. "Other (COUNT)" will be used as a "basket" for other values with COUNT set to the count of other values beyond the top N. ID fields will be indicated by "<ALL_UNIQUE>" in the table.
+* `dpp` - additional inferred/calculated metadata.<br/>
+  * `ORIGINAL_FILE_SIZE` (bytes)
+  * `PREVIEW_FILE_SIZE` (bytes)
+  * `RECORD_COUNT` (int)
+  * `PREVIEW_RECORD_COUNT` (int)
+  * `IS_SORTED` (bool)
+  * `DEDUPED` (bool)
+  * `DUPE_COUNT` (int: -1 if there are no dupes)
+  * Date/DateTime metadata<br/>
+    DP+ can infer date/datetime columns - supporting 19 different formats. As it is a relatively expensive operation, it will only do so for candidate columns with names that fit a configurable pattern.
+      * `DATE_FIELDS` - a list of inferred date columns
+      * `NO_DATE_FIELDS` (bool)
+      * `DATETIME_FIELDS` - a list of inferred datetime columns
+      * `NO_DATETIME_FIELDS` (bool)
+  * Latitude/Longitude metadata<br/>
+    DP+ can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
+      * its in a comma-separated priority-order list of lat/long name patterns
+      * for latitude, if its of type "Float" with a range of -90.0 to 90.0, and
+      * for longitude, if its a "Float" with a range of -180.0 to 180.0.
+    * `LAT_FIELD` and `LON_FIELD` - lat/long columns
+    * `NO_LAT_LONG_FIELDS` (bool)
+
+Beyond the extensive list of built-in Jinja2 [filters](https://jinja.palletsprojects.com/en/stable/templates/#list-of-builtin-filters)/[functions](https://jinja.palletsprojects.com/en/stable/templates/#list-of-global-functions), DP+ also supports an extensive list of additional [custom filters/functions](https://github.com/dathere/datapusher-plus/blob/607e7c5e5d75c5dc7ac55d684522c7972bc33d1d/ckanext/datapusher_plus/jinja2_helpers.py#L171).
+
+There are two Formula types that are indicated by adding these keywords to the scheming yaml file:
+ * `formula` - the formula will be evaluated at resource creation/update time and the result is assigned to the corresponding package/resource field immediately.
+ * `suggest_formula` - the formula will be evaluated at resource creation/update time and the result is stored in the `dpp_suggestions` package field as a compound JSON object. `dpp_suggestions` contains all the suggestion for both package and resource fields. This field is parsed to show "Suggestions" during metadata entry for the associated package/resource field using the Suggestion UI (indicated by a function symbol next to the metadata field name).
+
+ Formulas that fail to evaluate will return with the `#ERROR!:` (reminiscent of Excel's `#VALUE!` function error) prefix followed by a detailed Jinja2 error message.
+
+In addition, Datapusher+ is no longer a webservice, but a full-fledged CKAN extension. It drops usage of the deprecated [CKAN Service Provider][], with the unmaintained [Messytables] replaced by the blazing-fast [qsv] data-wrangling engine.
 
 [TNRIS](https://tnris.org)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
 of Datapusher+, specifically, to support a [Resource-first upload workflow](docs/RESOURCE_FIRST_WORKFLOW.md#Resource-first-Upload-Workflow).

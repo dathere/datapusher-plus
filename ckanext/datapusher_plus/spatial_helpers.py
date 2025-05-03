@@ -17,7 +17,7 @@ import numpy as np
 from shapely.ops import transform
 import pyproj
 
-from ckanext.datapusher_plus.logging_utils import trace, TRACE
+from ckanext.datapusher_plus.logging_utils import TRACE
 
 # Create logger at module level as fallback
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ def process_spatial_file(
     output_csv_path: Optional[Union[str, Path]] = None,
     tolerance: float = 0.001,  # Now represents a relative tolerance (0.1%)
     task_logger: Optional[logging.Logger] = None,
-) -> Tuple[bool, Optional[str]]:
+) -> Tuple[bool, Optional[str], Optional[Tuple[float, float, float, float]]]:
     """
     Simplifies and converts a spatial file (e.g., zipped Shapefile, GeoJSON) to CSV format.
 
@@ -201,9 +201,10 @@ def process_spatial_file(
             errors. If not provided, a module-level logger is used.
 
     Returns:
-        Tuple[bool, Optional[str]]:
+        Tuple[bool, Optional[str], Optional[Tuple[float, float, float, float]]]
             - success (bool): True if the conversion was successful, False otherwise.
             - error_message (Optional[str]): Error message if failed, or None if successful.
+            - bounds (Optional[Tuple[float, float, float, float]]): Bounding box coordinates (minx, miny, maxx, maxy) or None if failed
 
     Notes:
         - The function will attempt to transform coordinates to meters for simplification if
@@ -219,7 +220,7 @@ def process_spatial_file(
     try:
         input_path = Path(input_path)
         if not input_path.exists():
-            return False, f"Input file does not exist: {input_path}"
+            return False, f"Input file does not exist: {input_path}", None
 
         if not output_csv_path:
             output_csv_path = input_path.with_suffix(".csv")
@@ -255,15 +256,18 @@ def process_spatial_file(
                 input_path = shapefile_path
                 log.debug(f"Using unzipped shapefile: {shapefile_path}")
             else:
-                return False, "No .shp file found in the zipped Shapefile"
+                return False, "No .shp file found in the zipped Shapefile", None
 
-        # Step 1: Read spatial features using Fiona
+        # Step 1: Read spatial features using Fiona and get bounds
         log.debug(f"Reading spatial features from {input_path}")
+        bounds = None
         with fiona.open(input_path) as src:
             features = list(src)
-            # Get CRS information
+            # Get CRS information and bounds
             src_crs = src.crs
+            bounds = src.bounds  # Get the bounding box
             log.info(f"Source CRS: {src_crs}")
+            log.info(f"Source bounds: {bounds}")
 
             # Log schema information
             log.info(f"Feature schema: {src.schema}")
@@ -291,7 +295,7 @@ def process_spatial_file(
                     log.warning(f"Could not setup coordinate transformation: {str(e)}")
 
         if not features:
-            return False, "No features found in the input file"
+            return False, "No features found in the input file", None
 
         log.info(f"Found {len(features)} features")
         log.info(
@@ -435,7 +439,7 @@ def process_spatial_file(
             )
 
         if not simplified_geoms:
-            return False, "No features could be processed"
+            return False, "No features could be processed", None
 
         avg_reduction = (
             total_reduction / len(simplified_geoms) if simplified_geoms else 0
@@ -453,10 +457,10 @@ def process_spatial_file(
         # Step 4: Write to CSV
         df.to_csv(output_csv_path, index=False)
 
-        return True, None
+        return True, None, bounds
 
     except Exception as e:
-        return False, f"Error converting spatial file to CSV: {str(e)}"
+        return False, f"Error converting spatial file to CSV: {str(e)}", None
 
     finally:
         if zip_temp_dir:
