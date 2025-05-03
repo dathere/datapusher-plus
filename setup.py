@@ -68,6 +68,7 @@ setup(
         'jinja2>=3.1.4',
         'fiona==1.10.1',
         'pandas>=2.2.3',
+        'semver==3.0.4',
         'shapely>=2.1.0',
         'pyproj>=3.7.1',
     ],
