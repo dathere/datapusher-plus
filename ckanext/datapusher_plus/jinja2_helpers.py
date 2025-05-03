@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any, Dict
-from jinja2 import DictLoader, Environment
+from jinja2 import DictLoader, Environment, pass_context
 
 import ckanext.datapusher_plus.config as conf
 
@@ -205,10 +205,15 @@ class FormulaProcessor:
 
 
 # ------------------
-# Jinja2 filters and functions
-# IMPORTANT: Be sure to add the function to the filters dict in create_jinja2_env
+# DP+ Jinja2 filters & functions
+# that can be used in scheming formulas
+# IMPORTANT: Be sure to add the filters & functions to the filters & globals dict in create_jinja2_env
 def truncate_with_ellipsis(text, length=50, ellipsis="..."):
-    """Truncate text to a specific length and append ellipsis."""
+    """Truncate text to a specific length and append ellipsis.
+
+    Example:
+    {{ package.description | truncate_with_ellipsis(10) }} -> "Hello, wo..."
+    """
     if not text or len(text) <= length:
         return text
     return text[:length] + ellipsis
@@ -274,8 +279,34 @@ def format_coordinates(lat, lon, precision=6):
     return f"{abs(lat):.{precision}f}°{lat_dir}, {abs(lon):.{precision}f}°{lon_dir}"
 
 
-def calculate_bbox_area(min_lon, min_lat, max_lon, max_lat):
+# ------------------
+# Jinja2 Global Functions
+# that can be used in scheming formulas
+# IMPORTANT: When adding a new function,
+# be sure to add the function to the globals dict in create_jinja2_env
+@pass_context
+def calculate_bbox_area(
+    context: dict,
+    min_lon: float = None,
+    min_lat: float = None,
+    max_lon: float = None,
+    max_lat: float = None,
+) -> float:
     """Calculate approximate area of bounding box in square kilometers
+
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+        min_lon: Minimum longitude coordinate
+        min_lat: Minimum latitude coordinate
+        max_lon: Maximum longitude coordinate
+        max_lat: Maximum latitude coordinate
+
+    If the min/max coordinates are not provided, the spatial extent of the resource will be used if available
+    Otherwise, the min/max coordinates will be calculated from the latitude and longitude fields
+
+    Returns:
+        float: Area of the bounding box in square kilometers
 
     Example:
     {{ calculate_bbox_area(dpp.spatial_extent.min_lon, dpp.spatial_extent.min_lat, dpp.spatial_extent.max_lon, dpp.spatial_extent.max_lat) }}
@@ -284,24 +315,56 @@ def calculate_bbox_area(min_lon, min_lat, max_lon, max_lat):
     from math import radians, cos
 
     earth_radius = 6371  # km
+
+    if not min_lon or not min_lat or not max_lon or not max_lat:
+        bbox = context.get("resource").get("dpp_spatial_extent")
+        if bbox:
+            # get the min/max coordinates from the spatial extent
+            # which is in BoundingBox format
+            if bbox.get("type") != "BoundingBox":
+                # validate the spatial extent is a BoundingBox first
+                return None
+            else:
+                bbox_coords = bbox.get("coordinates")
+                min_lon = bbox_coords[0][0]
+                min_lat = bbox_coords[0][1]
+                max_lon = bbox_coords[1][0]
+                max_lat = bbox_coords[1][1]
+        elif context.get("dpp").get("NO_LAT_LON_FIELDS"):
+            return None
+        else:
+            lon_field = context.get("dpp").get("LON_FIELD")
+            lat_field = context.get("dpp").get("LAT_FIELD")
+            min_lon = context.get("dpps").get(lon_field).get("stats").get("min")
+            min_lat = context.get("dpps").get(lat_field).get("stats").get("min")
+            max_lon = context.get("dpps").get(lon_field).get("stats").get("max")
+            max_lat = context.get("dpps").get(lat_field).get("stats").get("max")
+
     width = abs(max_lon - min_lon) * cos(radians((min_lat + max_lat) / 2))
     height = abs(max_lat - min_lat)
     return width * height * (earth_radius**2)
 
 
-# ------------------
-# Jinja2 Functions
-# IMPORTANT: Be sure to add the function to the globals dict in create_jinja2_env
+@pass_context
 def spatial_extent_wkt(
-    min_lon: float, min_lat: float, max_lon: float, max_lat: float
+    context: dict,
+    min_lon: float = None,
+    min_lat: float = None,
+    max_lon: float = None,
+    max_lat: float = None,
 ) -> str:
     """Convert min/max WGS84 coordinates to WKT polygon format.
 
     Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
         min_lon: Minimum longitude coordinate
         min_lat: Minimum latitude coordinate
         max_lon: Maximum longitude coordinate
         max_lat: Maximum latitude coordinate
+
+    If the min/max coordinates are not provided, the spatial extent of the resource will be used if available
+    Otherwise, the min/max coordinates will be calculated from the latitude and longitude fields
 
     Returns:
         str: WKT polygon string representing the spatial extent
@@ -309,39 +372,104 @@ def spatial_extent_wkt(
     Example:
         >>> spatial_extent_wkt(-180, -90, 180, 90)
         'POLYGON((-180 -90, -180 90, 180 90, 180 -90, -180 -90))'
+        >>> spatial_extent_wkt()
+        'POLYGON((-180 -90, -180 90, 180 90, 180 -90, -180 -90))'
     """
+    if not min_lon or not min_lat or not max_lon or not max_lat:
+        bbox = context.get("resource").get("dpp_spatial_extent")
+        if bbox:
+            # get the min/max coordinates from the spatial extent
+            # which is in BoundingBox format
+            if bbox.get("type") != "BoundingBox":
+                # validate the spatial extent is a BoundingBox first
+                return None
+            else:
+                bbox_coords = bbox.get("coordinates")
+                min_lon = bbox_coords[0][0]
+                min_lat = bbox_coords[0][1]
+                max_lon = bbox_coords[1][0]
+                max_lat = bbox_coords[1][1]
+        elif context.get("dpp").get("NO_LAT_LON_FIELDS"):
+            return None
+        else:
+            lon_field = context.get("dpp").get("LON_FIELD")
+            lat_field = context.get("dpp").get("LAT_FIELD")
+            min_lon = context.get("dpps").get(lon_field).get("stats").get("min")
+            min_lat = context.get("dpps").get(lat_field).get("stats").get("min")
+            max_lon = context.get("dpps").get(lon_field).get("stats").get("max")
+            max_lat = context.get("dpps").get(lat_field).get("stats").get("max")
     # Create WKT polygon string from coordinates
     wkt = f"SRID=4326;POLYGON(({min_lon} {min_lat}, {min_lon} {max_lat}, {max_lon} {max_lat}, {max_lon} {min_lat}, {min_lon} {min_lat}))"
     return wkt
 
 
+@pass_context
 def spatial_extent_feature_collection(
-    name: str, bbox: list[float], type: str = "calculated"
+    context: dict,
+    name: str = "Inferred Spatial Extent",
+    bbox: list[float] = None,
+    type: str = "inferred",
 ) -> str:
     """Convert a bounding box to a namedGeoJSON feature collection.
 
     Args:
         name: Name of the feature
         bbox: List of floats representing the bounding box [min_lon, min_lat, max_lon, max_lat]
+              If the bbox is not provided, the spatial extent of the resource will be used if available
+              Otherwise, the bbox will be calculated from the latitude and longitude fields
         type: Type of the feature, defaults to "calculated"
 
     Returns:
         str: GeoJSON feature collection string
 
     Example:
-        >>> spatial_extent_feature_collection("User Drawn Polygon 1", "draw", [-180, -90, 180, 90])
-        '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"User Drawn Polygon 1","type":"draw"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
+        >>> spatial_extent_feature_collection()
+        '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"Inferred Spatial Extent","type":"inferred"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
+        >>> spatial_extent_feature_collection("User Provided Bounding Box", [-180, -90, 180, 90])
+        '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"User Provided Bounding Box","type":"calculated"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
+        >>> spatial_extent_feature_collection("Custom Name")
+        '{"type": "FeatureCollection", "features": [{"type": "Feature", "properties":{"name":"Custom Name","type":"inferred"}, "geometry": {"type": "Polygon", "coordinates": [[[-180, -90], [-180, 90], [180, 90], [180, -90], [-180, -90]]]}, "properties": {}}]}
     """
+    if bbox:
+        type = "calculated"
+        # validate bbox
+        if len(bbox) != 4:
+            return None
+        else:
+            bbox = [float(coord) for coord in bbox]
+    else:
+        if context.get("resource").get("dpp_spatial_extent"):
+            bbox = context.get("resource").get("dpp_spatial_extent").get("coordinates")
+        else:
+            if context.get("dpp").get("NO_LAT_LON_FIELDS"):
+                return None
+            else:
+                lat_field = context.get("dpp").get("LAT_FIELD")
+                lon_field = context.get("dpp").get("LON_FIELD")
+                if lat_field and lon_field:
+                    bbox = [
+                        context.get("dpps").get(lon_field).get("stats").get("min"),
+                        context.get("dpps").get(lat_field).get("stats").get("min"),
+                        context.get("dpps").get(lon_field).get("stats").get("max"),
+                        context.get("dpps").get(lat_field).get("stats").get("max"),
+                    ]
+                else:
+                    return None
+
     return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[[{bbox[0]},{bbox[1]}], [{bbox[0]},{bbox[3]}], [{bbox[2]},{bbox[3]}], [{bbox[2]},{bbox[1]}], [{bbox[0]},{bbox[1]}]]]}}}}]}}'
 
 
+@pass_context
 def get_frequency_top_values(
-    resource_fields_freqs: dict, field: str, count: int = 10
+    context: dict,
+    field: str,
+    count: int = 10,
 ) -> list[dict]:
     """Get the top values for a field from the frequency data.
 
     Args:
-        resource_fields_freqs: Dictionary containing frequency data for all fields
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
         field: The field to get the top values for
         count: The number of top values to return, defaults to 10
 
@@ -349,10 +477,15 @@ def get_frequency_top_values(
         List of dictionaries containing value, count and percentage for top values
 
     Example:
-    {{ get_frequency_top_values(dppf, 'record_id', 10) }} -> [{'value': '<ALL_UNIQUE>', 'count': 1000000, 'percentage': 100.0}]
+    {{ get_frequency_top_values('record_id', 10) }} -> [{'value': '<ALL_UNIQUE>', 'count': 1000000, 'percentage': 100.0}]
     """
-    if field not in resource_fields_freqs:
+    dppf = context.get("dppf")
+
+    if not dppf:
+        return []
+
+    if field not in dppf:
         return []
 
     # The data is already sorted by frequency in descending order from qsv frequency
-    return resource_fields_freqs[field][:count]
+    return dppf[field][:count]
