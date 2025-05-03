@@ -316,7 +316,7 @@ def calculate_bbox_area(
 
     earth_radius = 6371  # km
 
-    if not min_lon or not min_lat or not max_lon or not max_lat:
+    if min_lon is None or min_lat is None or max_lon is None or max_lat is None:
         bbox = context.get("resource").get("dpp_spatial_extent")
         if bbox:
             # get the min/max coordinates from the spatial extent
@@ -375,7 +375,7 @@ def spatial_extent_wkt(
         >>> spatial_extent_wkt()
         'POLYGON((-180 -90, -180 90, 180 90, 180 -90, -180 -90))'
     """
-    if not min_lon or not min_lat or not max_lon or not max_lat:
+    if min_lon is None or min_lat is None or max_lon is None or max_lat is None:
         bbox = context.get("resource").get("dpp_spatial_extent")
         if bbox:
             # get the min/max coordinates from the spatial extent
