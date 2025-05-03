@@ -33,7 +33,7 @@ def screen_for_pii(
         logger: Logger instance
 
     Returns:
-        tuple[bool, float]: Tuple containing (pii_found, piiscreening_elapsed)
+        bool: True if PII is found, False otherwise
     """
 
     pii_found_abort = conf.PII_FOUND_ABORT
