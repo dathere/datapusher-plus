@@ -159,3 +159,9 @@ LONGITUDE_FIELDS = tk.config.get(
     "ckanext.datapusher_plus.longitude_fields",
     "longitude,lon",
 )
+
+# Jinja2 bytecode cache settings
+JINJA2_BYTECODE_CACHE_DIR = tk.config.get(
+    "ckanext.datapusher_plus.jinja2_bytecode_cache_dir", "/tmp/jinja2_bytecode_cache"
+)
+

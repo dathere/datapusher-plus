@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict, Optional
-from jinja2 import DictLoader, Environment, pass_context
+from jinja2 import DictLoader, Environment, FileSystemBytecodeCache, pass_context
 
 import ckanext.datapusher_plus.config as conf
 
@@ -194,7 +195,15 @@ class FormulaProcessor:
 
     def create_jinja2_env(self, context: Dict[str, Any]) -> Environment:
         """Create a configured Jinja2 environment with all filters and globals."""
-        env = Environment(loader=DictLoader(context))
+
+        # We use a bytecode cache to speed up the rendering of the Formulas
+        # we do not use temp_dir defined in jobs.py because we want the cache
+        # to be persistent across datapusher runs
+        cache_dir = conf.JINJA2_BYTECODE_CACHE_DIR
+        os.makedirs(cache_dir, exist_ok=True)
+        bytecode_cache = FileSystemBytecodeCache(cache_dir)
+
+        env = Environment(loader=DictLoader(context), bytecode_cache=bytecode_cache)
 
         # Register filters
         for func in JINJA2_FILTERS:
