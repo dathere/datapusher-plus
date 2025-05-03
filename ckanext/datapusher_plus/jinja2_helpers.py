@@ -312,7 +312,7 @@ def calculate_bbox_area(
     {{ calculate_bbox_area(dpp.spatial_extent.min_lon, dpp.spatial_extent.min_lat, dpp.spatial_extent.max_lon, dpp.spatial_extent.max_lat) }}
     -> 1234.56
     """
-    from math import radians, cos
+    from math import radians, cos, pi
 
     earth_radius = 6371  # km
 
@@ -340,8 +340,9 @@ def calculate_bbox_area(
             max_lon = context.get("dpps").get(lon_field).get("stats").get("max")
             max_lat = context.get("dpps").get(lat_field).get("stats").get("max")
 
-    width = abs(max_lon - min_lon) * cos(radians((min_lat + max_lat) / 2))
-    height = abs(max_lat - min_lat)
+    # Convert degree differences to radians for accurate area calculation
+    width = abs(max_lon - min_lon) * (pi / 180) * cos(radians((min_lat + max_lat) / 2))
+    height = abs(max_lat - min_lat) * (pi / 180)
     return width * height * (earth_radius**2)
 
 
