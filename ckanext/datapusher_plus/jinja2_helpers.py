@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from jinja2 import DictLoader, Environment, pass_context
 
 import ckanext.datapusher_plus.config as conf
@@ -291,7 +291,7 @@ def calculate_bbox_area(
     min_lat: float = None,
     max_lon: float = None,
     max_lat: float = None,
-) -> float:
+) -> Optional[float]:
     """Calculate approximate area of bounding box in square kilometers
 
     Args:
@@ -352,7 +352,7 @@ def spatial_extent_wkt(
     min_lat: float = None,
     max_lon: float = None,
     max_lat: float = None,
-) -> str:
+) -> Optional[str]:
     """Convert min/max WGS84 coordinates to WKT polygon format.
 
     Args:
