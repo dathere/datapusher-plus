@@ -11,6 +11,7 @@ import logging
 from pathlib import Path
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.utils as utils
+from typing import Optional, Dict, Any, List, Union
 
 from ckanext.datapusher_plus.logging_utils import TRACE
 
@@ -25,7 +26,7 @@ class QSVCommand:
     error handling and logging.
     """
 
-    def __init__(self, logger=None):
+    def __init__(self, logger: Optional[logging.Logger] = None) -> None:
         """
         Initialize the QSVCommand class.
 
@@ -41,13 +42,13 @@ class QSVCommand:
 
     def _run_command(
         self,
-        args,
-        check=True,
-        capture_output=True,
-        text=True,
-        env=None,
-        uses_stdio=False,
-    ):
+        args: List[Union[str, Path]],
+        check: bool = True,
+        capture_output: bool = True,
+        text: bool = True,
+        env: Optional[Dict[str, str]] = None,
+        uses_stdio: bool = False,
+    ) -> Union[subprocess.CompletedProcess, Dict[str, Any], str]:
         """
         Run a qsv command with the given arguments.
 
@@ -91,7 +92,7 @@ class QSVCommand:
                     raise utils.JobError(error_msg)
             return e.stderr
 
-    def version(self):
+    def version(self) -> str:
         """
         Get the qsv version.
 
@@ -119,7 +120,7 @@ class QSVCommand:
 
         return version
 
-    def check_version(self):
+    def check_version(self) -> bool:
         """
         Check if the qsv version meets the minimum requirement.
 
@@ -144,7 +145,13 @@ class QSVCommand:
         except ValueError as e:
             raise utils.JobError(f"Cannot parse qsv version info: {e}")
 
-    def excel(self, input_file, sheet=0, trim=True, output_file=None):
+    def excel(
+        self,
+        input_file: str,
+        sheet: int = 0,
+        trim: bool = True,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Convert an Excel file to CSV.
 
@@ -171,8 +178,13 @@ class QSVCommand:
         return self._run_command(args)
 
     def geoconvert(
-        self, input_file, input_format, output_format, max_length=None, output_file=None
-    ):
+        self,
+        input_file: str,
+        input_format: str,
+        output_format: str,
+        max_length: Optional[int] = None,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Convert a spatial file to another format.
 
@@ -199,7 +211,12 @@ class QSVCommand:
 
         return self._run_command(args)
 
-    def input(self, input_file, trim_headers=True, output_file=None):
+    def input(
+        self,
+        input_file: str,
+        trim_headers: bool = True,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Normalize and transcode a CSV/TSV/TAB file to UTF-8.
 
@@ -224,7 +241,7 @@ class QSVCommand:
 
         return self._run_command(args)
 
-    def validate(self, input_file):
+    def validate(self, input_file: str) -> subprocess.CompletedProcess:
         """
         Validate a CSV file against RFC4180.
 
@@ -240,8 +257,12 @@ class QSVCommand:
         return self._run_command(["validate", input_file])
 
     def sortcheck(
-        self, input_file, json_output=False, capture_output=True, uses_stdio=False
-    ):
+        self,
+        input_file: str,
+        json_output: bool = False,
+        capture_output: bool = True,
+        uses_stdio: bool = False,
+    ) -> Union[subprocess.CompletedProcess, Dict[str, Any]]:
         """
         Check if a CSV file is sorted and has duplicates.
 
@@ -264,7 +285,9 @@ class QSVCommand:
             args, capture_output=capture_output, uses_stdio=uses_stdio
         )
 
-    def extdedup(self, input_file, output_file):
+    def extdedup(
+        self, input_file: str, output_file: str
+    ) -> subprocess.CompletedProcess:
         """
         Remove duplicate rows from a CSV file.
 
@@ -280,7 +303,9 @@ class QSVCommand:
         """
         return self._run_command(["extdedup", input_file, output_file])
 
-    def headers(self, input_file, just_names=False):
+    def headers(
+        self, input_file: str, just_names: bool = False
+    ) -> subprocess.CompletedProcess:
         """
         Get the headers of a CSV file.
 
@@ -303,13 +328,13 @@ class QSVCommand:
 
     def safenames(
         self,
-        input_file,
-        mode="json",
-        reserved=None,
-        prefix=None,
-        output_file=None,
-        uses_stdio=False,
-    ):
+        input_file: str,
+        mode: str = "json",
+        reserved: Optional[str] = None,
+        prefix: Optional[str] = None,
+        output_file: Optional[str] = None,
+        uses_stdio: bool = False,
+    ) -> Union[subprocess.CompletedProcess, Dict[str, Any]]:
         """
         Check and sanitize column names.
 
@@ -339,7 +364,7 @@ class QSVCommand:
 
         return self._run_command(args, uses_stdio=uses_stdio)
 
-    def index(self, input_file):
+    def index(self, input_file: str) -> subprocess.CompletedProcess:
         """
         Create an index for a CSV file.
 
@@ -354,7 +379,7 @@ class QSVCommand:
         """
         return self._run_command(["index", input_file])
 
-    def count(self, input_file):
+    def count(self, input_file: str) -> subprocess.CompletedProcess:
         """
         Count the number of rows in a CSV file.
 
@@ -371,16 +396,16 @@ class QSVCommand:
 
     def stats(
         self,
-        input_file,
-        typesonly=False,
-        infer_dates=True,
-        dates_whitelist="all",
-        stats_jsonl=False,
-        prefer_dmy=False,
-        cardinality=False,
-        summary_stats_options=None,
-        output_file=None,
-    ):
+        input_file: str,
+        typesonly: bool = False,
+        infer_dates: bool = True,
+        dates_whitelist: str = "all",
+        stats_jsonl: bool = False,
+        prefer_dmy: bool = False,
+        cardinality: bool = False,
+        summary_stats_options: Optional[str] = None,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Get statistics for a CSV file.
 
@@ -426,7 +451,12 @@ class QSVCommand:
 
         return self._run_command(args)
 
-    def frequency(self, input_file, limit=0, output_file=None):
+    def frequency(
+        self,
+        input_file: str,
+        limit: int = 0,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Get frequency statistics for a CSV file.
 
@@ -448,7 +478,13 @@ class QSVCommand:
 
         return self._run_command(args)
 
-    def slice(self, input_file, start=None, length=None, output_file=None):
+    def slice(
+        self,
+        input_file: str,
+        start: Optional[int] = None,
+        length: Optional[int] = None,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Slice a CSV file.
 
@@ -477,7 +513,13 @@ class QSVCommand:
 
         return self._run_command(args)
 
-    def datefmt(self, datecols, input_file, prefer_dmy=False, output_file=None):
+    def datefmt(
+        self,
+        datecols: str,
+        input_file: str,
+        prefer_dmy: bool = False,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Format dates in a CSV file.
 
@@ -505,15 +547,15 @@ class QSVCommand:
 
     def searchset(
         self,
-        regex_file,
-        input_file,
-        ignore_case=False,
-        quick=False,
-        flag=None,
-        flag_matches_only=False,
-        json_output=False,
-        output_file=None,
-    ):
+        regex_file: str,
+        input_file: str,
+        ignore_case: bool = False,
+        quick: bool = False,
+        flag: Optional[str] = None,
+        flag_matches_only: bool = False,
+        json_output: bool = False,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
         """
         Search a CSV file for patterns defined in a regex file.
 
@@ -556,8 +598,12 @@ class QSVCommand:
         return self._run_command(args)
 
     def save_stats_to_datastore(
-        self, stats_csv_file, resource_id, datastore_write_url, logger=None
-    ):
+        self,
+        stats_csv_file: str,
+        resource_id: str,
+        datastore_write_url: str,
+        logger: Optional[logging.Logger] = None,
+    ) -> bool:
         """
         Save statistics from a CSV file to the datastore.
 
@@ -653,8 +699,12 @@ class QSVCommand:
         return True
 
     def save_freq_to_datastore(
-        self, freq_csv_file, resource_id, datastore_write_url, logger=None
-    ):
+        self,
+        freq_csv_file: str,
+        resource_id: str,
+        datastore_write_url: str,
+        logger: Optional[logging.Logger] = None,
+    ) -> Dict[str, List[Dict[str, Any]]]:
         """
         Save frequency data from a CSV file to the datastore.
 
