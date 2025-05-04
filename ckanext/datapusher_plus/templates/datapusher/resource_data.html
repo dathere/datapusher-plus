@@ -74,7 +74,7 @@
           {% for line in item.message.strip().split('\n') %}
             {{ line | urlize }}<br />
           {% endfor %}
-          <span class="date" title="{{ h.render_datetime(item.timestamp, with_hours=True) }}">
+          <span class="date" title="{{ h.render_datetime(item.timestamp, with_hours=True, with_seconds=True) }}">
             {{ h.time_ago_from_timestamp(item.timestamp) }}
             <a href="#" data-module="datapusher_popover" data-module-title="Details <a href='#' class='popover-close'>X</a>" data-module-content="<ul class='list-unstyled'>{% for key, value in item.items() %}<li><b>{{ key }}</b>: {{ h.clean_html(value|string) }}</li>{% endfor %}</ul>">              
               {{ _('Details') }}
