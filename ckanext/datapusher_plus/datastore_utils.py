@@ -14,7 +14,7 @@ import ckanext.datapusher_plus.utils as utils
 class DatastoreEncoder(json.JSONEncoder):
     """Custom JSON encoder for datastore values."""
 
-    def default(self, obj):
+    def default(self, obj: object) -> object:
         if isinstance(obj, datetime.datetime):
             return obj.isoformat()
         if isinstance(obj, decimal.Decimal):
@@ -22,7 +22,7 @@ class DatastoreEncoder(json.JSONEncoder):
         return json.JSONEncoder.default(self, obj)
 
 
-def delete_datastore_resource(resource_id):
+def delete_datastore_resource(resource_id: str) -> None:
     """Delete a resource from datastore."""
     try:
         tk.get_action("datastore_delete")(
@@ -32,7 +32,7 @@ def delete_datastore_resource(resource_id):
         raise utils.JobError("Deleting existing datastore failed.")
 
 
-def delete_resource(resource_id):
+def delete_resource(resource_id: str) -> None:
     """Delete a resource from CKAN."""
     try:
         tk.get_action("resource_delete")(
@@ -42,7 +42,7 @@ def delete_resource(resource_id):
         raise utils.JobError("Deleting existing resource failed.")
 
 
-def datastore_resource_exists(resource_id):
+def datastore_resource_exists(resource_id: str) -> dict:
     """Check if a resource exists in datastore."""
     data_dict = {
         "resource_id": resource_id,
@@ -56,12 +56,17 @@ def datastore_resource_exists(resource_id):
         result = tk.get_action("datastore_search")(context, data_dict)
         return result
     except tk.ObjectNotFound:
-        return False
+        return None
 
 
 def send_resource_to_datastore(
-    resource, resource_id, headers, records, aliases, calculate_record_count
-):
+    resource: dict,
+    resource_id: str,
+    headers: list,
+    records: list,
+    aliases: list,
+    calculate_record_count: bool,
+) -> dict:
     """Store records in CKAN datastore."""
     if resource_id:
         # used to create the "main" resource
@@ -91,7 +96,7 @@ def send_resource_to_datastore(
         raise utils.JobError("Error sending data to datastore ({!s}).".format(e))
 
 
-def upload_resource(new_resource, file):
+def upload_resource(new_resource: dict, file: str) -> None:
     """Upload a new resource to CKAN."""
     site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
     context = {
@@ -109,7 +114,7 @@ def upload_resource(new_resource, file):
             raise utils.JobError("Creating resource failed.")
 
 
-def update_resource(resource):
+def update_resource(resource: dict) -> None:
     """Update resource metadata."""
     site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
     context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
@@ -119,7 +124,7 @@ def update_resource(resource):
         raise utils.JobError("Updating existing resource failed.")
 
 
-def get_resource(resource_id):
+def get_resource(resource_id: str) -> dict:
     """Get available information about the resource from CKAN."""
     resource_dict = tk.get_action("resource_show")(
         {"ignore_auth": True}, {"id": resource_id}
@@ -127,7 +132,7 @@ def get_resource(resource_id):
     return resource_dict
 
 
-def get_package(package_id):
+def get_package(package_id: str) -> dict:
     """Get available information about a package from CKAN."""
     dataset_dict = tk.get_action("package_show")(
         {"ignore_auth": True}, {"id": package_id}
@@ -135,7 +140,7 @@ def get_package(package_id):
     return dataset_dict
 
 
-def resource_exists(package_id, resource_name):
+def resource_exists(package_id: str, resource_name: str) -> tuple[bool, str | None]:
     """
     Check if a resource name exists in a package.
     Returns:
@@ -151,7 +156,7 @@ def resource_exists(package_id, resource_name):
     return False, None
 
 
-def patch_package(package):
+def patch_package(package: dict) -> dict:
     """Patch package metadata."""
     site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
     context = {"ignore_auth": True, "user": site_user["name"], "auth_user_obj": None}
@@ -159,7 +164,13 @@ def patch_package(package):
     return patched_package
 
 
-def revise_package(package_id, match=None, filter=None, update=None, include=None):
+def revise_package(
+    package_id: str,
+    match: dict | None = None,
+    filter: list | None = None,
+    update: dict | None = None,
+    include: list | None = None,
+) -> dict:
     """
     Revise package metadata using the package_revise action API.
 
@@ -196,7 +207,9 @@ def revise_package(package_id, match=None, filter=None, update=None, include=Non
     return revised_package
 
 
-def get_scheming_yaml(package_id, scheming_yaml_type="dataset"):
+def get_scheming_yaml(
+    package_id: str, scheming_yaml_type: str = "dataset"
+) -> tuple[dict, dict]:
     """Get the scheming yaml for a package."""
     package = get_package(package_id)
     if not package:
