@@ -40,6 +40,12 @@ class QSVCommand:
         if not Path(self.qsv_bin).is_file():
             raise utils.JobError(f"{self.qsv_bin} not found.")
 
+        # Check qsv version
+        try:
+            self.check_version()
+        except utils.JobError as e:
+            raise utils.JobError(f"qsv version check failed: {e}")
+
     def _run_command(
         self,
         args: List[Union[str, Path]],

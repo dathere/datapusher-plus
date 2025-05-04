@@ -185,12 +185,6 @@ def _push_to_datastore(
     # Initialize QSVCommand
     qsv = QSVCommand(logger=logger)
 
-    # Check qsv version
-    try:
-        qsv.check_version()
-    except utils.JobError as e:
-        raise utils.JobError(f"qsv version check error: {e}")
-
     validate_input(input)
 
     data = input["metadata"]
@@ -385,6 +379,8 @@ def _push_to_datastore(
     # 1) its type inferences are bullet-proof not guesses as it scans the entire file,
     # 2) its super-fast, and
     # 3) it has addl data-wrangling capabilities we use in DP+ (e.g. stats, dedup, etc.)
+    dupe_count = 0
+    record_count = 0
     analysis_start = time.perf_counter()
     logger.info("ANALYZING WITH QSV..")
 
