@@ -621,79 +621,78 @@ class QSVCommand:
         logger = logger or self.logger
         stats_table = sql.Identifier(resource_id + "-druf-stats")
 
-        try:
-            raw_connection_statsfreq = psycopg2.connect(datastore_write_url)
-        except psycopg2.Error as e:
-            raise utils.JobError("Could not connect to the Datastore: {}".format(e))
-
-        cur_statsfreq = raw_connection_statsfreq.cursor()
-
-        # Create stats table based on qsv stats CSV structure
-        cur_statsfreq.execute(
-            sql.SQL(
-                """
-                DROP TABLE IF EXISTS {};
-                CREATE TABLE {} (
-                    field TEXT,
-                    type TEXT,
-                    is_ascii BOOLEAN,
-                    sum TEXT,
-                    min TEXT,
-                    max TEXT,
-                    range TEXT,
-                    sort_order TEXT,
-                    sortiness FLOAT,
-                    min_length INTEGER,
-                    max_length INTEGER,
-                    sum_length INTEGER,
-                    avg_length FLOAT,
-                    stddev_length FLOAT,
-                    variance_length FLOAT,
-                    cv_length FLOAT,
-                    mean TEXT,
-                    sem FLOAT,
-                    geometric_mean FLOAT,
-                    harmonic_mean FLOAT,
-                    stddev FLOAT,
-                    variance FLOAT,
-                    cv FLOAT,
-                    nullcount INTEGER,
-                    max_precision INTEGER,
-                    sparsity FLOAT,
-                    cardinality INTEGER,
-                    uniqueness_ratio FLOAT
+        with psycopg2.connect(datastore_write_url) as raw_connection_statsfreq:
+            with raw_connection_statsfreq.cursor() as cur_statsfreq:
+                # Create stats table based on qsv stats CSV structure
+                cur_statsfreq.execute(
+                    sql.SQL(
+                        """
+                        DROP TABLE IF EXISTS {};
+                        CREATE TABLE {} (
+                            field TEXT,
+                            type TEXT,
+                            is_ascii BOOLEAN,
+                            sum TEXT,
+                            min TEXT,
+                            max TEXT,
+                            range TEXT,
+                            sort_order TEXT,
+                            sortiness FLOAT,
+                            min_length INTEGER,
+                            max_length INTEGER,
+                            sum_length INTEGER,
+                            avg_length FLOAT,
+                            stddev_length FLOAT,
+                            variance_length FLOAT,
+                            cv_length FLOAT,
+                            mean TEXT,
+                            sem FLOAT,
+                            geometric_mean FLOAT,
+                            harmonic_mean FLOAT,
+                            stddev FLOAT,
+                            variance FLOAT,
+                            cv FLOAT,
+                            nullcount INTEGER,
+                            max_precision INTEGER,
+                            sparsity FLOAT,
+                            cardinality INTEGER,
+                            uniqueness_ratio FLOAT
+                        )
+                    """
+                    ).format(stats_table, stats_table)
                 )
-            """
-            ).format(stats_table, stats_table)
-        )
 
-        # Load stats CSV directly using COPY
-        copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
-            stats_table
-        )
+                # Load stats CSV directly using COPY
+                copy_sql = sql.SQL(
+                    "COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)"
+                ).format(stats_table)
 
-        # Copy stats CSV to /tmp directory for debugging purposes
-        if logger.isEnabledFor(TRACE):
-            try:
-                debug_stats_path = os.path.join(
-                    "/tmp", os.path.basename(stats_csv_file)
-                )
-                shutil.copy2(stats_csv_file, debug_stats_path)
-                logger.trace(f"Copied stats CSV to {debug_stats_path} for debugging")
-            except Exception as e:
-                logger.trace(f"Failed to copy stats CSV to /tmp for debugging: {e}")
+                # Copy stats CSV to /tmp directory for debugging purposes
+                if logger.isEnabledFor(TRACE):
+                    try:
+                        debug_stats_path = os.path.join(
+                            "/tmp", os.path.basename(stats_csv_file)
+                        )
+                        shutil.copy2(stats_csv_file, debug_stats_path)
+                        logger.trace(
+                            f"Copied stats CSV to {debug_stats_path} for debugging"
+                        )
+                    except Exception as e:
+                        logger.trace(
+                            f"Failed to copy stats CSV to /tmp for debugging: {e}"
+                        )
 
-        try:
-            with open(stats_csv_file, "r") as f:
-                cur_statsfreq.copy_expert(copy_sql, f)
-        except IOError as e:
-            raise utils.JobError("Could not open stats CSV file: {}".format(e))
-        except psycopg2.Error as e:
-            raise utils.JobError("Could not copy stats data to database: {}".format(e))
+                try:
+                    with open(stats_csv_file, "r") as f:
+                        cur_statsfreq.copy_expert(copy_sql, f)
+                except IOError as e:
+                    raise utils.JobError("Could not open stats CSV file: {}".format(e))
+                except psycopg2.Error as e:
+                    raise utils.JobError(
+                        "Could not copy stats data to database: {}".format(e)
+                    )
 
-        raw_connection_statsfreq.commit()
-        cur_statsfreq.close()
-        raw_connection_statsfreq.close()
+            raw_connection_statsfreq.commit()
 
         return True
 
@@ -722,76 +721,81 @@ class QSVCommand:
         logger = logger or self.logger
         freq_table = sql.Identifier(resource_id + "-druf-freq")
 
-        try:
-            raw_connection_freq = psycopg2.connect(datastore_write_url)
-        except psycopg2.Error as e:
-            raise utils.JobError("Could not connect to the Datastore: {}".format(e))
-
-        cur_freq = raw_connection_freq.cursor()
-
-        # Create frequency table based on qsv frequency CSV structure
-        cur_freq.execute(
-            sql.SQL(
-                """
-                DROP TABLE IF EXISTS {};
-                CREATE TABLE {} (
-                    field TEXT,
-                    value TEXT,
-                    count INTEGER,
-                    percentage FLOAT,
-                    PRIMARY KEY (field, value, count)
+        with psycopg2.connect(datastore_write_url) as raw_connection_freq:
+            with raw_connection_freq.cursor() as cur_freq:
+                # Create frequency table based on qsv frequency CSV structure
+                cur_freq.execute(
+                    sql.SQL(
+                        """
+                        DROP TABLE IF EXISTS {};
+                        CREATE TABLE {} (
+                            field TEXT,
+                            value TEXT,
+                            count INTEGER,
+                            percentage FLOAT,
+                            PRIMARY KEY (field, value, count)
+                        )
+                    """
+                    ).format(freq_table, freq_table)
                 )
-            """
-            ).format(freq_table, freq_table)
-        )
 
-        # Copy frequency CSV to /tmp directory for debugging purposes
-        if logger.isEnabledFor(TRACE):
-            try:
-                debug_freq_path = os.path.join("/tmp", os.path.basename(freq_csv_file))
-                shutil.copy2(freq_csv_file, debug_freq_path)
-                logger.trace(f"Copied frequency CSV to {debug_freq_path} for debugging")
-            except Exception as e:
-                logger.trace(f"Failed to copy frequency CSV to /tmp for debugging: {e}")
+                # Copy frequency CSV to /tmp directory for debugging purposes
+                if logger.isEnabledFor(TRACE):
+                    try:
+                        debug_freq_path = os.path.join(
+                            "/tmp", os.path.basename(freq_csv_file)
+                        )
+                        shutil.copy2(freq_csv_file, debug_freq_path)
+                        logger.trace(
+                            f"Copied frequency CSV to {debug_freq_path} for debugging"
+                        )
+                    except Exception as e:
+                        logger.trace(
+                            f"Failed to copy frequency CSV to /tmp for debugging: {e}"
+                        )
 
-        # load the frequency table using COPY
-        copy_sql = sql.SQL("COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)").format(
-            freq_table
-        )
+                # load the frequency table using COPY
+                copy_sql = sql.SQL(
+                    "COPY {} FROM STDIN WITH (FORMAT CSV, HEADER TRUE)"
+                ).format(freq_table)
 
-        resource_fields_freqs = {}
-        try:
-            with open(freq_csv_file, "r") as f:
-                reader = csv.DictReader(f)
-                for row in reader:
-                    field = row["field"]
-                    value = row["value"]
-                    count = row["count"]
-                    percentage = row["percentage"]
+                resource_fields_freqs = {}
+                try:
+                    with open(freq_csv_file, "r") as f:
+                        reader = csv.DictReader(f)
+                        for row in reader:
+                            field = row["field"]
+                            value = row["value"]
+                            count = row["count"]
+                            percentage = row["percentage"]
 
-                    # Initialize list for field if it doesn't exist
-                    if field not in resource_fields_freqs:
-                        resource_fields_freqs[field] = []
+                            # Initialize list for field if it doesn't exist
+                            if field not in resource_fields_freqs:
+                                resource_fields_freqs[field] = []
 
-                    # Append the frequency data as a dict to the field's list
-                    resource_fields_freqs[field].append(
-                        {"value": value, "count": count, "percentage": percentage}
+                            # Append the frequency data as a dict to the field's list
+                            resource_fields_freqs[field].append(
+                                {
+                                    "value": value,
+                                    "count": count,
+                                    "percentage": percentage,
+                                }
+                            )
+
+                        logger.trace(f"Resource fields freqs: {resource_fields_freqs}")
+
+                        # Rewind file for COPY operation
+                        f.seek(0)
+                        cur_freq.copy_expert(copy_sql, f)
+                except IOError as e:
+                    raise utils.JobError(
+                        "Could not open frequency CSV file: {}".format(e)
+                    )
+                except psycopg2.Error as e:
+                    raise utils.JobError(
+                        "Could not copy frequency data to database: {}".format(e)
                     )
 
-                logger.trace(f"Resource fields freqs: {resource_fields_freqs}")
-
-                # Rewind file for COPY operation
-                f.seek(0)
-                cur_freq.copy_expert(copy_sql, f)
-        except IOError as e:
-            raise utils.JobError("Could not open frequency CSV file: {}".format(e))
-        except psycopg2.Error as e:
-            raise utils.JobError(
-                "Could not copy frequency data to database: {}".format(e)
-            )
-
-        raw_connection_freq.commit()
-        cur_freq.close()
-        raw_connection_freq.close()
+                raw_connection_freq.commit()
 
         return resource_fields_freqs
