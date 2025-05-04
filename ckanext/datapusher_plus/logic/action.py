@@ -10,7 +10,7 @@ import json
 import datetime
 
 from dateutil.parser import parse as parse_date
-from six.moves.urllib.parse import urljoin
+from six.moves.urllib.parse import urljoin  # type: ignore # noqa
 
 import ckan.lib.helpers as h
 import ckan.lib.navl.dictization_functions
