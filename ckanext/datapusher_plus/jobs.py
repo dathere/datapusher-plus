@@ -323,7 +323,10 @@ def _push_to_datastore(
         )
     except requests.RequestException as e:
         raise HTTPError(
-            message=str(e), status_code=None, request_url=resource_url, response=None
+            message=str(e),
+            status_code=None,
+            request_url=resource_url,
+            response=None,
         )
 
     file_hash = m.hexdigest()
@@ -427,7 +430,8 @@ def _push_to_datastore(
         logger.info("SHAPEFILE or GEOJSON file detected...")
 
         qsv_spatial_file = os.path.join(
-            temp_dir, "qsv_spatial_" + str(uuid.uuid4()) + "." + resource_format
+            temp_dir,
+            "qsv_spatial_" + str(uuid.uuid4()) + "." + resource_format,
         )
         os.link(tmp, qsv_spatial_file)
         qsv_spatial_csv = os.path.join(temp_dir, "qsv_spatial.csv")
@@ -492,7 +496,10 @@ def _push_to_datastore(
                                 {
                                     "dpp_spatial_extent": {
                                         "type": "BoundingBox",
-                                        "coordinates": [[minx, miny], [maxx, maxy]],
+                                        "coordinates": [
+                                            [minx, miny],
+                                            [maxx, maxy],
+                                        ],
                                     }
                                 }
                             )
@@ -980,7 +987,10 @@ def _push_to_datastore(
         )
         try:
             qsv.datefmt(
-                datecols, tmp, prefer_dmy=conf.PREFER_DMY, output_file=qsv_applydp_csv
+                datecols,
+                tmp,
+                prefer_dmy=conf.PREFER_DMY,
+                output_file=qsv_applydp_csv,
             )
         except utils.JobError as e:
             raise utils.JobError(f"Applydp error: {e}")
