@@ -17,7 +17,7 @@ import sys
 import json
 import requests
 from pathlib import Path
-from typing import Dict, Any, Optional, Union, List, Tuple, TypeVar, cast
+from typing import Dict, Any, Optional, List
 
 # Third-party imports
 import psycopg2
@@ -516,6 +516,9 @@ def _push_to_datastore(
                             )
 
                         dsu.upload_resource(new_simplified_resource, qsv_spatial_file)
+
+                        # delete the simplified spatial file
+                        os.remove(qsv_spatial_file)
 
                     simplification_failed_flag = False
                 else:
