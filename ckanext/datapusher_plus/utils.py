@@ -29,7 +29,9 @@ class StoringHandler(logging.Handler):
         funcName = str(record.funcName)
         job_log = Logs(
             job_id=self.task_id,
-            timestamp=datetime.datetime.now(),
+            # this needs to be a naive datetime, and utcnow() is deprecated and its
+            # replacement is not naive, so we need to remove the tzinfo
+            timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             message=message,
             level=level,
             module=module,
