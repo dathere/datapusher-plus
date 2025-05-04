@@ -137,6 +137,12 @@ Without an index, it takes 1.3 seconds.
       Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what
       caused the job to fail! YIKES!!!!
 
+## Requirements:
+Datapusher+ requires:
+* CKAN 2.10
+* Python 3.10
+* tested and developed on Ubuntu 22.04.5
+
 ## Development Installation
 
 Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN, and will be available as a CKAN plugin. This will allow for easier integration with CKAN and other CKAN extensions.
