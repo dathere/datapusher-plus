@@ -103,7 +103,7 @@ def datapusher_plus_to_datastore(input: Dict[str, Any]) -> Optional[str]:
         job_dict["status"] = "error"
         job_dict["error"] = str(e)
         log = logging.getLogger(__name__)
-        log.error("Datapusher Plus error: {0}, {1}".format(e, traceback.format_exc()))
+        log.error(f"Datapusher Plus error: {e}, {traceback.format_exc()}")
         errored = True
     except Exception as e:
         dph.mark_job_as_errored(
@@ -112,7 +112,7 @@ def datapusher_plus_to_datastore(input: Dict[str, Any]) -> Optional[str]:
         job_dict["status"] = "error"
         job_dict["error"] = str(e)
         log = logging.getLogger(__name__)
-        log.error("Datapusher Plus error: {0}, {1}".format(e, traceback.format_exc()))
+        log.error(f"Datapusher Plus error: {e}, {traceback.format_exc()}")
         errored = True
     finally:
         # job_dict is defined in datapusher_hook's docstring
@@ -180,7 +180,7 @@ def _push_to_datastore(
 
     # check if conf.QSV_BIN exists
     if not Path(conf.QSV_BIN).is_file():
-        raise utils.JobError("{} not found.".format(conf.QSV_BIN))
+        raise utils.JobError(f"{conf.QSV_BIN} not found.")
 
     # Initialize QSVCommand
     qsv = QSVCommand(logger=logger)
@@ -222,7 +222,7 @@ def _push_to_datastore(
     dataset_stats = {}
 
     # fetch the resource data
-    logger.info("Fetching from: {0}...".format(resource_url))
+    logger.info(f"Fetching from: {resource_url}...")
     headers: Dict[str, str] = {}
     if resource.get("url_type") == "upload":
         # If this is an uploaded file to CKAN, authenticate the request,
@@ -239,7 +239,7 @@ def _push_to_datastore(
                 scheme=rewrite_url.scheme, netloc=rewrite_url.netloc
             )
             resource_url = new_url.geturl()
-            logger.info("Rewritten resource url to: {0}".format(resource_url))
+            logger.info(f"Rewritten resource url to: {resource_url}")
 
     try:
         kwargs: Dict[str, Any] = {
@@ -253,6 +253,7 @@ def _push_to_datastore(
                 "http": conf.DOWNLOAD_PROXY,
                 "https": conf.DOWNLOAD_PROXY,
             }
+        logger.trace(f"kwargs: {kwargs}")
         with requests.get(resource_url, **kwargs) as response:
             response.raise_for_status()
 
@@ -263,10 +264,7 @@ def _push_to_datastore(
             try:
                 if cl and int(cl) > max_content_length and conf.PREVIEW_ROWS > 0:
                     raise utils.JobError(
-                        "Resource too large to download: {cl:.2MB} > max ({max_cl:.2MB}).".format(
-                            cl=DataSize(int(cl)),
-                            max_cl=DataSize(int(max_content_length)),
-                        )
+                        f"Resource too large to download: {DataSize(int(cl)):.2MB} > max ({DataSize(int(max_content_length)):.2MB})."
                     )
             except ValueError:
                 pass
@@ -284,13 +282,13 @@ def _push_to_datastore(
                         raise utils.JobError(
                             "Cannot determine format from mime type. Please specify format."
                         )
-                    logger.info("Inferred file format: {}".format(resource_format))
+                    logger.info(f"Inferred file format: {resource_format}")
                 else:
                     raise utils.JobError(
                         "Server did not return content-type. Please specify format."
                     )
             else:
-                logger.info("File format: {}".format(resource_format))
+                logger.info(f"File format: {resource_format}")
 
             tmp = os.path.join(temp_dir, "tmp." + resource_format)
             length = 0
@@ -300,7 +298,7 @@ def _push_to_datastore(
 
             # download the file
             if cl:
-                logger.info("Downloading {:.2MB} file...".format(DataSize(int(cl))))
+                logger.info(f"Downloading {DataSize(int(cl)):.2MB} file...")
             else:
                 logger.info("Downloading file of unknown size...")
 
@@ -309,17 +307,16 @@ def _push_to_datastore(
                     length += len(chunk)
                     if length > max_content_length and not conf.PREVIEW_ROWS:
                         raise utils.JobError(
-                            "Resource too large to process: {cl} > max ({max_cl}).".format(
-                                cl=length, max_cl=max_content_length
-                            )
+                            f"Resource too large to process: {length} > max ({max_content_length})."
                         )
                     tmp_file.write(chunk)
                     m.update(chunk)
 
     except requests.HTTPError as e:
         raise HTTPError(
-            "DataPusher+ received a bad HTTP response when trying to download "
-            "the data file",
+            f"DataPusher+ received a bad HTTP response when trying to download "
+            f"the data file from {resource_url}. Status code: {e.response.status_code}, "
+            f"Response content: {e.response.content}",
             status_code=e.response.status_code,
             request_url=resource_url,
             response=e.response.content,
@@ -350,20 +347,14 @@ def _push_to_datastore(
         and not conf.IGNORE_FILE_HASH
         and not resource_updated
     ):
-        logger.warning(
-            "Upload skipped as the file hash hasn't changed: {hash}.".format(
-                hash=file_hash
-            )
-        )
+        logger.warning(f"Upload skipped as the file hash hasn't changed: {file_hash}.")
         return
 
     resource["hash"] = file_hash
 
     fetch_elapsed = time.perf_counter() - timer_start
     logger.info(
-        "Fetched {:.2MB} file in {:,.2f} seconds.".format(
-            DataSize(length), fetch_elapsed
-        )
+        f"Fetched {DataSize(length):.2MB} file in {fetch_elapsed:,.2f} seconds."
     )
 
     # Check if the file is a zip file
@@ -378,11 +369,9 @@ def _push_to_datastore(
             logger.error("ZIP file invalid or no files found in ZIP file.")
             return
         logger.info(
-            "More than one file in the ZIP file ({} files), saving metadata...".format(
-                file_count
-            )
+            f"More than one file in the ZIP file ({file_count} files), saving metadata..."
             if file_count > 1
-            else "Extracted {} file: {}".format(unzipped_format, extracted_path)
+            else f"Extracted {unzipped_format} file: {extracted_path}"
         )
         tmp = extracted_path
 
@@ -410,9 +399,7 @@ def _push_to_datastore(
         # if so, export spreadsheet as a CSV file
         default_excel_sheet = conf.DEFAULT_EXCEL_SHEET
         file_format = unzipped_format if unzipped_format != "" else file_format
-        logger.info(
-            "Converting {} sheet {} to CSV...".format(file_format, default_excel_sheet)
-        )
+        logger.info(f"Converting {file_format} sheet {default_excel_sheet} to CSV...")
         # first, we need a temporary spreadsheet filename with the right file extension
         # we only need the filename though, that's why we remove it
         # and create a hardlink to the file we got from CKAN
@@ -431,10 +418,10 @@ def _push_to_datastore(
             )
         except utils.JobError as e:
             raise utils.JobError(
-                "Upload aborted. Cannot export spreadsheet(?) to CSV: {}".format(e)
+                f"Upload aborted. Cannot export spreadsheet(?) to CSV: {e}"
             )
         excel_export_msg = qsv_excel.stderr
-        logger.info("{}...".format(excel_export_msg))
+        logger.info(f"{excel_export_msg}...")
         tmp = qsv_excel_csv
     elif resource_format.upper() in ["SHP", "QGIS", "GEOJSON"]:
         logger.info("SHAPEFILE or GEOJSON file detected...")
@@ -448,9 +435,7 @@ def _push_to_datastore(
         if conf.AUTO_SPATIAL_SIMPLIFICATION:
             # Try to convert spatial file to CSV using spatial_helpers
             logger.info(
-                "Converting spatial file to CSV with a simplification relative tolerance of {}...".format(
-                    conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE
-                )
+                f"Converting spatial file to CSV with a simplification relative tolerance of {conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE}..."
             )
 
             try:
@@ -529,9 +514,7 @@ def _push_to_datastore(
             except Exception as e:
                 logger.warning(f"Simplification and conversion failed: {str(e)}")
                 logger.warning(
-                    "Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {} characters...".format(
-                        conf.QSV_STATS_STRING_MAX_LENGTH
-                    )
+                    f"Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {conf.QSV_STATS_STRING_MAX_LENGTH} characters..."
                 )
                 simplification_failed_flag = True
                 pass
@@ -567,12 +550,10 @@ def _push_to_datastore(
         qsv_input_csv = os.path.join(temp_dir, "qsv_input.csv")
         # if resource_format is CSV we don't need to normalize
         if resource_format.upper() == "CSV":
-            logger.info("Normalizing/UTF-8 transcoding {}...".format(resource_format))
+            logger.info(f"Normalizing/UTF-8 transcoding {resource_format}...")
         else:
             # if not CSV (e.g. TSV, TAB, etc.) we need to normalize to CSV
-            logger.info(
-                "Normalizing/UTF-8 transcoding {} to CSV...".format(resource_format)
-            )
+            logger.info(f"Normalizing/UTF-8 transcoding {resource_format} to CSV...")
 
         qsv_input_utf_8_encoded_csv = os.path.join(
             temp_dir, "qsv_input_utf_8_encoded.csv"
@@ -585,7 +566,7 @@ def _push_to_datastore(
             capture_output=True,
             text=True,
         )
-        logger.info("Identified encoding of the file: {}".format(file_encoding.stdout))
+        logger.info(f"Identified encoding of the file: {file_encoding.stdout}")
 
         # trim the encoding string
         file_encoding.stdout = file_encoding.stdout.strip()
@@ -593,9 +574,7 @@ def _push_to_datastore(
         # using iconv to re-encode in UTF-8 OR ASCII (as ASCII is a subset of UTF-8)
         if file_encoding.stdout != "UTF-8" and file_encoding.stdout != "ASCII":
             logger.info(
-                "File is not UTF-8 encoded. Re-encoding from {} to UTF-8".format(
-                    file_encoding.stdout
-                )
+                f"File is not UTF-8 encoded. Re-encoding from {file_encoding.stdout} to UTF-8"
             )
             try:
                 cmd = subprocess.run(
@@ -625,7 +604,7 @@ def _push_to_datastore(
             qsv.input(tmp, trim_headers=True, output_file=qsv_input_csv)
         except utils.JobError as e:
             raise utils.JobError(
-                "Job aborted as the file cannot be normalized/transcoded: {}.".format(e)
+                f"Job aborted as the file cannot be normalized/transcoded: {e}."
             )
         tmp = qsv_input_csv
         logger.info("Normalized & transcoded...")
@@ -691,16 +670,16 @@ def _push_to_datastore(
     # --------------- Do we need to dedup? ------------------
     if conf.DEDUP and dupe_count > 0:
         qsv_dedup_csv = os.path.join(temp_dir, "qsv_dedup.csv")
-        logger.info("{:.} duplicate rows found. Deduping...".format(dupe_count))
+        logger.info(f"{dupe_count} duplicate rows found. Deduping...")
 
         try:
             qsv.extdedup(tmp, qsv_dedup_csv)
         except utils.JobError as e:
-            raise utils.JobError("Check for duplicates error: {}".format(e))
+            raise utils.JobError(f"Check for duplicates error: {e}")
 
         dataset_stats["DEDUPED"] = True
         tmp = qsv_dedup_csv
-        logger.info("Deduped CSV saved to {}".format(qsv_dedup_csv))
+        logger.info(f"Deduped CSV saved to {qsv_dedup_csv}")
     else:
         dataset_stats["DEDUPED"] = False
 
@@ -710,7 +689,7 @@ def _push_to_datastore(
     try:
         qsv_headers = qsv.headers(tmp, just_names=True)
     except utils.JobError as e:
-        raise utils.JobError("Cannot scan CSV headers: {}".format(e))
+        raise utils.JobError(f"Cannot scan CSV headers: {e}")
     original_headers = str(qsv_headers.stdout).strip()
     original_header_dict = {
         idx: ele for idx, ele in enumerate(original_headers.splitlines())
@@ -729,16 +708,14 @@ def _push_to_datastore(
             uses_stdio=True,
         )
     except utils.JobError as e:
-        raise utils.JobError("Cannot scan CSV headers: {}".format(e))
+        raise utils.JobError(f"Cannot scan CSV headers: {e}")
 
     unsafe_json = json.loads(str(qsv_safenames.stdout))
     unsafe_headers = unsafe_json["unsafe_headers"]
 
     if unsafe_headers:
         logger.info(
-            '"{} unsafe" header names found ({}). Sanitizing..."'.format(
-                len(unsafe_headers), unsafe_headers
-            )
+            f'"{len(unsafe_headers)} unsafe" header names found ({unsafe_headers}). Sanitizing..."'
         )
         qsv_safenames = qsv.safenames(
             tmp, mode="conditional", output_file=qsv_safenames_csv
@@ -756,7 +733,7 @@ def _push_to_datastore(
         qsv_index_file = tmp + ".idx"
         qsv.index(tmp)
     except utils.JobError as e:
-        raise utils.JobError("Cannot index CSV: {}".format(e))
+        raise utils.JobError(f"Cannot index CSV: {e}")
 
     # if SORT_AND_DUPE_CHECK = True, we already know the record count
     # so we can skip qsv count.
@@ -767,7 +744,7 @@ def _push_to_datastore(
             record_count = int(str(qsv_count.stdout).strip())
             dataset_stats["RECORD_COUNT"] = record_count
         except utils.JobError as e:
-            raise utils.JobError("Cannot count records in CSV: {}".format(e))
+            raise utils.JobError(f"Cannot count records in CSV: {e}")
 
     # its empty, nothing to do
     if record_count == 0:
@@ -778,7 +755,7 @@ def _push_to_datastore(
     unique_qualifier = ""
     if conf.DEDUP:
         unique_qualifier = "unique"
-    logger.info("{:,} {} records detected...".format(record_count, unique_qualifier))
+    logger.info(f"{record_count} {unique_qualifier} records detected...")
 
     # run qsv stats to get data types and summary statistics
     logger.info("Inferring data types and compiling statistics...")
@@ -819,9 +796,7 @@ def _push_to_datastore(
                 output_file=qsv_stats_csv,
             )
     except utils.JobError as e:
-        raise utils.JobError(
-            "Cannot infer data types and compile statistics: {}".format(e)
-        )
+        raise utils.JobError(f"Cannot infer data types and compile statistics: {e}")
 
     # Dictionary to look up stats by resource field name
     resource_fields_stats = {}
@@ -865,11 +840,7 @@ def _push_to_datastore(
 
     # Delete existing datastore resource before proceeding.
     if existing:
-        logger.info(
-            'Deleting existing resource "{res_id}" from datastore.'.format(
-                res_id=resource_id
-            )
-        )
+        logger.info(f'Deleting existing resource "{resource_id}" from datastore.')
         dsu.delete_datastore_resource(resource_id)
 
     # 1st pass of building headers_dict
@@ -927,9 +898,7 @@ def _push_to_datastore(
                 if type_override in list(conf.TYPE_MAPPING.values()):
                     h["type"] = type_override
 
-    logger.info(
-        "Determined headers and types: {headers}...".format(headers=headers_dicts)
-    )
+    logger.info(f"Determined headers and types: {headers_dicts}...")
 
     # save stats to the datastore by loading qsv_stats_csv directly using COPY
     stats_table = sql.Identifier(resource_id + "-druf-stats")
@@ -937,7 +906,7 @@ def _push_to_datastore(
     try:
         raw_connection_statsfreq = psycopg2.connect(conf.DATASTORE_WRITE_URL)
     except psycopg2.Error as e:
-        raise utils.JobError("Could not connect to the Datastore: {}".format(e))
+        raise utils.JobError(f"Could not connect to the Datastore: {e}")
     else:
         cur_statsfreq = raw_connection_statsfreq.cursor()
 
@@ -956,7 +925,7 @@ def _push_to_datastore(
     try:
         qsv.frequency(tmp, limit=conf.QSV_FREQ_LIMIT, output_file=qsv_freq_csv)
     except utils.JobError as e:
-        raise utils.JobError("Cannot create a frequency table: {}".format(e))
+        raise utils.JobError(f"Cannot create a frequency table: {e}")
 
     resource_fields_freqs = {}
     try:
@@ -974,12 +943,12 @@ def _push_to_datastore(
     if conf.PREVIEW_ROWS and record_count > conf.PREVIEW_ROWS:
         if conf.PREVIEW_ROWS > 0:
             # conf.PREVIEW_ROWS is positive, slice from the beginning
-            logger.info("Preparing {:,}-row preview...".format(conf.PREVIEW_ROWS))
+            logger.info(f"Preparing {conf.PREVIEW_ROWS}-row preview...")
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv.slice(tmp, length=conf.PREVIEW_ROWS, output_file=qsv_slice_csv)
             except utils.JobError as e:
-                raise utils.JobError("Cannot create a preview slice: {}".format(e))
+                raise utils.JobError(f"Cannot create a preview slice: {e}")
             rows_to_copy = conf.PREVIEW_ROWS
             tmp = qsv_slice_csv
         else:
@@ -987,14 +956,12 @@ def _push_to_datastore(
             # TODO: do http range request so we don't have to download the whole file
             # to slice from the end
             slice_len = abs(conf.PREVIEW_ROWS)
-            logger.info("Preparing {:,}-row preview from the end...".format(slice_len))
+            logger.info(f"Preparing {slice_len}-row preview from the end...")
             qsv_slice_csv = os.path.join(temp_dir, "qsv_slice.csv")
             try:
                 qsv.slice(tmp, start=-1, length=slice_len, output_file=qsv_slice_csv)
             except utils.JobError as e:
-                raise utils.JobError(
-                    "Cannot create a preview slice from the end: {}".format(e)
-                )
+                raise utils.JobError(f"Cannot create a preview slice from the end: {e}")
             rows_to_copy = slice_len
             tmp = qsv_slice_csv
 
@@ -1009,24 +976,20 @@ def _push_to_datastore(
         datecols = ",".join(datetimecols_list)
 
         logger.info(
-            'Formatting dates "{}" to ISO 8601/RFC 3339 format with PREFER_DMY: {}...'.format(
-                datecols, conf.PREFER_DMY
-            )
+            f'Formatting dates "{datecols}" to ISO 8601/RFC 3339 format with PREFER_DMY: {conf.PREFER_DMY}...'
         )
         try:
             qsv.datefmt(
                 datecols, tmp, prefer_dmy=conf.PREFER_DMY, output_file=qsv_applydp_csv
             )
         except utils.JobError as e:
-            raise utils.JobError("Applydp error: {}".format(e))
+            raise utils.JobError(f"Applydp error: {e}")
         tmp = qsv_applydp_csv
 
     # -------------------- QSV ANALYSIS DONE --------------------
     analysis_elapsed = time.perf_counter() - analysis_start
     logger.info(
-        "ANALYSIS DONE! Analyzed and prepped in {:,.2f} seconds.".format(
-            analysis_elapsed
-        )
+        f"ANALYSIS DONE! Analyzed and prepped in {analysis_elapsed:,.2f} seconds."
     )
 
     # ----------------------------- PII Screening ------------------------------
@@ -1061,9 +1024,9 @@ def _push_to_datastore(
     copy_start = time.perf_counter()
 
     if conf.PREVIEW_ROWS:
-        logger.info("COPYING {:,}-row preview to Datastore...".format(rows_to_copy))
+        logger.info(f"COPYING {rows_to_copy}-row preview to Datastore...")
     else:
-        logger.info("COPYING {:,} rows to Datastore...".format(rows_to_copy))
+        logger.info(f"COPYING {rows_to_copy} rows to Datastore...")
 
     # first, let's create an empty datastore table w/ guessed types
     dsu.send_resource_to_datastore(
@@ -1079,7 +1042,7 @@ def _push_to_datastore(
     try:
         raw_connection = psycopg2.connect(conf.DATASTORE_WRITE_URL)
     except psycopg2.Error as e:
-        raise utils.JobError("Could not connect to the Datastore: {}".format(e))
+        raise utils.JobError(f"Could not connect to the Datastore: {e}")
     else:
         cur = raw_connection.cursor()
 
@@ -1092,7 +1055,7 @@ def _push_to_datastore(
             )
 
         except psycopg2.Error as e:
-            logger.warning("Could not TRUNCATE: {}".format(e))
+            logger.warning(f"Could not TRUNCATE: {e}")
 
         col_names_list = [h["id"] for h in headers_dicts]
         column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
@@ -1109,7 +1072,7 @@ def _push_to_datastore(
             try:
                 cur.copy_expert(copy_sql, f, size=conf.COPY_READBUFFER_SIZE)
             except psycopg2.Error as e:
-                raise utils.JobError("Postgres COPY failed: {}".format(e))
+                raise utils.JobError(f"Postgres COPY failed: {e}")
             else:
                 copied_count = cur.rowcount
 
@@ -1126,11 +1089,7 @@ def _push_to_datastore(
 
     copy_elapsed = time.perf_counter() - copy_start
     logger.info(
-        '...copying done. Copied {n} rows to "{res_id}" in {copy_elapsed} seconds.'.format(
-            n="{:,}".format(copied_count),
-            res_id=resource_id,
-            copy_elapsed="{:,.2f}".format(copy_elapsed),
-        )
+        f'...copying done. Copied {copied_count} rows to "{resource_id}" in {copy_elapsed:,.2f} seconds.'
     )
 
     # ============================================================
@@ -1261,9 +1220,7 @@ def _push_to_datastore(
     # -------------------- FORMULAE PROCESSING DONE --------------------
     formulae_elapsed = time.perf_counter() - formulae_start
     logger.info(
-        "FORMULAE PROCESSING DONE! Processed in {:,.2f} seconds.".format(
-            formulae_elapsed
-        )
+        f"FORMULAE PROCESSING DONE! Processed in {formulae_elapsed:,.2f} seconds."
     )
 
     # ============================================================
@@ -1277,9 +1234,7 @@ def _push_to_datastore(
     # when using the Datastore API and in SQL queries
     alias = None
     if conf.AUTO_ALIAS:
-        logger.info(
-            "AUTO-ALIASING. Auto-alias-unique: {} ...".format(conf.AUTO_ALIAS_UNIQUE)
-        )
+        logger.info(f"AUTO-ALIASING. Auto-alias-unique: {conf.AUTO_ALIAS_UNIQUE} ...")
         # get package info, so we can construct the alias
         package = dsu.get_package(resource["package_id"])
 
@@ -1322,22 +1277,18 @@ def _push_to_datastore(
                     alias_sequence += 1
             elif alias_count == 1:
                 logger.warning(
-                    'Dropping existing alias "{}" for resource "{}"...'.format(
-                        alias, existing_alias_of
-                    )
+                    f'Dropping existing alias "{alias}" for resource "{existing_alias_of}"...'
                 )
                 try:
                     cur.execute(
                         sql.SQL("DROP VIEW IF EXISTS {}").format(sql.Identifier(alias))
                     )
                 except psycopg2.Error as e:
-                    logger.warning("Could not drop alias/view: {}".format(e))
+                    logger.warning(f"Could not drop alias/view: {e}")
 
         else:
             logger.warning(
-                "Cannot create alias: {}-{}-{}".format(
-                    resource_name, package_name, owner_org
-                )
+                f"Cannot create alias: {resource_name}-{package_name}-{owner_org}"
             )
             alias = None
 
@@ -1352,9 +1303,7 @@ def _push_to_datastore(
         existing_stats = dsu.datastore_resource_exists(stats_resource_id)
         # Delete existing summary-stats before proceeding.
         if existing_stats:
-            logger.info(
-                'Deleting existing summary stats "{}".'.format(stats_resource_id)
-            )
+            logger.info(f'Deleting existing summary stats "{stats_resource_id}".')
 
             cur.execute(
                 "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
@@ -1379,9 +1328,7 @@ def _push_to_datastore(
             # Delete existing auto-aliased summary-stats before proceeding.
             if existing_alias_stats:
                 logger.info(
-                    'Deleting existing alias summary stats "{}".'.format(
-                        auto_alias_stats_id
-                    )
+                    f'Deleting existing alias summary stats "{auto_alias_stats_id}".'
                 )
 
                 cur.execute(
@@ -1403,7 +1350,7 @@ def _push_to_datastore(
                 typesonly=True,
             )
         except utils.JobError as e:
-            raise utils.JobError("Cannot run stats on CSV stats: {}".format(e))
+            raise utils.JobError(f"Cannot run stats on CSV stats: {e}")
 
         stats_stats = str(qsv_stats_stats.stdout).strip()
         stats_stats_dict = [
@@ -1436,11 +1383,7 @@ def _push_to_datastore(
         # now COPY the stats to the datastore
         col_names_list = [h["id"] for h in stats_stats_dict]
         logger.info(
-            'ADDING SUMMARY STATISTICS {} in "{}" with alias/es "{}"...'.format(
-                col_names_list,
-                new_stats_resource_id,
-                stats_aliases,
-            )
+            f'ADDING SUMMARY STATISTICS {col_names_list} in "{new_stats_resource_id}" with alias/es "{stats_aliases}"...'
         )
 
         column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
@@ -1458,7 +1401,7 @@ def _push_to_datastore(
             try:
                 cur.copy_expert(copy_sql, f)
             except psycopg2.Error as e:
-                raise utils.JobError("Postgres COPY failed: {}".format(e))
+                raise utils.JobError(f"Postgres COPY failed: {e}")
 
         stats_resource["id"] = new_stats_resource_id
         stats_resource["summary_statistics"] = True
@@ -1490,13 +1433,11 @@ def _push_to_datastore(
     )
 
     if alias:
-        logger.info('Created alias "{}" for "{}"...'.format(alias, resource_id))
+        logger.info(f'Created alias "{alias}" for "{resource_id}"...')
 
     metadata_elapsed = time.perf_counter() - metadata_start
     logger.info(
-        "METADATA UPDATES DONE! Resource metadata updated in {:.2f} seconds.".format(
-            metadata_elapsed
-        )
+        f"METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
     )
 
     # =================================================================================================
@@ -1514,9 +1455,7 @@ def _push_to_datastore(
     ):
         index_start = time.perf_counter()
         logger.info(
-            "AUTO-INDEXING. Auto-index threshold: {:,} unique value/s. Auto-unique index: {} Auto-index dates: {} ...".format(
-                conf.AUTO_INDEX_THRESHOLD, conf.AUTO_UNIQUE_INDEX, conf.AUTO_INDEX_DATES
-            )
+            f"AUTO-INDEXING. Auto-index threshold: {conf.AUTO_INDEX_THRESHOLD} unique value/s. Auto-unique index: {conf.AUTO_UNIQUE_INDEX} Auto-index dates: {conf.AUTO_INDEX_DATES} ..."
         )
         index_cur = raw_connection.cursor()
 
@@ -1540,9 +1479,7 @@ def _push_to_datastore(
                     else:
                         unique_value_count = cardinality
                     logger.info(
-                        'Creating UNIQUE index on "{}" for {:,} unique values...'.format(
-                            curr_col, unique_value_count
-                        )
+                        f'Creating UNIQUE index on "{curr_col}" for {unique_value_count} unique values...'
                     )
                     try:
                         index_cur.execute(
@@ -1553,9 +1490,7 @@ def _push_to_datastore(
                         )
                     except psycopg2.Error as e:
                         logger.warning(
-                            'Could not CREATE UNIQUE INDEX on "{}": {}'.format(
-                                curr_col, e
-                            )
+                            f'Could not CREATE UNIQUE INDEX on "{curr_col}": {e}'
                         )
                     index_count += 1
                 elif cardinality <= conf.AUTO_INDEX_THRESHOLD or (
@@ -1565,15 +1500,11 @@ def _push_to_datastore(
                     # create an index
                     if curr_col in datetimecols_list:
                         logger.info(
-                            'Creating index on "{}" date column for {:,} unique value/s...'.format(
-                                curr_col, cardinality
-                            )
+                            f'Creating index on "{curr_col}" date column for {cardinality} unique value/s...'
                         )
                     else:
                         logger.info(
-                            'Creating index on "{}" for {:,} unique value/s...'.format(
-                                curr_col, cardinality
-                            )
+                            f'Creating index on "{curr_col}" for {cardinality} unique value/s...'
                         )
                     try:
                         index_cur.execute(
@@ -1583,9 +1514,7 @@ def _push_to_datastore(
                             )
                         )
                     except psycopg2.Error as e:
-                        logger.warning(
-                            'Could not CREATE INDEX on "{}": {}'.format(curr_col, e)
-                        )
+                        logger.warning(f'Could not CREATE INDEX on "{curr_col}": {e}')
                     index_count += 1
 
         index_cur.close()
@@ -1605,11 +1534,7 @@ def _push_to_datastore(
 
         index_elapsed = time.perf_counter() - index_start
         logger.info(
-            '...indexing/vacuum analysis done. Indexed {n} column/s in "{res_id}" in {index_elapsed} seconds.'.format(
-                n="{:,}".format(index_count),
-                res_id=resource_id,
-                index_elapsed="{:,.2f}".format(index_elapsed),
-            )
+            f'...indexing/vacuum analysis done. Indexed {index_count} column/s in "{resource_id}" in {index_elapsed:,.2f} seconds.'
         )
 
     raw_connection.close()
