@@ -663,7 +663,7 @@ def spatial_resolution_in_meters(context):
     """
     Compute the diagonal of the bounding box in meters.
     """
-    from math import radians, cos, sin, sqrt
+    from math import radians, cos, sin, sqrt, asin
 
     dpp = context.get("dpp", {})
     dpps = context.get("dpps", {})
