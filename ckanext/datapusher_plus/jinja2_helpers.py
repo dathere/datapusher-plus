@@ -683,7 +683,7 @@ def spatial_resolution_in_meters(context):
     dphi = radians(float(max_lat) - float(min_lat))
     dlambda = radians(float(max_lon) - float(min_lon))
     a = sin(dphi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(dlambda / 2) ** 2
-    c = 2 * sqrt(a) if a < 1 else 2
+    c = 2 * asin(sqrt(a))
     d = R * c
     return d
 
