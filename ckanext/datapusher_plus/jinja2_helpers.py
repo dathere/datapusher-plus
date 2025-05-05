@@ -15,7 +15,8 @@ import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
 
 log = logging.getLogger(__name__)
-log.addHandler(logging.StreamHandler())
+if not log.handlers:
+    log.addHandler(logging.StreamHandler())
 
 # At the top of jinja2_helpers.py
 JINJA2_FILTERS = []
