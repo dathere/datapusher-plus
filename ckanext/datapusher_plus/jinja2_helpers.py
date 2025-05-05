@@ -563,7 +563,7 @@ def temporal_resolution(context, date_field=None):
     sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
     try:
         records = dsu.datastore_search_sql(sql)
-        values = [r[date_field] for r in records if r.get(date_field)]
+        values = [r[date_field] for r in records.get('records', []) if r.get(date_field)]
         if len(values) < 2:
             return None
     except Exception as e:
