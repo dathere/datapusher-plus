@@ -570,9 +570,8 @@ def temporal_resolution(context, date_field=None):
         if len(values) < 2:
             return None
     except Exception as e:
-        error_msg = f"#ERROR!: Error getting temporal resolution: {e}"
-        log.error(error_msg)
-        return error_msg
+        log.error(f"Error getting temporal resolution: {e}")
+        return None
 
     # Parse and sort dates
     try:
