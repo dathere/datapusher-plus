@@ -139,8 +139,8 @@ Without an index, it takes 1.3 seconds.
 
 ## Requirements:
 Datapusher+ requires:
-* CKAN 2.10
-* Python 3.10
+* CKAN 2.10+
+* Python 3.10+
 * tested and developed on Ubuntu 22.04.5
 * [`ckan.datastore.sqlsearch.enabled`](https://docs.ckan.org/en/2.10/maintaining/datastore.html#ckanext.datastore.logic.action.datastore_search_sql) set to `true` if you want to use the `temporal_resolution` and `guess_accrual_periodicity` Formula helpers
 
@@ -183,9 +183,9 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     it to the appropriate directory, e.g. for Linux:
 
     ```bash
-    wget https://github.com/dathere/qsv/releases/download/2.22.1/qsv-2.22.1-x86_64-unknown-linux-gnu.zip
-    unzip qsv-2.22.1-x86_64-unknown-linux-gnu.zip
-    rm qsv-2.22.1-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
     ```
 
@@ -195,7 +195,6 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     section to squeeze even more performance from qsv.
 
     Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
-    (This will be the case when running Ubuntu 18.04 or older).
     If so, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
 
     If you already have qsv, update it to the latest release by using the --update option.
@@ -228,10 +227,12 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
       sudo apt install qsv
       ```
 
-6. Configure the Datapusher+ database.
+6. Create an API token for the DP+ Service account. 
+   Replace `CKAN_ADMIN` with an existing CKAN user with sysadmin privileges.
 
-   Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database
-   (see [DataPusher+ Database Setup](#datapusher-database-setup)).
+    ```
+    ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$(ckan -c /etc/ckan/default/ckan.ini user token add CKAN_ADMIN dpplus | tail -n 1 | tr -d '\t')"
+    ```
 
 ## Configuring
 
@@ -245,39 +246,50 @@ ckan.plugins = <other plugins> datapusher_plus
 ```
 
 
-> ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - `xlsm` and `xlsb` for Excel Spreadsheets,
-> and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
->
 >```ini
-> ckanext.datapusher_plus.copy_readbuffer_size = 1048576
-> ckanext.datapusher_plus.max_content_length = 1256000000000
-> ckanext.datapusher_plus.ignore_file_hash = true
-> ckanext.datapusher_plus.chunk_size = 16384
-> ckanext.datapusher_plus.download_timeout = 300
+> ckanext.datapusher_plus.use_proxy = false
+> ckanext.datapusher_plus.download_proxy = 
 > ckanext.datapusher_plus.ssl_verify = false
-> ckanext.datapusher_plus.download_proxy =
-> ckanext.datapusher_plus.types = csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-> ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}
+> # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
+> ckanext.datapusher_plus.upload_log_level = INFO
+> ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
 > ckanext.datapusher_plus.pii_screening = false
-> ckanext.datapusher_plus.pii_quick_screen = false
 > ckanext.datapusher_plus.pii_found_abort = false
-> ckanext.datapusher_plus.pii_show_candidates = false
 > ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
-> ckanext.datapusher_plus.qsv_bin =  /usr/local/bin/qsvdp
-> ckanext.datapusher_plus.file_bin = /usr/bin/file
-> ckanext.datapusher_plus.prefer_dmy = false
+> ckanext.datapusher_plus.pii_show_candidates = false
+> ckanext.datapusher_plus.pii_quick_screen = false
+> ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
 > ckanext.datapusher_plus.preview_rows = 100
-> ckanext.datapusher_plus.auto_index_threshold = 3
-> ckanext.datapusher_plus.auto_unique_index = true
-> ckanext.datapusher_plus.auto_index_dates = true
+> ckanext.datapusher_plus.download_timeout = 300
+> ckanext.datapusher_plus.max_content_length = 1256000000000
+> ckanext.datapusher_plus.chunk_size = 16384
+> ckanext.datapusher_plus.default_excel_sheet = 0
 > ckanext.datapusher_plus.sort_and_dupe_check = true
 > ckanext.datapusher_plus.dedup = false
-> ckanext.datapusher_plus.default_excel_sheet = 0
-> ckanext.datapusher_plus.add_summary_stats_resource = false
+> ckanext.datapusher_plus.unsafe_prefix = unsafe_
+> ckanext.datapusher_plus.reserved_colnames = _id
+> ckanext.datapusher_plus.prefer_dmy = false
+> ckanext.datapusher_plus.ignore_file_hash = true
+> ckanext.datapusher_plus.auto_index_threshold = 3
+> ckanext.datapusher_plus.auto_index_dates = true
+> ckanext.datapusher_plus.auto_unique_index = true
 > ckanext.datapusher_plus.summary_stats_options =
+> ckanext.datapusher_plus.add_summary_stats_resource = false
+> ckanext.datapusher_plus.summary_stats_with_preview = false
+> ckanext.datapusher_plus.qsv_stats_string_max_length = 32767
+> ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created
+> ckanext.datapusher_plus.qsv_freq_limit = 10
 > ckanext.datapusher_plus.auto_alias = true
 > ckanext.datapusher_plus.auto_alias_unique = false
-> ckanext.datapusher_plus.api_token = 
+> ckanext.datapusher_plus.copy_readbuffer_size = 1048576
+> ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
+> ckanext.datapusher_plus.auto_spatial_simplication = true
+> ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+> ckanext.datapusher_plus.latitude_fields = latitude,lat
+> ckanext.datapusher_plus.longitude_fields = longitude,long,lon
+> ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+> ckanext.datapusher_plus.api_token = <CKAN service account token for CKAN user with sysadmin privileges>
+>ckanext.datapusher_plus.describeGPT_api_key = <Token for OpenAI API compatible service>
 >```
 >
 >and add this entry to your CKAN's `resource_formats.json` file.
@@ -285,14 +297,6 @@ ckan.plugins = <other plugins> datapusher_plus
 >```json
 > ["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
 >```
-
-### DataPusher+ Database Setup
-
-```bash
-
-ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
-
-```
 
 ## Usage
 

@@ -87,7 +87,7 @@ def get_dp_plus_user_apitoken():
         return api_token
     else:
         raise Exception(
-            "No API token found. Required for downloading private resources."
+            "No API token found. API token required for DP+ service account."
         )
 
 
