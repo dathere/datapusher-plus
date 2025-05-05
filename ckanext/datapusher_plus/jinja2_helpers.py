@@ -563,7 +563,9 @@ def temporal_resolution(context, date_field=None):
     sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
     try:
         records = dsu.datastore_search_sql(sql)
-        values = [r[date_field] for r in records.get('records', []) if r.get(date_field)]
+        values = [
+            r[date_field] for r in records.get("records", []) if r.get(date_field)
+        ]
         if len(values) < 2:
             return None
     except Exception as e:
@@ -580,8 +582,6 @@ def temporal_resolution(context, date_field=None):
             return "PT1H"  # fallback for sub-daily
         elif min_days == 1:
             return "P1D"
-        elif min_days <= 7:
-            return f"P{min_days}D"
         elif min_days <= 31:
             return f"P{min_days}D"
         elif min_days <= 366:
@@ -610,7 +610,9 @@ def guess_accrual_periodicity(context, date_field=None):
             return None
         sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
         records = dsu.datastore_search_sql(sql)
-        values = [r[date_field] for r in records.get('records', []) if r.get(date_field)]
+        values = [
+            r[date_field] for r in records.get("records", []) if r.get(date_field)
+        ]
         if len(values) < 2:
             return None
         dates = [datetime.fromisoformat(v) for v in values if v]
@@ -621,8 +623,6 @@ def guess_accrual_periodicity(context, date_field=None):
         most_common = Counter(intervals).most_common(1)[0][0]
         if most_common == 1:
             return "R/P1D"
-        elif most_common <= 7:
-            return f"R/P{most_common}D"
         elif most_common <= 31:
             return f"R/P{most_common}D"
         elif most_common <= 366:
