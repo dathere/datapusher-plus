@@ -15,6 +15,7 @@ import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
 
 log = logging.getLogger(__name__)
+log.addHandler(logging.StreamHandler())
 
 # At the top of jinja2_helpers.py
 JINJA2_FILTERS = []
@@ -569,7 +570,9 @@ def temporal_resolution(context, date_field=None):
         if len(values) < 2:
             return None
     except Exception as e:
-        return None
+        error_msg = f"#ERROR!: Error getting temporal resolution: {e}"
+        log.error(error_msg)
+        return error_msg
 
     # Parse and sort dates
     try:
@@ -609,7 +612,12 @@ def guess_accrual_periodicity(context, date_field=None):
         if not resource_id:
             return None
         sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
-        records = dsu.datastore_search_sql(sql)
+        try:
+            records = dsu.datastore_search_sql(sql)
+        except Exception as e:
+            error_msg = f"#ERROR!: Error getting accrual periodicity: {e}"
+            log.error(error_msg)
+            return error_msg
         values = [
             r[date_field] for r in records.get("records", []) if r.get(date_field)
         ]

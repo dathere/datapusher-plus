@@ -68,8 +68,8 @@ def datastore_search_sql(sql: str) -> dict:
     try:
         result = tk.get_action("datastore_search_sql")(context, data_dict)
         return result
-    except tk.ObjectNotFound:
-        return None
+    except Exception as e:
+        raise utils.JobError(f'Error running datastore_search_sql "{sql}": {e}')
 
 
 def send_resource_to_datastore(
