@@ -5,12 +5,18 @@ from __future__ import annotations
 
 import logging
 import os
+from datetime import datetime
+from collections import Counter
 from typing import Any, Dict, Optional
+
 from jinja2 import DictLoader, Environment, FileSystemBytecodeCache, pass_context
 
 import ckanext.datapusher_plus.config as conf
+import ckanext.datapusher_plus.datastore_utils as dsu
 
 log = logging.getLogger(__name__)
+if not log.handlers:
+    log.addHandler(logging.StreamHandler())
 
 # At the top of jinja2_helpers.py
 JINJA2_FILTERS = []
@@ -534,3 +540,176 @@ def get_frequency_top_values(
 
     # The data is already sorted by frequency in descending order from qsv frequency
     return dppf[field][:count]
+
+
+@jinja2_global
+@pass_context
+def temporal_resolution(context, date_field=None):
+    """
+    Compute the minimum interval (in ISO 8601 duration) between sorted unique dates in a date field.
+    Fetch them using the CKAN DataStore SQL API.
+    """
+    dpp = context.get("dpp", {})
+    resource = context.get("resource", {})
+
+    if not date_field:
+        date_fields = dpp.get("DATE_FIELDS", [])
+        if not date_fields:
+            return None
+        date_field = date_fields[0]
+
+    # Get unique values for the date field from the DataStore
+    resource_id = resource.get("id")
+    if not resource_id:
+        return None
+    sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
+    try:
+        records = dsu.datastore_search_sql(sql)
+        values = [
+            r[date_field] for r in records.get("records", []) if r.get(date_field)
+        ]
+        if len(values) < 2:
+            return None
+    except Exception as e:
+        log.error(f"Error getting temporal resolution: {e}")
+        return None
+
+    # Parse and sort dates
+    try:
+        dates = [datetime.fromisoformat(v) for v in values if v]
+        intervals = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
+        if not intervals:
+            return None
+        min_days = min(intervals)
+        if min_days < 1:
+            return "PT1H"  # fallback for sub-daily
+        elif min_days == 1:
+            return "P1D"
+        elif min_days <= 31:
+            return f"P{min_days}D"
+        elif min_days <= 366:
+            return f"P{min_days//30}M"
+        else:
+            return f"P{min_days//365}Y"
+    except Exception:
+        return None
+
+
+@jinja2_global
+@pass_context
+def guess_accrual_periodicity(context, date_field=None):
+    """
+    Guess accrual periodicity (e.g., 'R/P1D' for daily) from date intervals.
+    """
+    dpp = context.get("dpp", {})
+    if not date_field:
+        date_fields = dpp.get("DATE_FIELDS", [])
+        if not date_fields:
+            return None
+        date_field = date_fields[0]
+    try:
+        resource_id = context.get("resource", {}).get("id")
+        if not resource_id:
+            return None
+        sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
+        try:
+            records = dsu.datastore_search_sql(sql)
+        except Exception as e:
+            log.error(f"Error getting accrual periodicity: {e}")
+            return None
+        values = [
+            r[date_field] for r in records.get("records", []) if r.get(date_field)
+        ]
+        if len(values) < 2:
+            return None
+        dates = [datetime.fromisoformat(v) for v in values if v]
+        intervals = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
+        if not intervals:
+            return None
+        # Use the most common interval
+        most_common = Counter(intervals).most_common(1)[0][0]
+        if most_common == 1:
+            return "R/P1D"
+        elif most_common <= 31:
+            return f"R/P{most_common}D"
+        elif most_common <= 366:
+            return f"R/P{most_common//30}M"
+        else:
+            return f"R/P{most_common//365}Y"
+    except Exception:
+        return None
+
+
+@jinja2_global
+@pass_context
+def map_tags_to_themes(context):
+    """
+    Map CKAN tags to DCAT theme URIs using a lookup table.
+    """
+    # Example mapping, extend as needed
+    # we can possibly point to a reference resource in CKAN
+    # or point to a remote JSON resource
+    # TODO: add more mappings ...
+    tag_to_theme = {
+        "climate": "https://data.gov/themes/climate",
+        "health": "https://data.gov/themes/health",
+        "transportation": "https://data.gov/themes/transportation",
+    }
+    tags = context.get("package", {}).get("tags", [])
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",")]
+    themes = [
+        tag_to_theme.get(tag.lower()) for tag in tags if tag.lower() in tag_to_theme
+    ]
+    return themes or None
+
+
+@jinja2_global
+@pass_context
+def spatial_resolution_in_meters(context):
+    """
+    Compute the diagonal of the bounding box in meters.
+    """
+    from math import radians, cos, sin, sqrt, asin
+
+    dpp = context.get("dpp", {})
+    dpps = context.get("dpps", {})
+    if dpp.get("NO_LAT_LON_FIELDS"):
+        return None
+    lat_field = dpp.get("LAT_FIELD")
+    lon_field = dpp.get("LON_FIELD")
+    if not lat_field or not lon_field:
+        return None
+    min_lat = dpps[lat_field]["stats"]["min"]
+    max_lat = dpps[lat_field]["stats"]["max"]
+    min_lon = dpps[lon_field]["stats"]["min"]
+    max_lon = dpps[lon_field]["stats"]["max"]
+    # Haversine formula for diagonal
+    R = 6371000  # meters
+    phi1, phi2 = radians(float(min_lat)), radians(float(max_lat))
+    dphi = radians(float(max_lat) - float(min_lat))
+    dlambda = radians(float(max_lon) - float(min_lon))
+    a = sin(dphi / 2) ** 2 + cos(phi1) * cos(phi2) * sin(dlambda / 2) ** 2
+    c = 2 * asin(sqrt(a))
+    d = R * c
+    return d
+
+
+@jinja2_filter
+def get_field_null_percentage(field_stats):
+    """
+    Compute the percentage of nulls in a field.
+    Usage: {{ dpps.FIELDNAME.stats | get_field_null_percentage }}
+    """
+    nullcount = field_stats.get("nullcount", 0)
+    count = field_stats.get("count", 1)
+    return (nullcount / count) * 100 if count else 0
+
+
+@jinja2_filter
+def get_field_unique_count(field_stats):
+    """
+    Compute the number of unique values in a field.
+    Usage: {{ dpps.FIELDNAME.stats | get_field_unique_count }}
+    """
+    return field_stats.get("uniquecount", 0)

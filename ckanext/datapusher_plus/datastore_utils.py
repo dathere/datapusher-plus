@@ -59,6 +59,19 @@ def datastore_resource_exists(resource_id: str) -> dict:
         return None
 
 
+def datastore_search_sql(sql: str) -> dict:
+    """Search datastore using SQL."""
+    context = {"ignore_auth": True}
+    data_dict = {
+        "sql": sql,
+    }
+    try:
+        result = tk.get_action("datastore_search_sql")(context, data_dict)
+        return result
+    except Exception as e:
+        raise utils.JobError(f'Error running datastore_search_sql "{sql}": {e}')
+
+
 def send_resource_to_datastore(
     resource: dict,
     resource_id: str,
