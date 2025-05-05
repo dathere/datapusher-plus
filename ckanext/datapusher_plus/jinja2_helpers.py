@@ -614,9 +614,8 @@ def guess_accrual_periodicity(context, date_field=None):
         try:
             records = dsu.datastore_search_sql(sql)
         except Exception as e:
-            error_msg = f"#ERROR!: Error getting accrual periodicity: {e}"
-            log.error(error_msg)
-            return error_msg
+            log.error(f"Error getting accrual periodicity: {e}")
+            return None
         values = [
             r[date_field] for r in records.get("records", []) if r.get(date_field)
         ]
