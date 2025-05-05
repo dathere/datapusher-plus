@@ -610,7 +610,7 @@ def guess_accrual_periodicity(context, date_field=None):
             return None
         sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
         records = dsu.datastore_search_sql(sql)
-        values = [r[date_field] for r in records if r.get(date_field)]
+        values = [r[date_field] for r in records.get('records', []) if r.get(date_field)]
         if len(values) < 2:
             return None
         dates = [datetime.fromisoformat(v) for v in values if v]
