@@ -723,8 +723,8 @@ def _push_to_datastore(
         qsv_safenames = qsv.safenames(
             tmp, mode="conditional", output_file=qsv_safenames_csv
         )
-    else:
         tmp = qsv_safenames_csv
+    else:
         logger.info("No unsafe header names found...")
 
     # ---------------------- Type Inferencing -----------------------
