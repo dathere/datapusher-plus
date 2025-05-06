@@ -176,6 +176,7 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
     ## Manual Installation
 
+    ### Install Prebuilt Binaries
     [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
     it to the appropriate directory, e.g. for Linux:
 
@@ -188,20 +189,24 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
     If you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library. If so, use the `qsv-X.X.X-unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
 
-    Alternatively, you can build qsvdp from source.
+
+    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run qsv with the `--update` option and it will check for the latest version and update as required.
+
+    ### Build qsvdp from source
+    Alternatively, you can build qsvdp from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster.
     
     ```bash
     git clone https://github.com/dathere/qsv.git
     cd qsv
+
+    # install Rust, if it's not installed
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+    # build qsvdp
     CARGO_BUILD_RUSTFLAGS='-C target-cpu=native' cargo build --release --locked --bin qsvdp -F datapusher_plus
     sudo cp target/release/qsvdp /usr/local/bin
+    cargo clean
     ```
-
-    If you already have qsv, update it to the latest release by using the --update option.
-
-    `qsvdp --update`
-
-    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run qsv with the `--update` option and it will check for the latest version and update as required.
 
     ### Debian Package Installation
 
