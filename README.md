@@ -151,22 +151,19 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 1. Install the required packages.
 
     ```bash
-    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file uchardet
+    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev uchardet
     ```
 
-2. Activate the CKAN virtual environment using atleast python 3.8.
+2. Activate the CKAN virtual environment using at least python 3.10.
 
     ```bash
     . /usr/lib/ckan/default/bin/activate
     ```
 
-    > ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.7/3.8
-    > to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
-
 3. Install the extension using following commands:
 
     ```bash
-   pip install -e "git+https://github.com/dathere/datapusher-plus.git@1.0.1#egg=datapusher-plus"
+   pip install -e "git+https://github.com/dathere/datapusher-plus.git@2.0.0#egg=datapusher-plus"
     ```
 
 4. Install the dependencies.
@@ -190,7 +187,7 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     ```
 
     Alternatively, if you want to install qsv from source, follow
-    the instructions [here](https://github.com/dathere/qsv#installation). Note that when compiling from source,
+    the instructions [here](https://github.com/dathere/qsv?tab=readme-ov-file#option-4-compile-from-source). Note that when compiling from source,
     you may want to look into the [Performance Tuning](https://github.com/dathere/qsv#performance-tuning)
     section to squeeze even more performance from qsv.
 
@@ -201,10 +198,9 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
     `qsvdp --update`
 
-    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
-    qsv with the `--update` option and it will check for the latest version and update as required.
+    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run qsv with the `--update` option and it will check for the latest version and update as required.
 
-    ### Linux Installation
+    ### Debian Package Installation
 
     If you are running Debian based distribution, you can install qsv using the following command:
 
