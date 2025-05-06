@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## What's Changed
+* Update README with some fixes by @tino097 in https://github.com/dathere/datapusher-plus/pull/178
+* Druf apr2025 by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/180
+* Refactor upload log level by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/181
+* feat: zip file support by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/182
+* feat: shapefile support by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/183
+* Refactor jobs py by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/184
+* feat: make frequency limit configurable; move stats/freq copying to datastore from jobs.py to qsv_utils.py by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/185
+* Lat lon columns inferencing for use in Formulas by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/188
+* Configurable Date/Datetime inferencing and dataset stats by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/190
+* refactor: move pii-screening to a separate module by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/191
+* chore: add WIP geojson update by @rzmk in https://github.com/dathere/datapusher-plus/pull/186
+* "smart" formula spatial functions by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/192
+* Jobs cleanup by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/193
+* Fix datastore upload log timestamps by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/194
+* DCAT 3 formula helpers by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/195
+
+## New Contributors
+* @rzmk made their first contribution in https://github.com/dathere/datapusher-plus/pull/186
+
+**Full Changelog**: https://github.com/dathere/datapusher-plus/compare/2.0.0...2.1.0
+
 ## [2.0.0] - 2025-04-25
 
 ## 🎉 Data Resource Upload First (DRUF) Workflow is finally here! 🎉 
