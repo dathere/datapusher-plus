@@ -174,9 +174,7 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
 5. Install [qsv](https://github.com/dathere/qsv).
 
-    ## Manual Installation
-
-    ### Install Prebuilt Binaries
+    ## Option 1: Install Prebuilt qsv Binaries
     [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
     it to the appropriate directory, e.g. for Linux:
 
@@ -192,7 +190,7 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
     > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run qsv with the `--update` option and it will check for the latest version and update as required.
 
-    ### Build qsvdp from source
+    ## Option 2: Build qsv from source
     Alternatively, you can build qsvdp from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster.
     
     ```bash
@@ -208,9 +206,9 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     cargo clean
     ```
 
-    ### Debian Package Installation
+    ## Option 3: Debian Package Installation
 
-    If you are running Debian based distribution, you can install qsv using the following command:
+    Finally, if you are running Debian based distribution, you can install qsv using the following command:
 
     Add the qsv repository to your sources list:
 
