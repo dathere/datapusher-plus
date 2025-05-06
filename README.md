@@ -186,13 +186,16 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     sudo mv qsv* /usr/local/bin
     ```
 
-    Alternatively, if you want to install qsv from source, follow
-    the instructions [here](https://github.com/dathere/qsv?tab=readme-ov-file#option-4-compile-from-source). Note that when compiling from source,
-    you may want to look into the [Performance Tuning](https://github.com/dathere/qsv#performance-tuning)
-    section to squeeze even more performance from qsv.
+    If you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library. If so, use the `qsv-X.X.X-unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
 
-    Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
-    If so, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+    Alternatively, you can build qsvdp from source.
+    
+    ```bash
+    git clone https://github.com/dathere/qsv.git
+    cd qsv
+    CARGO_BUILD_RUSTFLAGS='-C target-cpu=native' cargo build --release --locked --bin qsvdp -F datapusher_plus
+    sudo cp target/release/qsvdp /usr/local/bin
+    ```
 
     If you already have qsv, update it to the latest release by using the --update option.
 
