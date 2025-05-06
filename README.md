@@ -4,7 +4,7 @@
 
 # DataPusher+
 
-> NOTE: v2 is a major revamp. Updated documentation will be available shortly.
+> NOTE: v2 is a major revamp. Documentation is currently WIP.
 
 DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher - super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file.
 
