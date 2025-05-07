@@ -174,41 +174,9 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
 5. Install [qsv](https://github.com/dathere/qsv).
 
-    ## Option 1: Install Prebuilt qsv Binaries
-    [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
-    it to the appropriate directory, e.g. for Linux:
+    ## Option 1: Debian Package Installation (Easiest)
 
-    ```bash
-    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    sudo mv qsv* /usr/local/bin
-    ```
-
-    If you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library. If so, use the `qsv-X.X.X-unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
-
-
-    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run qsv with the `--update` option and it will check for the latest version and update as required.
-
-    ## Option 2: Build qsv from source
-    Alternatively, you can build qsvdp from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster.
-    
-    ```bash
-    git clone https://github.com/dathere/qsv.git
-    cd qsv
-
-    # install Rust, if it's not installed
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-    # build qsvdp
-    CARGO_BUILD_RUSTFLAGS='-C target-cpu=native' cargo build --release --locked --bin qsvdp -F datapusher_plus
-    sudo cp target/release/qsvdp /usr/local/bin
-    cargo clean
-    ```
-
-    ## Option 3: Debian Package Installation
-
-    Finally, if you are running Debian based distribution, you can install qsv using the following command:
+    If you are running Debian based Linux distribution on x86_64, you can quickly install qsv using the following commands:
 
     Add the qsv repository to your sources list:
 
@@ -228,6 +196,40 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
       sudo apt update
       sudo apt install qsv
       ```
+
+    ## Option 2: Install Prebuilt qsv Binaries (Easy)
+    [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy it to the appropriate directory, e.g. for Ubuntu LTS 22.04 or 24.04:
+
+    ```bash
+    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    sudo mv qsv* /usr/local/bin
+    ```
+
+    If you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library. If so, use the `qsv-4.0.0-unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+
+
+    > ℹ️ **NOTE:** qsv's prebuilt binaries have the ability to self-update to the latest version. Just run qsv with the `--update` option and it will check for the latest version and update itself as required.
+    > ```
+    > sudo qsvdp --update
+    > ```
+
+    ## Option 3: Build qsv from source 
+    Finally, you can build qsvdp from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster, but may take up to 30 minutes to compile.
+    
+    ```bash
+    git clone https://github.com/dathere/qsv.git
+    cd qsv
+
+    # install Rust, if it's not installed
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+    # build qsvdp
+    CARGO_BUILD_RUSTFLAGS='-C target-cpu=native' cargo build --release --locked --bin qsvdp -F datapusher_plus
+    sudo cp target/release/qsvdp /usr/local/bin
+    cargo clean
+    ```
 
 6. Create an API token for the DP+ Service account. 
    Replace `CKAN_ADMIN` with an existing CKAN user with sysadmin privileges.
