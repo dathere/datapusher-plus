@@ -13,14 +13,15 @@ from jinja2 import DictLoader, Environment, FileSystemBytecodeCache, pass_contex
 
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
+import ckan.plugins.toolkit as tk
 
 log = logging.getLogger(__name__)
 if not log.handlers:
     log.addHandler(logging.StreamHandler())
 
-# At the top of jinja2_helpers.py
 JINJA2_FILTERS = []
 JINJA2_GLOBALS = []
+USES_SQL = []
 
 
 def jinja2_filter(func):
@@ -32,6 +33,12 @@ def jinja2_filter(func):
 def jinja2_global(func):
     """Decorator to register a function as a Jinja2 global."""
     JINJA2_GLOBALS.append(func)
+    return func
+
+
+def uses_sql(func):
+    """Decorator to register a function as using SQL."""
+    USES_SQL.append(func)
     return func
 
 
@@ -211,12 +218,18 @@ class FormulaProcessor:
 
         env = Environment(loader=DictLoader(context), bytecode_cache=bytecode_cache)
 
+        datastore_sqlsearch_enabled = tk.get_config.get(
+            "ckan.datastore.sqlsearch.enabled", False
+        )
+
         # Register filters
         for func in JINJA2_FILTERS:
-            env.filters[func.__name__] = func
+            if func not in USES_SQL or datastore_sqlsearch_enabled:
+                env.filters[func.__name__] = func
         # Register globals
         for func in JINJA2_GLOBALS:
-            env.globals[func.__name__] = func
+            if func not in USES_SQL or datastore_sqlsearch_enabled:
+                env.globals[func.__name__] = func
         return env
 
 
@@ -543,6 +556,7 @@ def get_frequency_top_values(
 
 
 @jinja2_global
+@uses_sql
 @pass_context
 def temporal_resolution(context, date_field=None):
     """
@@ -596,6 +610,7 @@ def temporal_resolution(context, date_field=None):
 
 
 @jinja2_global
+@uses_sql
 @pass_context
 def guess_accrual_periodicity(context, date_field=None):
     """
