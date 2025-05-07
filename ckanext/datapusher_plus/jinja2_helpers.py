@@ -218,7 +218,7 @@ class FormulaProcessor:
 
         env = Environment(loader=DictLoader(context), bytecode_cache=bytecode_cache)
 
-        datastore_sqlsearch_enabled = tk.get_config.get(
+        datastore_sqlsearch_enabled = tk.config.get(
             "ckan.datastore.sqlsearch.enabled", False
         )
 
