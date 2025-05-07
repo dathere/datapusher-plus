@@ -247,7 +247,6 @@ def _push_to_datastore(
                 "http": conf.DOWNLOAD_PROXY,
                 "https": conf.DOWNLOAD_PROXY,
             }
-        logger.trace(f"kwargs: {kwargs}")
         with requests.get(resource_url, **kwargs) as response:
             response.raise_for_status()
 
