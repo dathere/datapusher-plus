@@ -216,6 +216,87 @@ class QSVCommand:
 
         return self._run_command(args)
 
+    def geocode(
+        self,
+        input_file: str,
+        subcommand: str,
+        column: str,
+        new_column: Optional[str] = None,
+        rename: Optional[str] = None,
+        country: Optional[str] = None,
+        min_score: Optional[float] = None,
+        admin1: Optional[bool] = None,
+        k_weight: Optional[float] = None,
+        format_str: Optional[str] = None,
+        output_file: Optional[str] = None,
+    ) -> subprocess.CompletedProcess:
+        """
+        Geocode addresses in a CSV file.
+
+        Args:
+            input_file: Path to the input CSV file
+            subcommand: One of: suggest, suggestnow, reverse, reversenow, countryinfo, countryinfonow
+            column: Column containing addresses to geocode
+            new_column: New column name for geocoded results
+            rename: Rename the column containing addresses to geocode
+            country: Country code to restrict geocoding to (e.g., "US")
+            min_score: Minimum score threshold for geocoding matches (0.0-1.0)
+            admin1: Whether to include administrative level 1 (state/province) information
+            k_weight: Weight for the k-nearest neighbors algorithm (0.0-1.0)
+            format_str: Custom format string for output
+            output_file: Path to the output file
+
+        Returns:
+            The result of the command
+
+        Raises:
+            utils.JobError: If the command fails
+        """
+        valid_subcommands = [
+            "suggest",
+            "suggestnow",
+            "reverse",
+            "reversenow",
+            "countryinfo",
+            "countryinfonow",
+        ]
+        if subcommand not in valid_subcommands:
+            raise utils.JobError(
+                f"Invalid subcommand: {subcommand}. Must be one of: {', '.join(valid_subcommands)}"
+            )
+
+        args = ["geocode", subcommand, input_file, column]
+
+        if new_column:
+            args.extend(["--new-column", new_column])
+
+        if rename:
+            args.extend(["--rename", rename])
+
+        if country:
+            args.extend(["--country", country])
+
+        if min_score is not None:
+            if not 0.0 <= min_score <= 1.0:
+                raise utils.JobError("min_score must be between 0.0 and 1.0")
+            args.extend(["--min-score", str(min_score)])
+
+        if admin1 is not None:
+            args.append("--admin1")
+
+        if k_weight is not None:
+            if not 0.0 <= k_weight <= 1.0:
+                raise utils.JobError("k_weight must be between 0.0 and 1.0")
+            args.extend(["--k-weight", str(k_weight)])
+
+        if format_str:
+            args.extend(["--format", format_str])
+
+        if output_file:
+            args.extend(["--output", output_file])
+
+        return self._run_command(args)
+
     def input(
         self,
         input_file: str,
