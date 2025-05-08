@@ -282,19 +282,34 @@ def format_bytes(bytes):
 
 @jinja2_filter
 def format_date(value, format="%Y-%m-%d"):
-    """Format dates in specified format
+    """Format dates in specified format. This function takes a date value and formats it according to the specified format string.
+
+    The function handles three cases:
+    1. If the input is None, returns None
+    2. If the input is already a datetime object, formats it directly using strftime()
+    3. If the input is a string, attempts to parse it as an ISO format date first
+
+    If parsing fails in case 3, returns the original value unchanged.
+
+    Args:
+        value: A datetime object, ISO format date string, or None
+        format: A strftime format string (default: "%Y-%m-%d")
+
+    Returns:
+        str: The formatted date string
+        None: If input was None
+        original value: If parsing failed
 
     Example:
     {{ dpps.created_date.stats.max | format_date("%B %d, %Y") }} -> January 1, 2024
     """
     if value is None:
-        return value
+        return None
     try:
+        # value is already a datetime object
         return value.strftime(format)
     except AttributeError:
         # Try to parse string to date
-        from datetime import datetime
-
         try:
             dt = datetime.fromisoformat(value)
             return dt.strftime(format)
@@ -312,9 +327,12 @@ def calculate_percentage(part, whole):
     try:
         part = float(part)
         whole = float(whole)
-        return (part / whole) * 100 if whole else 0
+        if whole == 0:
+            raise ValueError("Whole value is zero")
+        else:
+            return (part / whole) * 100
     except (TypeError, ValueError, ZeroDivisionError):
-        return 0
+        raise ValueError("Error calculating percentage")
 
 
 @jinja2_filter
@@ -376,29 +394,28 @@ def calculate_bbox_area(
 
     earth_radius = 6371  # km
 
-    if min_lon is None or min_lat is None or max_lon is None or max_lat is None:
-        bbox = context.get("resource").get("dpp_spatial_extent")
-        if bbox:
-            # get the min/max coordinates from the spatial extent
-            # which is in BoundingBox format
-            if bbox.get("type") != "BoundingBox":
-                # validate the spatial extent is a BoundingBox first
-                return None
-            else:
-                bbox_coords = bbox.get("coordinates")
-                min_lon = bbox_coords[0][0]
-                min_lat = bbox_coords[0][1]
-                max_lon = bbox_coords[1][0]
-                max_lat = bbox_coords[1][1]
-        elif context.get("dpp").get("NO_LAT_LON_FIELDS"):
-            return None
+    bbox = context.get("resource").get("dpp_spatial_extent")
+    if bbox:
+        # get the min/max coordinates from the spatial extent
+        # which is in BoundingBox format
+        if bbox.get("type") != "BoundingBox":
+            # validate the spatial extent is a BoundingBox first
+            raise ValueError("Spatial extent is not a BoundingBox")
         else:
-            lon_field = context.get("dpp").get("LON_FIELD")
-            lat_field = context.get("dpp").get("LAT_FIELD")
-            min_lon = context.get("dpps").get(lon_field).get("stats").get("min")
-            min_lat = context.get("dpps").get(lat_field).get("stats").get("min")
-            max_lon = context.get("dpps").get(lon_field).get("stats").get("max")
-            max_lat = context.get("dpps").get(lat_field).get("stats").get("max")
+            bbox_coords = bbox.get("coordinates")
+            min_lon = bbox_coords[0][0]
+            min_lat = bbox_coords[0][1]
+            max_lon = bbox_coords[1][0]
+            max_lat = bbox_coords[1][1]
+    elif context.get("dpp").get("NO_LAT_LON_FIELDS"):
+        raise ValueError("No latitude or longitude fields found")
+    else:
+        lon_field = context.get("dpp").get("LON_FIELD")
+        lat_field = context.get("dpp").get("LAT_FIELD")
+        min_lon = context.get("dpps").get(lon_field).get("stats").get("min")
+        min_lat = context.get("dpps").get(lat_field).get("stats").get("min")
+        max_lon = context.get("dpps").get(lon_field).get("stats").get("max")
+        max_lat = context.get("dpps").get(lat_field).get("stats").get("max")
 
     # Convert degree differences to radians for accurate area calculation
     width = abs(max_lon - min_lon) * (pi / 180) * cos(radians((min_lat + max_lat) / 2))
@@ -437,29 +454,28 @@ def spatial_extent_wkt(
         >>> spatial_extent_wkt()
         'POLYGON((-180 -90, -180 90, 180 90, 180 -90, -180 -90))'
     """
-    if min_lon is None or min_lat is None or max_lon is None or max_lat is None:
-        bbox = context.get("resource").get("dpp_spatial_extent")
-        if bbox:
-            # get the min/max coordinates from the spatial extent
-            # which is in BoundingBox format
-            if bbox.get("type") != "BoundingBox":
-                # validate the spatial extent is a BoundingBox first
-                return None
-            else:
-                bbox_coords = bbox.get("coordinates")
-                min_lon = bbox_coords[0][0]
-                min_lat = bbox_coords[0][1]
-                max_lon = bbox_coords[1][0]
-                max_lat = bbox_coords[1][1]
-        elif context.get("dpp").get("NO_LAT_LON_FIELDS"):
-            return None
+    bbox = context.get("resource").get("dpp_spatial_extent")
+    if bbox:
+        # get the min/max coordinates from the spatial extent
+        # which is in BoundingBox format
+        if bbox.get("type") != "BoundingBox":
+            # validate the spatial extent is a BoundingBox first
+            raise ValueError("Spatial extent is not a BoundingBox")
         else:
-            lon_field = context.get("dpp").get("LON_FIELD")
-            lat_field = context.get("dpp").get("LAT_FIELD")
-            min_lon = context.get("dpps").get(lon_field).get("stats").get("min")
-            min_lat = context.get("dpps").get(lat_field).get("stats").get("min")
-            max_lon = context.get("dpps").get(lon_field).get("stats").get("max")
-            max_lat = context.get("dpps").get(lat_field).get("stats").get("max")
+            bbox_coords = bbox.get("coordinates")
+            min_lon = bbox_coords[0][0]
+            min_lat = bbox_coords[0][1]
+            max_lon = bbox_coords[1][0]
+            max_lat = bbox_coords[1][1]
+    elif context.get("dpp").get("NO_LAT_LON_FIELDS"):
+        raise ValueError("No latitude or longitude fields found")
+    else:
+        lon_field = context.get("dpp").get("LON_FIELD")
+        lat_field = context.get("dpp").get("LAT_FIELD")
+        min_lon = context.get("dpps").get(lon_field).get("stats").get("min")
+        min_lat = context.get("dpps").get(lat_field).get("stats").get("min")
+        max_lon = context.get("dpps").get(lon_field).get("stats").get("max")
+        max_lat = context.get("dpps").get(lat_field).get("stats").get("max")
     # Create WKT polygon string from coordinates
     wkt = f"SRID=4326;POLYGON(({min_lon} {min_lat}, {min_lon} {max_lat}, {max_lon} {max_lat}, {max_lon} {min_lat}, {min_lon} {min_lat}))"
     return wkt
@@ -497,7 +513,7 @@ def spatial_extent_feature_collection(
         feature_type = "calculated"
         # validate bbox
         if len(bbox) != 4:
-            return None
+            raise ValueError("Invalid bounding box")
         else:
             bbox = [float(coord) for coord in bbox]
     else:
@@ -505,7 +521,7 @@ def spatial_extent_feature_collection(
             bbox = context.get("resource").get("dpp_spatial_extent").get("coordinates")
         else:
             if context.get("dpp").get("NO_LAT_LON_FIELDS"):
-                return None
+                raise ValueError("No latitude or longitude fields found")
             else:
                 lat_field = context.get("dpp").get("LAT_FIELD")
                 lon_field = context.get("dpp").get("LON_FIELD")
@@ -517,7 +533,7 @@ def spatial_extent_feature_collection(
                         context.get("dpps").get(lat_field).get("stats").get("max"),
                     ]
                 else:
-                    return None
+                    raise ValueError("No latitude or longitude fields found")
 
     return f'{{"type": "FeatureCollection", "features": [{{"type": "Feature", "properties": {{"name": "{name}", "type": "{feature_type}"}}, "geometry": {{"type": "Polygon", "coordinates": [[[{bbox[0]},{bbox[1]}], [{bbox[0]},{bbox[3]}], [{bbox[2]},{bbox[3]}], [{bbox[2]},{bbox[1]}], [{bbox[0]},{bbox[1]}]]]}}}}]}}'
 
@@ -546,10 +562,10 @@ def get_frequency_top_values(
     dppf = context.get("dppf")
 
     if not dppf:
-        return []
+        raise ValueError("No frequency data found")
 
     if field not in dppf:
-        return []
+        raise ValueError("Field not found in frequency data")
 
     # The data is already sorted by frequency in descending order from qsv frequency
     return dppf[field][:count]
@@ -559,9 +575,30 @@ def get_frequency_top_values(
 @uses_sql
 @pass_context
 def temporal_resolution(context, date_field=None):
-    """
-    Compute the minimum interval (in ISO 8601 duration) between sorted unique dates in a date field.
-    Fetch them using the CKAN DataStore SQL API.
+    """Compute the minimum interval between sorted unique dates in a date field.
+
+    This function analyzes a date field in a resource to determine the smallest time interval
+    between consecutive dates. It returns the interval in ISO 8601 duration format.
+
+    Args:
+        context (dict): The Jinja2 template context containing resource info and stats
+        date_field (str, optional): Name of the date field to analyze. If not provided,
+            uses the first date field found in the resource.
+
+    Returns:
+        str: ISO 8601 duration string representing the minimum interval between dates:
+            - "PT1H" for sub-daily intervals
+            - "P1D" for daily intervals
+            - "PnD" for n-day intervals up to 31 days
+            - "PnM" for n-month intervals up to 12 months
+            - "PnY" for n-year intervals
+            - None if no valid intervals found
+
+    Raises:
+        ValueError: If no date fields found, not enough records, or error processing dates
+
+    Example:
+        {{ temporal_resolution("date_column") }} -> "P1D" for daily data
     """
     dpp = context.get("dpp", {})
     resource = context.get("resource", {})
@@ -569,13 +606,15 @@ def temporal_resolution(context, date_field=None):
     if not date_field:
         date_fields = dpp.get("DATE_FIELDS", [])
         if not date_fields:
-            return None
+            raise ValueError("No date fields found")
+        # if there are DATE_FIELDS, but no date_field is provided,
+        # use the first one
         date_field = date_fields[0]
 
     # Get unique values for the date field from the DataStore
     resource_id = resource.get("id")
     if not resource_id:
-        return None
+        raise ValueError("No resource ID found")
     sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
     try:
         records = dsu.datastore_search_sql(sql)
@@ -583,10 +622,9 @@ def temporal_resolution(context, date_field=None):
             r[date_field] for r in records.get("records", []) if r.get(date_field)
         ]
         if len(values) < 2:
-            return None
+            raise ValueError("Not enough records to get temporal resolution")
     except Exception as e:
-        log.error(f"Error getting temporal resolution: {e}")
-        return None
+        raise ValueError(f"Error getting temporal resolution: {e}")
 
     # Parse and sort dates
     try:
@@ -606,41 +644,63 @@ def temporal_resolution(context, date_field=None):
         else:
             return f"P{min_days//365}Y"
     except Exception:
-        return None
+        raise ValueError("Error getting temporal resolution")
 
 
 @jinja2_global
 @uses_sql
 @pass_context
 def guess_accrual_periodicity(context, date_field=None):
-    """
-    Guess accrual periodicity (e.g., 'R/P1D' for daily) from date intervals.
+    """Guess the accrual periodicity of a dataset based on date intervals.
+
+    Analyzes the intervals between dates in a date field to determine how frequently
+    the dataset is updated. Returns an ISO 8601 duration pattern with repeating interval.
+
+    Args:
+        context (dict): Context dictionary containing resource and field information
+        date_field (str, optional): Name of the date field to analyze. If not provided,
+            will use the first detected date field.
+
+    Returns:
+        str: ISO 8601 repeating duration pattern, e.g.:
+            - "R/P1D" for daily
+            - "R/P7D" for weekly
+            - "R/P1M" for monthly
+            - "R/P1Y" for yearly
+
+    Raises:
+        ValueError: If no date fields found, not enough records to analyze,
+            or other errors occur during processing.
+
+    Example:
+        {{ guess_accrual_periodicity("updated_date") }} -> "R/P1D"
     """
     dpp = context.get("dpp", {})
     if not date_field:
         date_fields = dpp.get("DATE_FIELDS", [])
         if not date_fields:
-            return None
+            raise ValueError("No date fields found")
+        # if there are DATE_FIELDS, but no date_field is provided,
+        # use the first one
         date_field = date_fields[0]
     try:
         resource_id = context.get("resource", {}).get("id")
         if not resource_id:
-            return None
+            raise ValueError("No resource ID found")
         sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
         try:
             records = dsu.datastore_search_sql(sql)
         except Exception as e:
-            log.error(f"Error getting accrual periodicity: {e}")
-            return None
+            raise ValueError(f"Error getting accrual periodicity: {e}")
         values = [
             r[date_field] for r in records.get("records", []) if r.get(date_field)
         ]
         if len(values) < 2:
-            return None
+            raise ValueError("Not enough records to guess accrual periodicity")
         dates = [datetime.fromisoformat(v) for v in values if v]
         intervals = [(dates[i + 1] - dates[i]).days for i in range(len(dates) - 1)]
         if not intervals:
-            return None
+            raise ValueError("No intervals found")
         # Use the most common interval
         most_common = Counter(intervals).most_common(1)[0][0]
         if most_common == 1:
@@ -652,7 +712,7 @@ def guess_accrual_periodicity(context, date_field=None):
         else:
             return f"R/P{most_common//365}Y"
     except Exception:
-        return None
+        raise ValueError("Error guessing accrual periodicity")
 
 
 @jinja2_global
@@ -690,11 +750,11 @@ def spatial_resolution_in_meters(context):
     dpp = context.get("dpp", {})
     dpps = context.get("dpps", {})
     if dpp.get("NO_LAT_LON_FIELDS"):
-        return None
+        raise ValueError("No latitude or longitude fields found")
     lat_field = dpp.get("LAT_FIELD")
     lon_field = dpp.get("LON_FIELD")
     if not lat_field or not lon_field:
-        return None
+        raise ValueError("No latitude or longitude fields found")
     min_lat = dpps[lat_field]["stats"]["min"]
     max_lat = dpps[lat_field]["stats"]["max"]
     min_lon = dpps[lon_field]["stats"]["min"]
@@ -710,21 +770,65 @@ def spatial_resolution_in_meters(context):
     return d
 
 
-@jinja2_filter
-def get_field_null_percentage(field_stats):
+@jinja2_global
+@pass_context
+def get_column_null_percentage(context, column_name):
     """
     Compute the percentage of nulls in a field.
-    Usage: {{ dpps.FIELDNAME.stats | get_field_null_percentage }}
+    Usage: {{ get_column_null_percentage("column_name") }}
     """
+    if not column_name:
+        raise ValueError("Column name is required")
+    field_stats = context.get("dpps", {}).get(column_name, {}).get("stats", {})
     nullcount = field_stats.get("nullcount", 0)
-    count = field_stats.get("count", 1)
-    return (nullcount / count) * 100 if count else 0
+    record_count = context.get("dpp", {}).get("RECORD_COUNT", 0)
+    if record_count == 0:
+        return 0
+    else:
+        return (nullcount / record_count) * 100
 
 
-@jinja2_filter
-def get_field_unique_count(field_stats):
+@jinja2_global
+@pass_context
+def get_column_stats(context, column_name, stat_name=None):
+    """Get statistics for a column in the datastore.
+
+    This function retrieves statistics for a specified column from the datastore stats.
+    Available statistics typically include: min, max, sum, mean, stddev, variance,
+    nullcount, cardinality, and type.
+
+    Args:
+        context (dict): The Jinja2 template context containing stats data
+        column_name (str): Name of the column to get stats for
+        stat_name (str|list, optional): Specific stat(s) to return. Can be:
+            - None: Returns all available stats (default)
+            - str: Returns value for a single stat
+            - list: Returns dict of values for specified stats
+
+    Returns:
+        dict|float: Statistics for the column. Returns:
+            - All stats as dict if stat_name is None
+            - Single stat value if stat_name is string
+            - Dict of requested stats if stat_name is list
+            - 0 if stat not found
+
+    Examples:
+        Get all stats:
+        {{ get_column_stats("temperature") }}
+
+        Get specific stats:
+        {{ get_column_stats("temperature", ["min", "max"]) }}
+
+        Get single stat:
+        {{ get_column_stats("temperature", "avg") }}
     """
-    Compute the number of unique values in a field.
-    Usage: {{ dpps.FIELDNAME.stats | get_field_unique_count }}
-    """
-    return field_stats.get("uniquecount", 0)
+    if not column_name:
+        raise ValueError("Column name is required")
+    field_stats = context.get("dpps", {}).get(column_name, {}).get("stats", {})
+    if stat_name:
+        if isinstance(stat_name, list):
+            return {k: field_stats.get(k, 0) for k in stat_name}
+        else:
+            return field_stats.get(stat_name, 0)
+    else:
+        return field_stats
