@@ -35,7 +35,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
     p.implements(p.IConfigurable, inherit=True)
     p.implements(p.IActions)
     p.implements(p.IAuthFunctions)
-    # p.implements(p.IPackageController, inherit=True)
+    p.implements(p.IPackageController, inherit=True)
     p.implements(p.IResourceUrlChange)
     p.implements(p.IResourceController, inherit=True)
     p.implements(p.ITemplateHelpers)
@@ -51,9 +51,9 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         tk.add_resource("assets", "datapusher_plus")
 
     # IPackageController
-    # def before_dataset_index(self, dataset_dict: dict[str, Any]):
-    #     # breakpoint()
-    #     return dataset_dict
+    def before_dataset_index(self, dataset_dict: dict[str, Any]):
+        dataset_dict.pop("dpp_suggestions", None)
+        return dataset_dict
 
     # IResourceUrlChange
     def notify(self, resource: model.Resource):
