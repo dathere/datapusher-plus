@@ -7,6 +7,8 @@ from ckan.common import CKANConfig
 import logging
 from typing import Any, Callable
 
+from ckan.types import Action, AuthFunction, Context
+
 import ckan.model as model
 import ckan.plugins as p
 import ckanext.datapusher_plus.views as views
@@ -19,18 +21,8 @@ tk = p.toolkit
 
 log = logging.getLogger(__name__)
 
-try:
-    config_declarations = tk.blanket.config_declarations
-except AttributeError:
-    # CKAN 2.9 does not have config_declarations.
-    # Remove when dropping support.
-    def config_declarations(cls):
-        return cls
 
-
-# Get ready for CKAN 2.10 upgrade
-if tk.check_ckan_version("2.10"):
-    from ckan.types import Action, AuthFunction, Context
+config_declarations = tk.blanket.config_declarations
 
 
 class DatastoreException(Exception):
