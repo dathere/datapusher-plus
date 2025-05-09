@@ -292,6 +292,7 @@ ckan.plugins = <other plugins> datapusher_plus
 > ckanext.datapusher_plus.latitude_fields = latitude,lat
 > ckanext.datapusher_plus.longitude_fields = longitude,long,lon
 > ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+> ckanext.datapusher_plus.auto_unzip_one_file = true
 > ckanext.datapusher_plus.api_token = <CKAN service account token for CKAN user with sysadmin privileges>
 >ckanext.datapusher_plus.describeGPT_api_key = <Token for OpenAI API compatible service>
 >```
