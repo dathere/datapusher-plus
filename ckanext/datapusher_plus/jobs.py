@@ -453,7 +453,7 @@ def _push_to_datastore(
                     )
                     tmp = qsv_spatial_csv
 
-                    # Check if the resource already exists
+                    # Check if the simplified resource already exists
                     simplified_resource_name = (
                         os.path.splitext(resource["name"])[0]
                         + "_simplified"
