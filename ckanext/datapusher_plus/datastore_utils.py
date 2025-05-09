@@ -72,6 +72,17 @@ def datastore_search_sql(sql: str) -> dict:
         raise utils.JobError(f'Error running datastore_search_sql "{sql}": {e}')
 
 
+def datastore_info(resource_id: str) -> dict:
+    """Get datastore info for a resource."""
+    context = {"ignore_auth": True}
+    data_dict = {"id": resource_id}
+    try:
+        result = tk.get_action("datastore_info")(context, data_dict)
+        return result
+    except Exception as e:
+        raise utils.JobError(f'Error getting datastore info for "{resource_id}": {e}')
+
+
 def send_resource_to_datastore(
     resource: dict,
     resource_id: str,
