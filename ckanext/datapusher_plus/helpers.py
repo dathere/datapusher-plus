@@ -48,9 +48,7 @@ def datapusher_status_description(status: Dict[str, Any]) -> str:
 
 
 def get_job(
-    job_id: Optional[str], 
-    limit: Optional[int] = None, 
-    use_aps_id: bool = False
+    job_id: Optional[str], limit: Optional[int] = None, use_aps_id: bool = False
 ) -> Optional[Dict[str, Any]]:
     """Return the job with the given job_id as a dict.
 
@@ -143,7 +141,7 @@ def add_pending_job(
     job_key: Optional[str] = None,
     data: Optional[Dict[str, Any]] = None,
     metadata: Optional[Dict[str, Any]] = None,
-    result_url: Optional[str] = None
+    result_url: Optional[str] = None,
 ) -> None:
     """Add a new job with status "pending" to the jobs table.
 
@@ -243,7 +241,9 @@ def add_pending_job(
                 raise e
 
 
-def validate_error(error: Optional[Union[str, Dict[str, Any]]]) -> Optional[Dict[str, str]]:
+def validate_error(
+    error: Optional[Union[str, Dict[str, Any]]],
+) -> Optional[Dict[str, str]]:
     """Validate and return the given error object.
 
     Based on the given error object, return either None or a dict with a
@@ -283,7 +283,9 @@ def validate_error(error: Optional[Union[str, Dict[str, Any]]]) -> Optional[Dict
             )
 
 
-def update_job(job_id: str, job_dict: Dict[str, Any]) -> None:  # sourcery skip: raise-specific-error
+def update_job(
+    job_id: str, job_dict: Dict[str, Any]
+) -> None:  # sourcery skip: raise-specific-error
     """Update the database row for the given job_id with the given job_dict.
 
     All functions that update rows in the jobs table do it by calling this
@@ -405,12 +407,15 @@ def extract_zip_or_metadata(
 ):
     """
     Extract metadata from ZIP archive and save to CSV file.
-    If the ZIP file contains only one item of a supported format, extract it directly.
+    If the ZIP file contains only one item of a supported format and
+    AUTO_UNZIP_ONE_FILE is True, extract it directly.
 
     Args:
         zip_path: Path to the ZIP file
-        output_dir: Directory to save the extracted or metadata file (defaults to zip_path's directory)
-        task_logger: Optional logger to use for logging (if not provided, module logger will be used)
+        output_dir: Directory to save the extracted or metadata file
+                    (defaults to zip_path's directory)
+        task_logger: Optional logger to use for logging
+                     (if not provided, module logger will be used)
 
     Returns:
         tuple: (int, str, str) - (file_count, result_path, unzipped_format)
@@ -432,7 +437,7 @@ def extract_zip_or_metadata(
             file_list = [info for info in zip_file.infolist() if not info.is_dir()]
             file_count = len(file_list)
 
-            if file_count == 1:
+            if file_count == 1 and conf.AUTO_UNZIP_ONE_FILE:
                 file_info = file_list[0]
                 file_name = file_info.filename
                 file_ext = os.path.splitext(file_name)[1][1:].upper()
