@@ -164,3 +164,10 @@ LONGITUDE_FIELDS = tk.config.get(
 JINJA2_BYTECODE_CACHE_DIR = tk.config.get(
     "ckanext.datapusher_plus.jinja2_bytecode_cache_dir", "/tmp/jinja2_bytecode_cache"
 )
+
+# if a zip archive is uploaded, and it only contains one file and the file
+# is one of the supported formats, automatically unzip the file and pump the
+# contents into the datastore. Leave the zip file as the "main" resource.
+AUTO_UNZIP_ONE_FILE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_unzip_one_file", True)
+)
