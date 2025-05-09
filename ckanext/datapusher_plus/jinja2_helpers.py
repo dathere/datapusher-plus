@@ -224,11 +224,19 @@ class FormulaProcessor:
 
         # Register filters
         for func in JINJA2_FILTERS:
-            if func not in USES_SQL or datastore_sqlsearch_enabled:
+            if func in USES_SQL and not datastore_sqlsearch_enabled:
+                self.logger.warning(
+                    f"Datastore SQL Search is disabled, skipping filter {func.__name__}"
+                )
+            else:
                 env.filters[func.__name__] = func
         # Register globals
         for func in JINJA2_GLOBALS:
-            if func not in USES_SQL or datastore_sqlsearch_enabled:
+            if func in USES_SQL and not datastore_sqlsearch_enabled:
+                self.logger.warning(
+                    f"Datastore SQL Search is disabled, skipping global {func.__name__}"
+                )
+            else:
                 env.globals[func.__name__] = func
         return env
 
@@ -580,6 +588,12 @@ def temporal_resolution(context, date_field=None):
     This function analyzes a date field in a resource to determine the smallest time interval
     between consecutive dates. It returns the interval in ISO 8601 duration format.
 
+    NOTE: This function uses the CKAN DataStore SQL API to fetch all the unique dates for
+    the given date field. This is OK even for large datasets as DP+ automatically adds an
+    index on date fields BY DEFAULT (configurable with AUTO_INDEX_DATES).
+    If AUTO_INDEX_DATES is set to False, this function will log a warning to alert
+    the user that the resource will be slow to process.
+
     Args:
         context (dict): The Jinja2 template context containing resource info and stats
         date_field (str, optional): Name of the date field to analyze. If not provided,
@@ -605,8 +619,11 @@ def temporal_resolution(context, date_field=None):
 
     if not date_field:
         date_fields = dpp.get("DATE_FIELDS", [])
+        datetime_fields = dpp.get("DATETIME_FIELDS", [])
+        if datetime_fields:
+            date_fields.extend(datetime_fields)
         if not date_fields:
-            raise ValueError("No date fields found")
+            raise ValueError("No date or datetime fields found")
         # if there are DATE_FIELDS, but no date_field is provided,
         # use the first one
         date_field = date_fields[0]
@@ -615,6 +632,24 @@ def temporal_resolution(context, date_field=None):
     resource_id = resource.get("id")
     if not resource_id:
         raise ValueError("No resource ID found")
+
+    # check if the resource has an index on the date field
+    # if not, log a warning
+    datastore_info = dsu.datastore_info(resource_id)
+    index_exists = False
+    for field in datastore_info.get("fields", []):
+        if field.get("id") == date_field:
+            schema = field.get("schema", {})
+            index_name = schema.get("index_name")
+            if index_name == f"{resource_id}_{date_field}_idx":
+                index_exists = True
+                break
+    if not index_exists:
+        log = context.get("logger", logging.getLogger(__name__))
+        log.warning(
+            f"Resource {resource_id} does not have an index on the date field {date_field}. This will slow down the temporal resolution calculation."
+        )
+
     sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
     try:
         records = dsu.datastore_search_sql(sql)
@@ -656,6 +691,12 @@ def guess_accrual_periodicity(context, date_field=None):
     Analyzes the intervals between dates in a date field to determine how frequently
     the dataset is updated. Returns an ISO 8601 duration pattern with repeating interval.
 
+    NOTE: This function uses the CKAN DataStore SQL API to fetch all the unique dates for
+    the given date field. This is OK even for large datasets as DP+ automatically adds an
+    index on date fields BY DEFAULT (configurable with AUTO_INDEX_DATES).
+    If AUTO_INDEX_DATES is set to False, this function will log a warning to alert
+    the user that the resource will be slow to process.
+
     Args:
         context (dict): Context dictionary containing resource and field information
         date_field (str, optional): Name of the date field to analyze. If not provided,
@@ -678,15 +719,37 @@ def guess_accrual_periodicity(context, date_field=None):
     dpp = context.get("dpp", {})
     if not date_field:
         date_fields = dpp.get("DATE_FIELDS", [])
+        datetime_fields = dpp.get("DATETIME_FIELDS", [])
+        if datetime_fields:
+            date_fields.extend(datetime_fields)
         if not date_fields:
-            raise ValueError("No date fields found")
+            raise ValueError("No date or datetime fields found")
         # if there are DATE_FIELDS, but no date_field is provided,
         # use the first one
         date_field = date_fields[0]
+
+    resource_id = context.get("resource", {}).get("id")
+    if not resource_id:
+        raise ValueError("No resource ID found")
+
+    # check if the resource has an index on the date field
+    # if not, log a warning
+    datastore_info = dsu.datastore_info(resource_id)
+    index_exists = False
+    for field in datastore_info.get("fields", []):
+        if field.get("id") == date_field:
+            schema = field.get("schema", {})
+            index_name = schema.get("index_name")
+            if index_name == f"{resource_id}_{date_field}_idx":
+                index_exists = True
+                break
+    if not index_exists:
+        log = context.get("logger", logging.getLogger(__name__))
+        log.warning(
+            f"Resource {resource_id} does not have an index on the date field {date_field}. This will slow down the accrual periodicity calculation."
+        )
+
     try:
-        resource_id = context.get("resource", {}).get("id")
-        if not resource_id:
-            raise ValueError("No resource ID found")
         sql = f'SELECT DISTINCT "{date_field}" FROM "{resource_id}" WHERE "{date_field}" IS NOT NULL ORDER BY "{date_field}"'
         try:
             records = dsu.datastore_search_sql(sql)
