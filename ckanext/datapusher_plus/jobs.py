@@ -1098,137 +1098,6 @@ def _push_to_datastore(
     )
 
     # ============================================================
-    # PROCESS DRUF JINJA2 FORMULAE
-    # ============================================================
-    # Check if there are any fields with DRUF keys in the scheming_yaml
-    # There are two types of DRUF keys:
-    # 1. "formula": This is used to update the field value DIRECTLY
-    #    when the resource is created/updated. It can update both package and resource fields.
-    # 2. "suggestion_formula": This is used to populate the suggestion
-    #    popovers DURING data entry/curation.
-    # DRUF keys are stored as jinja2 template expressions in the scheming_yaml
-    # and are rendered using the Jinja2 template engine.
-    formulae_start = time.perf_counter()
-
-    # Fetch the scheming_yaml and package
-    package_id = resource["package_id"]
-    scheming_yaml, package = dsu.get_scheming_yaml(
-        package_id, scheming_yaml_type="dataset"
-    )
-
-    # check if package dpp_suggestions field does not exist
-    # and there are "suggestion_formula" keys in the scheming_yaml
-    if "dpp_suggestions" not in package:
-        # Check for suggestion_formula in dataset_fields
-        has_suggestion_formula = any(
-            isinstance(field, dict)
-            and any(key.startswith("suggestion_formula") for key in field.keys())
-            for field in scheming_yaml["dataset_fields"]
-        )
-
-        if not has_suggestion_formula:
-            logger.error(
-                '"dpp_suggestions" field required but not found in package to process Suggestion Formulae. Ensure that your scheming.yaml file contains the "dpp_suggestions" field as a json_object.'
-            )
-            return
-
-    logger.trace(f"package: {package}")
-
-    # FIRST, INITIALIZE THE FORMULA PROCESSOR
-    formula_processor = j2h.FormulaProcessor(
-        scheming_yaml,
-        package,
-        resource,
-        resource_fields_stats,
-        resource_fields_freqs,
-        dataset_stats,
-        logger,
-    )
-
-    # SECOND, WE PROCESS THE FORMULAE THAT UPDATE THE
-    # PACKAGE AND RESOURCE FIELDS DIRECTLY
-    # using the package_patch CKAN API so we only update the fields
-    # with formulae
-    package_updates = formula_processor.process_formulae(
-        "package", "dataset_fields", "formula"
-    )
-    if package_updates:
-        # Update package with formula results
-        package.update(package_updates)
-        try:
-            patched_package = dsu.patch_package(package)
-            logger.debug(f"Package after patching: {patched_package}")
-            package = patched_package
-            logger.info("PACKAGE formulae processed...")
-        except Exception as e:
-            logger.error(f"Error patching package: {str(e)}")
-
-    # Process resource formulae
-    # as this is a direct update, we update the resource dictionary directly
-    resource_updates = formula_processor.process_formulae(
-        "resource", "resource_fields", "formula"
-    )
-    if resource_updates:
-        # Update resource with formula results
-        resource.update(resource_updates)
-        logger.info("RESOURCE formulae processed...")
-
-    # THIRD, WE PROCESS THE SUGGESTIONS THAT SHOW UP IN THE SUGGESTION POPOVER
-    # we update the package dpp_suggestions field
-    # from which the Suggestion popover UI will pick it up
-    package_suggestions = formula_processor.process_formulae(
-        "package", "dataset_fields", "suggestion_formula"
-    )
-    if package_suggestions:
-        logger.trace(f"package_suggestions: {package_suggestions}")
-        revise_update_content = {"package": package_suggestions}
-        try:
-            revised_package = dsu.revise_package(
-                package_id, update={"dpp_suggestions": revise_update_content}
-            )
-            logger.trace(f"Package after revising: {revised_package}")
-            package = revised_package
-            logger.info("PACKAGE suggestion formulae processed...")
-        except Exception as e:
-            logger.error(f"Error revising package: {str(e)}")
-
-    # Process resource suggestion formulae
-    # Note how we still update the PACKAGE dpp_suggestions field
-    # and there is NO RESOURCE dpp_suggestions field.
-    # This is because suggestion formulae are used to populate the
-    # suggestion popover DURING data entry/curation and suggestion formulae
-    # may update both package and resource fields.
-    resource_suggestions = formula_processor.process_formulae(
-        "resource", "resource_fields", "suggestion_formula"
-    )
-    if resource_suggestions:
-        logger.trace(f"resource_suggestions: {resource_suggestions}")
-        resource_name = resource["name"]
-        revise_update_content = {"resource": {resource_name: resource_suggestions}}
-
-        # Handle existing suggestions
-        if package.get("dpp_suggestions"):
-            package["dpp_suggestions"].update(revise_update_content["resource"])
-        else:
-            package["dpp_suggestions"] = revise_update_content["resource"]
-
-        try:
-            revised_package = dsu.revise_package(
-                package_id, update={"dpp_suggestions": revise_update_content}
-            )
-            logger.trace(f"Package after revising: {revised_package}")
-            package = revised_package
-            logger.info("RESOURCE suggestion formulae processed...")
-        except Exception as e:
-            logger.error(f"Error revising package: {str(e)}")
-
-    # -------------------- FORMULAE PROCESSING DONE --------------------
-    formulae_elapsed = time.perf_counter() - formulae_start
-    logger.info(
-        f"FORMULAE PROCESSING DONE! Processed in {formulae_elapsed:,.2f} seconds."
-    )
-
-    # ============================================================
     # UPDATE METADATA
     # ============================================================
     metadata_start = time.perf_counter()
@@ -1543,16 +1412,148 @@ def _push_to_datastore(
         )
 
     raw_connection.close()
+
+    # ============================================================
+    # PROCESS DRUF JINJA2 FORMULAE
+    # ============================================================
+    # Check if there are any fields with DRUF keys in the scheming_yaml
+    # There are two types of DRUF keys:
+    # 1. "formula": This is used to update the field value DIRECTLY
+    #    when the resource is created/updated. It can update both package and resource fields.
+    # 2. "suggestion_formula": This is used to populate the suggestion
+    #    popovers DURING data entry/curation.
+    # DRUF keys are stored as jinja2 template expressions in the scheming_yaml
+    # and are rendered using the Jinja2 template engine.
+    formulae_start = time.perf_counter()
+
+    # Fetch the scheming_yaml and package
+    package_id = resource["package_id"]
+    scheming_yaml, package = dsu.get_scheming_yaml(
+        package_id, scheming_yaml_type="dataset"
+    )
+
+    # check if package dpp_suggestions field does not exist
+    # and there are "suggestion_formula" keys in the scheming_yaml
+    if "dpp_suggestions" not in package:
+        # Check for suggestion_formula in dataset_fields
+        has_suggestion_formula = any(
+            isinstance(field, dict)
+            and any(key.startswith("suggestion_formula") for key in field.keys())
+            for field in scheming_yaml["dataset_fields"]
+        )
+
+        if not has_suggestion_formula:
+            logger.error(
+                '"dpp_suggestions" field required but not found in package to process Suggestion Formulae. Ensure that your scheming.yaml file contains the "dpp_suggestions" field as a json_object.'
+            )
+            return
+
+    logger.trace(f"package: {package}")
+
+    # FIRST, INITIALIZE THE FORMULA PROCESSOR
+    formula_processor = j2h.FormulaProcessor(
+        scheming_yaml,
+        package,
+        resource,
+        resource_fields_stats,
+        resource_fields_freqs,
+        dataset_stats,
+        logger,
+    )
+
+    # SECOND, WE PROCESS THE FORMULAE THAT UPDATE THE
+    # PACKAGE AND RESOURCE FIELDS DIRECTLY
+    # using the package_patch CKAN API so we only update the fields
+    # with formulae
+    package_updates = formula_processor.process_formulae(
+        "package", "dataset_fields", "formula"
+    )
+    if package_updates:
+        # Update package with formula results
+        package.update(package_updates)
+        try:
+            patched_package = dsu.patch_package(package)
+            logger.debug(f"Package after patching: {patched_package}")
+            package = patched_package
+            logger.info("PACKAGE formulae processed...")
+        except Exception as e:
+            logger.error(f"Error patching package: {str(e)}")
+
+    # Process resource formulae
+    # as this is a direct update, we update the resource dictionary directly
+    resource_updates = formula_processor.process_formulae(
+        "resource", "resource_fields", "formula"
+    )
+    if resource_updates:
+        # Update resource with formula results
+        resource.update(resource_updates)
+        logger.info("RESOURCE formulae processed...")
+
+    # THIRD, WE PROCESS THE SUGGESTIONS THAT SHOW UP IN THE SUGGESTION POPOVER
+    # we update the package dpp_suggestions field
+    # from which the Suggestion popover UI will pick it up
+    package_suggestions = formula_processor.process_formulae(
+        "package", "dataset_fields", "suggestion_formula"
+    )
+    if package_suggestions:
+        logger.trace(f"package_suggestions: {package_suggestions}")
+        revise_update_content = {"package": package_suggestions}
+        try:
+            revised_package = dsu.revise_package(
+                package_id, update={"dpp_suggestions": revise_update_content}
+            )
+            logger.trace(f"Package after revising: {revised_package}")
+            package = revised_package
+            logger.info("PACKAGE suggestion formulae processed...")
+        except Exception as e:
+            logger.error(f"Error revising package: {str(e)}")
+
+    # Process resource suggestion formulae
+    # Note how we still update the PACKAGE dpp_suggestions field
+    # and there is NO RESOURCE dpp_suggestions field.
+    # This is because suggestion formulae are used to populate the
+    # suggestion popover DURING data entry/curation and suggestion formulae
+    # may update both package and resource fields.
+    resource_suggestions = formula_processor.process_formulae(
+        "resource", "resource_fields", "suggestion_formula"
+    )
+    if resource_suggestions:
+        logger.trace(f"resource_suggestions: {resource_suggestions}")
+        resource_name = resource["name"]
+        revise_update_content = {"resource": {resource_name: resource_suggestions}}
+
+        # Handle existing suggestions
+        if package.get("dpp_suggestions"):
+            package["dpp_suggestions"].update(revise_update_content["resource"])
+        else:
+            package["dpp_suggestions"] = revise_update_content["resource"]
+
+        try:
+            revised_package = dsu.revise_package(
+                package_id, update={"dpp_suggestions": revise_update_content}
+            )
+            logger.trace(f"Package after revising: {revised_package}")
+            package = revised_package
+            logger.info("RESOURCE suggestion formulae processed...")
+        except Exception as e:
+            logger.error(f"Error revising package: {str(e)}")
+
+    # -------------------- FORMULAE PROCESSING DONE --------------------
+    formulae_elapsed = time.perf_counter() - formulae_start
+    logger.info(
+        f"FORMULAE PROCESSING DONE! Processed in {formulae_elapsed:,.2f} seconds."
+    )
+
     total_elapsed = time.perf_counter() - timer_start
     newline_var = "\n"
     end_msg = f"""
     DATAPUSHER+ JOB DONE!
       Download: {fetch_elapsed:,.2f}
       Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
-      Formulae processing: {formulae_elapsed:,.2f}
       COPYing: {copy_elapsed:,.2f}
       Metadata updates: {metadata_elapsed:,.2f}
       Indexing: {index_elapsed:,.2f}
+      Formulae processing: {formulae_elapsed:,.2f}
     TOTAL ELAPSED TIME: {total_elapsed:,.2f}
     """
     logger.info(end_msg)
