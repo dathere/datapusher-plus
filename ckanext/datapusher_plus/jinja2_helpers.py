@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 import logging
 import os
 from datetime import datetime
@@ -548,6 +549,7 @@ def spatial_extent_feature_collection(
 
 @jinja2_global
 @pass_context
+@lru_cache(maxsize=None)
 def get_frequency_top_values(
     context: dict,
     field: str,
@@ -582,6 +584,7 @@ def get_frequency_top_values(
 @jinja2_global
 @uses_sql
 @pass_context
+@lru_cache(maxsize=None)
 def temporal_resolution(context, date_field=None):
     """Compute the minimum interval between sorted unique dates in a date field.
 
@@ -635,16 +638,7 @@ def temporal_resolution(context, date_field=None):
 
     # check if the resource has an index on the date field
     # if not, log a warning
-    datastore_info = dsu.datastore_info(resource_id)
-    index_exists = False
-    for field in datastore_info.get("fields", []):
-        if field.get("id") == date_field:
-            schema = field.get("schema", {})
-            index_name = schema.get("index_name")
-            if index_name == f"{resource_id}_{date_field}_idx":
-                index_exists = True
-                break
-    if not index_exists:
+    if not dsu.index_exists(resource_id, date_field):
         log = context.get("logger", logging.getLogger(__name__))
         log.warning(
             f"Resource {resource_id} does not have an index on the date field {date_field}. This will slow down the temporal resolution calculation."
@@ -685,6 +679,7 @@ def temporal_resolution(context, date_field=None):
 @jinja2_global
 @uses_sql
 @pass_context
+@lru_cache(maxsize=None)
 def guess_accrual_periodicity(context, date_field=None):
     """Guess the accrual periodicity of a dataset based on date intervals.
 
@@ -734,16 +729,7 @@ def guess_accrual_periodicity(context, date_field=None):
 
     # check if the resource has an index on the date field
     # if not, log a warning
-    datastore_info = dsu.datastore_info(resource_id)
-    index_exists = False
-    for field in datastore_info.get("fields", []):
-        if field.get("id") == date_field:
-            schema = field.get("schema", {})
-            index_name = schema.get("index_name")
-            if index_name == f"{resource_id}_{date_field}_idx":
-                index_exists = True
-                break
-    if not index_exists:
+    if not dsu.index_exists(resource_id, date_field):
         log = context.get("logger", logging.getLogger(__name__))
         log.warning(
             f"Resource {resource_id} does not have an index on the date field {date_field}. This will slow down the accrual periodicity calculation."
@@ -853,6 +839,7 @@ def get_column_null_percentage(context, column_name):
 
 @jinja2_global
 @pass_context
+@lru_cache(maxsize=None)
 def get_column_stats(context, column_name, stat_name=None):
     """Get statistics for a column in the datastore.
 
