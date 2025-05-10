@@ -7,6 +7,7 @@ import json
 import datetime
 import decimal
 from functools import lru_cache
+from typing import Union
 
 import ckan.plugins.toolkit as tk
 
@@ -64,15 +65,15 @@ def datastore_resource_exists(resource_id: str) -> dict:
 @lru_cache(maxsize=None)
 def datastore_search(
     resource_id: str,
-    filters: list,
-    q: str,
-    full_text: str,
+    filters: Union[tuple, None] = None,
+    q: str = None,
+    full_text: str = None,
     distinct: bool = False,
     plain: bool = True,
     language: str = "en",
     limit: int = 100,
     offset: int = 0,
-    fields: list = [],
+    fields: Union[tuple, None] = None,
     sort: str = None,
     include_total: bool = True,
     total_estimation_threshold: int = None,
@@ -82,7 +83,7 @@ def datastore_search(
     context = {"ignore_auth": True}
     data_dict = {
         "resource_id": resource_id,
-        "filters": filters,
+        "filters": dict(filters) if filters else None,
         "q": q,
         "full_text": full_text,
         "distinct": distinct,
@@ -90,7 +91,7 @@ def datastore_search(
         "language": language,
         "limit": limit,
         "offset": offset,
-        "fields": fields,
+        "fields": list(fields) if fields else None,
         "sort": sort,
         "include_total": include_total,
         "total_estimation_threshold": total_estimation_threshold,
