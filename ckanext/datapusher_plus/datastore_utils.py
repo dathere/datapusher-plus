@@ -6,6 +6,8 @@ Utility functions for interacting with CKAN's datastore and resources.
 import json
 import datetime
 import decimal
+from functools import lru_cache
+
 import ckan.plugins.toolkit as tk
 
 import ckanext.datapusher_plus.utils as utils
@@ -59,6 +61,49 @@ def datastore_resource_exists(resource_id: str) -> dict:
         return None
 
 
+@lru_cache(maxsize=None)
+def datastore_search(
+    resource_id: str,
+    filters: list,
+    q: str,
+    full_text: str,
+    distinct: bool = False,
+    plain: bool = True,
+    language: str = "en",
+    limit: int = 100,
+    offset: int = 0,
+    fields: list = [],
+    sort: str = None,
+    include_total: bool = True,
+    total_estimation_threshold: int = None,
+    records_format: str = "objects",
+) -> dict:
+    """Search datastore using datastore_search action."""
+    context = {"ignore_auth": True}
+    data_dict = {
+        "resource_id": resource_id,
+        "filters": filters,
+        "q": q,
+        "full_text": full_text,
+        "distinct": distinct,
+        "plain": plain,
+        "language": language,
+        "limit": limit,
+        "offset": offset,
+        "fields": fields,
+        "sort": sort,
+        "include_total": include_total,
+        "total_estimation_threshold": total_estimation_threshold,
+        "records_format": records_format,
+    }
+    try:
+        result = tk.get_action("datastore_search")(context, data_dict)
+        return result
+    except Exception as e:
+        raise utils.JobError(f"Error running datastore_search: {e}")
+
+
+@lru_cache(maxsize=None)
 def datastore_search_sql(sql: str) -> dict:
     """Search datastore using SQL."""
     context = {"ignore_auth": True}
@@ -72,6 +117,7 @@ def datastore_search_sql(sql: str) -> dict:
         raise utils.JobError(f'Error running datastore_search_sql "{sql}": {e}')
 
 
+@lru_cache(maxsize=None)
 def datastore_info(resource_id: str) -> dict:
     """Get datastore info for a resource."""
     context = {"ignore_auth": True}
@@ -178,6 +224,29 @@ def resource_exists(package_id: str, resource_name: str) -> tuple[bool, str | No
         if resource["name"] == resource_name:
             return True, resource["id"]
     return False, None
+
+
+@lru_cache(maxsize=None)
+def index_exists(resource_id: str, column: str) -> bool:
+    """Check if a datastore index exists for a given resource and column.
+
+    This function is memoized using lru_cache to avoid repeated datastore lookups
+    for the same resource_id and column combination.
+    """
+    if not resource_id or not column:
+        raise ValueError("Resource ID and column are required")
+    # get the datastore info for the resource
+    datastore_info_dict = datastore_info(resource_id)
+    # check if the date field exists in the datastore info
+    exists = False
+    for field in datastore_info_dict.get("fields", []):
+        if field.get("id") == column:
+            schema = field.get("schema", {})
+            index_name = schema.get("index_name")
+            if index_name == f"{resource_id}_{column}_idx":
+                exists = True
+                break
+    return exists
 
 
 def patch_package(package: dict) -> dict:
