@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
 import logging
 import os
 from datetime import datetime
@@ -549,11 +548,9 @@ def spatial_extent_feature_collection(
 
 @jinja2_global
 @pass_context
-@lru_cache(maxsize=None)
 def get_frequency_top_values(
     context: dict,
     field: str,
-    count: int = 10,
 ) -> list[dict]:
     """Get the top values for a field from the frequency data.
 
@@ -561,13 +558,12 @@ def get_frequency_top_values(
         context: The context of the template
                  (automatically passed by Jinja2 using @pass_context decorator)
         field: The field to get the top values for
-        count: The number of top values to return, defaults to 10
 
     Returns:
         List of dictionaries containing value, count and percentage for top values
 
     Example:
-    {{ get_frequency_top_values('record_id', 10) }} -> [{'value': '<ALL_UNIQUE>', 'count': 1000000, 'percentage': 100.0}]
+    {{ get_frequency_top_values("field_name") }} -> [{'value': '<ALL_UNIQUE>', 'count': 1000000, 'percentage': 100.0}]
     """
     dppf = context.get("dppf")
 
@@ -578,7 +574,7 @@ def get_frequency_top_values(
         raise ValueError("Field not found in frequency data")
 
     # The data is already sorted by frequency in descending order from qsv frequency
-    return dppf[field][:count]
+    return dppf[field]
 
 
 @jinja2_global
@@ -788,24 +784,33 @@ def map_tags_to_themes(context):
 
 @jinja2_global
 @pass_context
-def spatial_resolution_in_meters(context):
+def spatial_resolution_in_meters(context, bbox=None):
     """
     Compute the diagonal of the bounding box in meters.
+
+    Args:
+        context: The template context containing spatial data
+        bbox: Optional BoundingBox tuple (min_lat, max_lat, min_lon, max_lon)
+              If not provided, will try to get coordinates from context
     """
     from math import radians, cos, sin, sqrt, asin
 
-    dpp = context.get("dpp", {})
-    dpps = context.get("dpps", {})
-    if dpp.get("NO_LAT_LON_FIELDS"):
-        raise ValueError("No latitude or longitude fields found")
-    lat_field = dpp.get("LAT_FIELD")
-    lon_field = dpp.get("LON_FIELD")
-    if not lat_field or not lon_field:
-        raise ValueError("No latitude or longitude fields found")
-    min_lat = dpps[lat_field]["stats"]["min"]
-    max_lat = dpps[lat_field]["stats"]["max"]
-    min_lon = dpps[lon_field]["stats"]["min"]
-    max_lon = dpps[lon_field]["stats"]["max"]
+    if bbox:
+        min_lat, max_lat, min_lon, max_lon = bbox
+    else:
+        dpp = context.get("dpp", {})
+        dpps = context.get("dpps", {})
+        if dpp.get("NO_LAT_LON_FIELDS"):
+            raise ValueError("No latitude or longitude fields found")
+        lat_field = dpp.get("LAT_FIELD")
+        lon_field = dpp.get("LON_FIELD")
+        if not lat_field or not lon_field:
+            raise ValueError("No latitude or longitude fields found")
+        min_lat = dpps[lat_field]["stats"]["min"]
+        max_lat = dpps[lat_field]["stats"]["max"]
+        min_lon = dpps[lon_field]["stats"]["min"]
+        max_lon = dpps[lon_field]["stats"]["max"]
+
     # Haversine formula for diagonal
     R = 6371000  # meters
     phi1, phi2 = radians(float(min_lat)), radians(float(max_lat))
@@ -837,17 +842,16 @@ def get_column_null_percentage(context, column_name):
 
 @jinja2_global
 @pass_context
-@lru_cache(maxsize=None)
 def get_column_stats(context, column_name, stat_name=None):
     """Get statistics for a column in the datastore.
-
     This function retrieves statistics for a specified column from the datastore stats.
     Available statistics typically include: min, max, sum, mean, stddev, variance,
     nullcount, cardinality, and type.
 
     Args:
-        context (dict): The Jinja2 template context containing stats data
-        column_name (str): Name of the column to get stats for
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+        column_name (str): Name of the column of the current resource to get stats for
         stat_name (str|list, optional): Specific stat(s) to return. Can be:
             - None: Returns all available stats (default)
             - str: Returns value for a single stat
@@ -872,7 +876,10 @@ def get_column_stats(context, column_name, stat_name=None):
     """
     if not column_name:
         raise ValueError("Column name is required")
+
     field_stats = context.get("dpps", {}).get(column_name, {}).get("stats", {})
+    if not field_stats:
+        raise ValueError(f"No stats found for column {column_name}")
     if stat_name:
         if isinstance(stat_name, list):
             return {k: field_stats.get(k, 0) for k in stat_name}
