@@ -1431,8 +1431,6 @@ def _push_to_datastore(
     dsu.index_exists.cache_clear()
     dsu.datastore_search.cache_clear()
     dsu.datastore_search_sql.cache_clear()
-    j2h.temporal_resolution.cache_clear()
-    j2h.guess_accrual_periodicity.cache_clear()
     j2h.get_column_stats.cache_clear()
     j2h.get_frequency_top_values.cache_clear()
 

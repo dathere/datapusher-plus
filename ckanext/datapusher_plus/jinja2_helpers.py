@@ -584,7 +584,6 @@ def get_frequency_top_values(
 @jinja2_global
 @uses_sql
 @pass_context
-@lru_cache(maxsize=None)
 def temporal_resolution(context, date_field=None):
     """Compute the minimum interval between sorted unique dates in a date field.
 
@@ -679,7 +678,6 @@ def temporal_resolution(context, date_field=None):
 @jinja2_global
 @uses_sql
 @pass_context
-@lru_cache(maxsize=None)
 def guess_accrual_periodicity(context, date_field=None):
     """Guess the accrual periodicity of a dataset based on date intervals.
 
