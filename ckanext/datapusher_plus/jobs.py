@@ -1426,6 +1426,14 @@ def _push_to_datastore(
     # and are rendered using the Jinja2 template engine.
     formulae_start = time.perf_counter()
 
+    # Clear all lru_cache before processing formulae
+    dsu.datastore_info.cache_clear()
+    dsu.index_exists.cache_clear()
+    dsu.datastore_search.cache_clear()
+    dsu.datastore_search_sql.cache_clear()
+    j2h.get_column_stats.cache_clear()
+    j2h.get_frequency_top_values.cache_clear()
+
     # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
     scheming_yaml, package = dsu.get_scheming_yaml(
