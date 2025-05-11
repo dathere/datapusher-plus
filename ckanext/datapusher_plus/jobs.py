@@ -1097,6 +1097,240 @@ def _push_to_datastore(
         f'...copying done. Copied {copied_count} rows to "{resource_id}" in {copy_elapsed:,.2f} seconds.'
     )
 
+    # =================================================================================================
+    # INDEXING
+    # =================================================================================================
+    # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
+    # create indices automatically based on summary statistics
+    # For columns w/ cardinality = record_count, it's all unique values, create a unique index
+    # If AUTO_INDEX_DATES is true, index all date columns
+    # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
+    if (
+        conf.AUTO_INDEX_THRESHOLD
+        or (conf.AUTO_INDEX_DATES and datetimecols_list)
+        or conf.AUTO_UNIQUE_INDEX
+    ):
+        index_start = time.perf_counter()
+        logger.info(
+            f"AUTO-INDEXING. Auto-index threshold: {conf.AUTO_INDEX_THRESHOLD} unique value/s. Auto-unique index: {conf.AUTO_UNIQUE_INDEX} Auto-index dates: {conf.AUTO_INDEX_DATES} ..."
+        )
+        index_cur = raw_connection.cursor()
+
+        # if auto_index_threshold == -1
+        # we index all the columns
+        if conf.AUTO_INDEX_THRESHOLD == -1:
+            conf.AUTO_INDEX_THRESHOLD = record_count
+
+        index_count = 0
+        for idx, cardinality in enumerate(headers_cardinality):
+            curr_col = headers[idx]
+            if (
+                conf.AUTO_INDEX_THRESHOLD > 0
+                or conf.AUTO_INDEX_DATES
+                or conf.AUTO_UNIQUE_INDEX
+            ):
+                if cardinality == record_count and conf.AUTO_UNIQUE_INDEX:
+                    # all the values are unique for this column, create a unique index
+                    if conf.PREVIEW_ROWS > 0:
+                        unique_value_count = min(conf.PREVIEW_ROWS, cardinality)
+                    else:
+                        unique_value_count = cardinality
+                    logger.info(
+                        f'Creating UNIQUE index on "{curr_col}" for {unique_value_count} unique values...'
+                    )
+                    try:
+                        index_cur.execute(
+                            sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
+                                sql.Identifier(resource_id),
+                                sql.Identifier(curr_col),
+                            )
+                        )
+                    except psycopg2.Error as e:
+                        logger.warning(
+                            f'Could not CREATE UNIQUE INDEX on "{curr_col}": {e}'
+                        )
+                    index_count += 1
+                elif cardinality <= conf.AUTO_INDEX_THRESHOLD or (
+                    conf.AUTO_INDEX_DATES and (curr_col in datetimecols_list)
+                ):
+                    # cardinality <= auto_index_threshold or its a date and auto_index_date is true
+                    # create an index
+                    if curr_col in datetimecols_list:
+                        logger.info(
+                            f'Creating index on "{curr_col}" date column for {cardinality} unique value/s...'
+                        )
+                    else:
+                        logger.info(
+                            f'Creating index on "{curr_col}" for {cardinality} unique value/s...'
+                        )
+                    try:
+                        index_cur.execute(
+                            sql.SQL("CREATE INDEX ON {} ({})").format(
+                                sql.Identifier(resource_id),
+                                sql.Identifier(curr_col),
+                            )
+                        )
+                    except psycopg2.Error as e:
+                        logger.warning(f'Could not CREATE INDEX on "{curr_col}": {e}')
+                    index_count += 1
+
+        index_cur.close()
+        raw_connection.commit()
+
+        logger.info("Vacuum Analyzing table to optimize indices...")
+
+        # this is needed to issue a VACUUM ANALYZE
+        raw_connection.set_isolation_level(
+            psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT
+        )
+        analyze_cur = raw_connection.cursor()
+        analyze_cur.execute(
+            sql.SQL("VACUUM ANALYZE {}").format(sql.Identifier(resource_id))
+        )
+        analyze_cur.close()
+
+        index_elapsed = time.perf_counter() - index_start
+        logger.info(
+            f'...indexing/vacuum analysis done. Indexed {index_count} column/s in "{resource_id}" in {index_elapsed:,.2f} seconds.'
+        )
+
+    # ============================================================
+    # PROCESS DRUF JINJA2 FORMULAE
+    # ============================================================
+    # Check if there are any fields with DRUF keys in the scheming_yaml
+    # There are two types of DRUF keys:
+    # 1. "formula": This is used to update the field value DIRECTLY
+    #    when the resource is created/updated. It can update both package and resource fields.
+    # 2. "suggestion_formula": This is used to populate the suggestion
+    #    popovers DURING data entry/curation.
+    # DRUF keys are stored as jinja2 template expressions in the scheming_yaml
+    # and are rendered using the Jinja2 template engine.
+    formulae_start = time.perf_counter()
+
+    # Clear all lru_cache before processing formulae
+    dsu.datastore_search.cache_clear()
+    dsu.datastore_search_sql.cache_clear()
+    dsu.datastore_info.cache_clear()
+    dsu.index_exists.cache_clear()
+
+    # Fetch the scheming_yaml and package
+    package_id = resource["package_id"]
+    scheming_yaml, package = dsu.get_scheming_yaml(
+        package_id, scheming_yaml_type="dataset"
+    )
+
+    # check if package dpp_suggestions field does not exist
+    # and there are "suggestion_formula" keys in the scheming_yaml
+    if "dpp_suggestions" not in package:
+        # Check for suggestion_formula in dataset_fields
+        has_suggestion_formula = any(
+            isinstance(field, dict)
+            and any(key.startswith("suggestion_formula") for key in field.keys())
+            for field in scheming_yaml["dataset_fields"]
+        )
+
+        if not has_suggestion_formula:
+            logger.error(
+                '"dpp_suggestions" field required but not found in package to process Suggestion Formulae. Ensure that your scheming.yaml file contains the "dpp_suggestions" field as a json_object.'
+            )
+            return
+
+    logger.trace(f"package: {package}")
+
+    # FIRST, INITIALIZE THE FORMULA PROCESSOR
+    formula_processor = j2h.FormulaProcessor(
+        scheming_yaml,
+        package,
+        resource,
+        resource_fields_stats,
+        resource_fields_freqs,
+        dataset_stats,
+        logger,
+    )
+
+    # SECOND, WE PROCESS THE FORMULAE THAT UPDATE THE
+    # PACKAGE AND RESOURCE FIELDS DIRECTLY
+    # using the package_patch CKAN API so we only update the fields
+    # with formulae
+    package_updates = formula_processor.process_formulae(
+        "package", "dataset_fields", "formula"
+    )
+    if package_updates:
+        # Update package with formula results
+        package.update(package_updates)
+        try:
+            patched_package = dsu.patch_package(package)
+            logger.debug(f"Package after patching: {patched_package}")
+            package = patched_package
+            logger.info("PACKAGE formulae processed...")
+        except Exception as e:
+            logger.error(f"Error patching package: {str(e)}")
+
+    # Process resource formulae
+    # as this is a direct update, we update the resource dictionary directly
+    resource_updates = formula_processor.process_formulae(
+        "resource", "resource_fields", "formula"
+    )
+    if resource_updates:
+        # Update resource with formula results
+        resource.update(resource_updates)
+        logger.info("RESOURCE formulae processed...")
+
+    # THIRD, WE PROCESS THE SUGGESTIONS THAT SHOW UP IN THE SUGGESTION POPOVER
+    # we update the package dpp_suggestions field
+    # from which the Suggestion popover UI will pick it up
+    package_suggestions = formula_processor.process_formulae(
+        "package", "dataset_fields", "suggestion_formula"
+    )
+    if package_suggestions:
+        logger.trace(f"package_suggestions: {package_suggestions}")
+        revise_update_content = {"package": package_suggestions}
+        try:
+            revised_package = dsu.revise_package(
+                package_id, update={"dpp_suggestions": revise_update_content}
+            )
+            logger.trace(f"Package after revising: {revised_package}")
+            package = revised_package
+            logger.info("PACKAGE suggestion formulae processed...")
+        except Exception as e:
+            logger.error(f"Error revising package: {str(e)}")
+
+    # Process resource suggestion formulae
+    # Note how we still update the PACKAGE dpp_suggestions field
+    # and there is NO RESOURCE dpp_suggestions field.
+    # This is because suggestion formulae are used to populate the
+    # suggestion popover DURING data entry/curation and suggestion formulae
+    # may update both package and resource fields.
+    resource_suggestions = formula_processor.process_formulae(
+        "resource", "resource_fields", "suggestion_formula"
+    )
+    if resource_suggestions:
+        logger.trace(f"resource_suggestions: {resource_suggestions}")
+        resource_name = resource["name"]
+        revise_update_content = {"resource": {resource_name: resource_suggestions}}
+
+        # Handle existing suggestions
+        if package.get("dpp_suggestions"):
+            package["dpp_suggestions"].update(revise_update_content["resource"])
+        else:
+            package["dpp_suggestions"] = revise_update_content["resource"]
+
+        try:
+            revised_package = dsu.revise_package(
+                package_id, update={"dpp_suggestions": revise_update_content}
+            )
+            logger.trace(f"Package after revising: {revised_package}")
+            package = revised_package
+            logger.info("RESOURCE suggestion formulae processed...")
+        except Exception as e:
+            logger.error(f"Error revising package: {str(e)}")
+
+    # -------------------- FORMULAE PROCESSING DONE --------------------
+    formulae_elapsed = time.perf_counter() - formulae_start
+    logger.info(
+        f"FORMULAE PROCESSING DONE! Processed in {formulae_elapsed:,.2f} seconds."
+    )
+
     # ============================================================
     # UPDATE METADATA
     # ============================================================
@@ -1284,6 +1518,7 @@ def _push_to_datastore(
 
     cur.close()
     raw_connection.commit()
+    raw_connection.close()
 
     resource["datastore_active"] = True
     resource["total_record_count"] = record_count
@@ -1314,242 +1549,6 @@ def _push_to_datastore(
         f"METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
     )
 
-    # =================================================================================================
-    # INDEXING
-    # =================================================================================================
-    # if AUTO_INDEX_THRESHOLD > 0 or AUTO_INDEX_DATES is true
-    # create indices automatically based on summary statistics
-    # For columns w/ cardinality = record_count, it's all unique values, create a unique index
-    # If AUTO_INDEX_DATES is true, index all date columns
-    # if a column's cardinality <= AUTO_INDEX_THRESHOLD, create an index for that column
-    if (
-        conf.AUTO_INDEX_THRESHOLD
-        or (conf.AUTO_INDEX_DATES and datetimecols_list)
-        or conf.AUTO_UNIQUE_INDEX
-    ):
-        index_start = time.perf_counter()
-        logger.info(
-            f"AUTO-INDEXING. Auto-index threshold: {conf.AUTO_INDEX_THRESHOLD} unique value/s. Auto-unique index: {conf.AUTO_UNIQUE_INDEX} Auto-index dates: {conf.AUTO_INDEX_DATES} ..."
-        )
-        index_cur = raw_connection.cursor()
-
-        # if auto_index_threshold == -1
-        # we index all the columns
-        if conf.AUTO_INDEX_THRESHOLD == -1:
-            conf.AUTO_INDEX_THRESHOLD = record_count
-
-        index_count = 0
-        for idx, cardinality in enumerate(headers_cardinality):
-            curr_col = headers[idx]
-            if (
-                conf.AUTO_INDEX_THRESHOLD > 0
-                or conf.AUTO_INDEX_DATES
-                or conf.AUTO_UNIQUE_INDEX
-            ):
-                if cardinality == record_count and conf.AUTO_UNIQUE_INDEX:
-                    # all the values are unique for this column, create a unique index
-                    if conf.PREVIEW_ROWS > 0:
-                        unique_value_count = min(conf.PREVIEW_ROWS, cardinality)
-                    else:
-                        unique_value_count = cardinality
-                    logger.info(
-                        f'Creating UNIQUE index on "{curr_col}" for {unique_value_count} unique values...'
-                    )
-                    try:
-                        index_cur.execute(
-                            sql.SQL("CREATE UNIQUE INDEX ON {} ({})").format(
-                                sql.Identifier(resource_id),
-                                sql.Identifier(curr_col),
-                            )
-                        )
-                    except psycopg2.Error as e:
-                        logger.warning(
-                            f'Could not CREATE UNIQUE INDEX on "{curr_col}": {e}'
-                        )
-                    index_count += 1
-                elif cardinality <= conf.AUTO_INDEX_THRESHOLD or (
-                    conf.AUTO_INDEX_DATES and (curr_col in datetimecols_list)
-                ):
-                    # cardinality <= auto_index_threshold or its a date and auto_index_date is true
-                    # create an index
-                    if curr_col in datetimecols_list:
-                        logger.info(
-                            f'Creating index on "{curr_col}" date column for {cardinality} unique value/s...'
-                        )
-                    else:
-                        logger.info(
-                            f'Creating index on "{curr_col}" for {cardinality} unique value/s...'
-                        )
-                    try:
-                        index_cur.execute(
-                            sql.SQL("CREATE INDEX ON {} ({})").format(
-                                sql.Identifier(resource_id),
-                                sql.Identifier(curr_col),
-                            )
-                        )
-                    except psycopg2.Error as e:
-                        logger.warning(f'Could not CREATE INDEX on "{curr_col}": {e}')
-                    index_count += 1
-
-        index_cur.close()
-        raw_connection.commit()
-
-        logger.info("Vacuum Analyzing table to optimize indices...")
-
-        # this is needed to issue a VACUUM ANALYZE
-        raw_connection.set_isolation_level(
-            psycopg2.extensions.ISOLATION_LEVEL_AUTOCOMMIT
-        )
-        analyze_cur = raw_connection.cursor()
-        analyze_cur.execute(
-            sql.SQL("VACUUM ANALYZE {}").format(sql.Identifier(resource_id))
-        )
-        analyze_cur.close()
-
-        index_elapsed = time.perf_counter() - index_start
-        logger.info(
-            f'...indexing/vacuum analysis done. Indexed {index_count} column/s in "{resource_id}" in {index_elapsed:,.2f} seconds.'
-        )
-
-    raw_connection.close()
-
-    # ============================================================
-    # PROCESS DRUF JINJA2 FORMULAE
-    # ============================================================
-    # Check if there are any fields with DRUF keys in the scheming_yaml
-    # There are two types of DRUF keys:
-    # 1. "formula": This is used to update the field value DIRECTLY
-    #    when the resource is created/updated. It can update both package and resource fields.
-    # 2. "suggestion_formula": This is used to populate the suggestion
-    #    popovers DURING data entry/curation.
-    # DRUF keys are stored as jinja2 template expressions in the scheming_yaml
-    # and are rendered using the Jinja2 template engine.
-    formulae_start = time.perf_counter()
-
-    # Clear all lru_cache before processing formulae
-    dsu.datastore_search.cache_clear()
-    dsu.datastore_search_sql.cache_clear()
-    dsu.datastore_info.cache_clear()
-    dsu.index_exists.cache_clear()
-
-    # Fetch the scheming_yaml and package
-    package_id = resource["package_id"]
-    scheming_yaml, package = dsu.get_scheming_yaml(
-        package_id, scheming_yaml_type="dataset"
-    )
-
-    # check if package dpp_suggestions field does not exist
-    # and there are "suggestion_formula" keys in the scheming_yaml
-    if "dpp_suggestions" not in package:
-        # Check for suggestion_formula in dataset_fields
-        has_suggestion_formula = any(
-            isinstance(field, dict)
-            and any(key.startswith("suggestion_formula") for key in field.keys())
-            for field in scheming_yaml["dataset_fields"]
-        )
-
-        if not has_suggestion_formula:
-            logger.error(
-                '"dpp_suggestions" field required but not found in package to process Suggestion Formulae. Ensure that your scheming.yaml file contains the "dpp_suggestions" field as a json_object.'
-            )
-            return
-
-    logger.trace(f"package: {package}")
-
-    # FIRST, INITIALIZE THE FORMULA PROCESSOR
-    formula_processor = j2h.FormulaProcessor(
-        scheming_yaml,
-        package,
-        resource,
-        resource_fields_stats,
-        resource_fields_freqs,
-        dataset_stats,
-        logger,
-    )
-
-    # SECOND, WE PROCESS THE FORMULAE THAT UPDATE THE
-    # PACKAGE AND RESOURCE FIELDS DIRECTLY
-    # using the package_patch CKAN API so we only update the fields
-    # with formulae
-    package_updates = formula_processor.process_formulae(
-        "package", "dataset_fields", "formula"
-    )
-    if package_updates:
-        # Update package with formula results
-        package.update(package_updates)
-        try:
-            patched_package = dsu.patch_package(package)
-            logger.debug(f"Package after patching: {patched_package}")
-            package = patched_package
-            logger.info("PACKAGE formulae processed...")
-        except Exception as e:
-            logger.error(f"Error patching package: {str(e)}")
-
-    # Process resource formulae
-    # as this is a direct update, we update the resource dictionary directly
-    resource_updates = formula_processor.process_formulae(
-        "resource", "resource_fields", "formula"
-    )
-    if resource_updates:
-        # Update resource with formula results
-        resource.update(resource_updates)
-        logger.info("RESOURCE formulae processed...")
-
-    # THIRD, WE PROCESS THE SUGGESTIONS THAT SHOW UP IN THE SUGGESTION POPOVER
-    # we update the package dpp_suggestions field
-    # from which the Suggestion popover UI will pick it up
-    package_suggestions = formula_processor.process_formulae(
-        "package", "dataset_fields", "suggestion_formula"
-    )
-    if package_suggestions:
-        logger.trace(f"package_suggestions: {package_suggestions}")
-        revise_update_content = {"package": package_suggestions}
-        try:
-            revised_package = dsu.revise_package(
-                package_id, update={"dpp_suggestions": revise_update_content}
-            )
-            logger.trace(f"Package after revising: {revised_package}")
-            package = revised_package
-            logger.info("PACKAGE suggestion formulae processed...")
-        except Exception as e:
-            logger.error(f"Error revising package: {str(e)}")
-
-    # Process resource suggestion formulae
-    # Note how we still update the PACKAGE dpp_suggestions field
-    # and there is NO RESOURCE dpp_suggestions field.
-    # This is because suggestion formulae are used to populate the
-    # suggestion popover DURING data entry/curation and suggestion formulae
-    # may update both package and resource fields.
-    resource_suggestions = formula_processor.process_formulae(
-        "resource", "resource_fields", "suggestion_formula"
-    )
-    if resource_suggestions:
-        logger.trace(f"resource_suggestions: {resource_suggestions}")
-        resource_name = resource["name"]
-        revise_update_content = {"resource": {resource_name: resource_suggestions}}
-
-        # Handle existing suggestions
-        if package.get("dpp_suggestions"):
-            package["dpp_suggestions"].update(revise_update_content["resource"])
-        else:
-            package["dpp_suggestions"] = revise_update_content["resource"]
-
-        try:
-            revised_package = dsu.revise_package(
-                package_id, update={"dpp_suggestions": revise_update_content}
-            )
-            logger.trace(f"Package after revising: {revised_package}")
-            package = revised_package
-            logger.info("RESOURCE suggestion formulae processed...")
-        except Exception as e:
-            logger.error(f"Error revising package: {str(e)}")
-
-    # -------------------- FORMULAE PROCESSING DONE --------------------
-    formulae_elapsed = time.perf_counter() - formulae_start
-    logger.info(
-        f"FORMULAE PROCESSING DONE! Processed in {formulae_elapsed:,.2f} seconds."
-    )
-
     total_elapsed = time.perf_counter() - timer_start
     newline_var = "\n"
     end_msg = f"""
@@ -1557,9 +1556,9 @@ def _push_to_datastore(
       Download: {fetch_elapsed:,.2f}
       Analysis: {analysis_elapsed:,.2f}{(newline_var + f"  PII Screening: {piiscreening_elapsed:,.2f}") if piiscreening_elapsed > 0 else ""}
       COPYing: {copy_elapsed:,.2f}
-      Metadata updates: {metadata_elapsed:,.2f}
       Indexing: {index_elapsed:,.2f}
       Formulae processing: {formulae_elapsed:,.2f}
+      Metadata updates: {metadata_elapsed:,.2f}
     TOTAL ELAPSED TIME: {total_elapsed:,.2f}
     """
     logger.info(end_msg)
