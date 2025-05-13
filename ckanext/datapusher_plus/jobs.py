@@ -1288,7 +1288,7 @@ def _push_to_datastore(
     )
     if package_suggestions:
         logger.trace(f"package_suggestions: {package_suggestions}")
-        revise_update_content = {"package": package_suggestions, "dpp_suggestions": {}}
+        revise_update_content = {"package": package_suggestions}
         try:
             status_msg = "PACKAGE suggestion formulae processed..."
             revise_update_content["dpp_suggestions"]["STATUS"] = status_msg
@@ -1323,8 +1323,6 @@ def _push_to_datastore(
 
         try:
             status_msg = "RESOURCE suggestion formulae processed..."
-            if "dpp_suggestions" not in revise_update_content:
-                revise_update_content["dpp_suggestions"] = {}
             revise_update_content["dpp_suggestions"]["STATUS"] = status_msg
             revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
