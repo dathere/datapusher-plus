@@ -902,24 +902,6 @@ def _push_to_datastore(
 
     logger.info(f"Determined headers and types: {headers_dicts}...")
 
-    # save stats to the datastore by loading qsv_stats_csv directly using COPY
-    stats_table = sql.Identifier(resource_id + "-druf-stats")
-
-    try:
-        raw_connection_statsfreq = psycopg2.connect(conf.DATASTORE_WRITE_URL)
-    except psycopg2.Error as e:
-        raise utils.JobError(f"Could not connect to the Datastore: {e}")
-    else:
-        cur_statsfreq = raw_connection_statsfreq.cursor()
-
-    # Save stats to the datastore
-    try:
-        qsv.save_stats_to_datastore(
-            qsv_stats_csv, resource_id, conf.DATASTORE_WRITE_URL, logger=logger
-        )
-    except utils.JobError as e:
-        raise utils.JobError(f"Failed to save stats to datastore: {e}")
-
     # ----------------------- Frequency Table ---------------------------
     # compile a frequency table for each column
     qsv_freq_csv = os.path.join(temp_dir, "qsv_freq.csv")
@@ -931,11 +913,31 @@ def _push_to_datastore(
 
     resource_fields_freqs = {}
     try:
-        resource_fields_freqs = qsv.save_freq_to_datastore(
-            qsv_freq_csv, resource_id, conf.DATASTORE_WRITE_URL, logger=logger
-        )
-    except utils.JobError as e:
-        raise utils.JobError(f"Failed to save frequency to datastore: {e}")
+        with open(qsv_freq_csv, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                field = row["field"]
+                value = row["value"]
+                count = row["count"]
+                percentage = row["percentage"]
+
+                # Initialize list for field if it doesn't exist
+                if field not in resource_fields_freqs:
+                    resource_fields_freqs[field] = []
+
+                # Append the frequency data as a dict to the field's list
+                resource_fields_freqs[field].append(
+                    {
+                        "value": value,
+                        "count": count,
+                        "percentage": percentage,
+                    }
+                )
+
+            logger.trace(f"Resource fields freqs: {resource_fields_freqs}")
+
+    except IOError as e:
+        raise utils.JobError("Could not open frequency CSV file: {}".format(e))
 
     # ------------------- Do we need to create a Preview?  -----------------------
     # if conf.PREVIEW_ROWS is not zero, create a preview using qsv slice
