@@ -1258,11 +1258,13 @@ def _push_to_datastore(
     if package_updates:
         # Update package with formula results
         package.update(package_updates)
+        status_msg = "PACKAGE formulae processed..."
+        package["dpp_suggestions"]["STATUS"] = status_msg
         try:
             patched_package = dsu.patch_package(package)
             logger.debug(f"Package after patching: {patched_package}")
             package = patched_package
-            logger.info("PACKAGE formulae processed...")
+            logger.info(status_msg)
         except Exception as e:
             logger.error(f"Error patching package: {str(e)}")
 
@@ -1274,7 +1276,9 @@ def _push_to_datastore(
     if resource_updates:
         # Update resource with formula results
         resource.update(resource_updates)
-        logger.info("RESOURCE formulae processed...")
+        status_msg = "RESOURCE formulae processed..."
+        resource["dpp_suggestions"]["STATUS"] = status_msg
+        logger.info(status_msg)
 
     # THIRD, WE PROCESS THE SUGGESTIONS THAT SHOW UP IN THE SUGGESTION POPOVER
     # we update the package dpp_suggestions field
@@ -1284,14 +1288,16 @@ def _push_to_datastore(
     )
     if package_suggestions:
         logger.trace(f"package_suggestions: {package_suggestions}")
-        revise_update_content = {"package": package_suggestions}
+        revise_update_content = {"package": package_suggestions, "dpp_suggestions": {}}
         try:
+            status_msg = "PACKAGE suggestion formulae processed..."
+            revise_update_content["dpp_suggestions"]["STATUS"] = status_msg
             revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
             logger.trace(f"Package after revising: {revised_package}")
             package = revised_package
-            logger.info("PACKAGE suggestion formulae processed...")
+            logger.info(status_msg)
         except Exception as e:
             logger.error(f"Error revising package: {str(e)}")
 
@@ -1316,20 +1322,26 @@ def _push_to_datastore(
             package["dpp_suggestions"] = revise_update_content["resource"]
 
         try:
+            status_msg = "RESOURCE suggestion formulae processed..."
+            if "dpp_suggestions" not in revise_update_content:
+                revise_update_content["dpp_suggestions"] = {}
+            revise_update_content["dpp_suggestions"]["STATUS"] = status_msg
             revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
             logger.trace(f"Package after revising: {revised_package}")
             package = revised_package
-            logger.info("RESOURCE suggestion formulae processed...")
+            logger.info(status_msg)
         except Exception as e:
             logger.error(f"Error revising package: {str(e)}")
 
     # -------------------- FORMULAE PROCESSING DONE --------------------
+    status_msg = "FORMULAE PROCESSING DONE!"
+    package["dpp_suggestions"]["STATUS"] = status_msg
+    dsu.patch_package(package)
+
     formulae_elapsed = time.perf_counter() - formulae_start
-    logger.info(
-        f"FORMULAE PROCESSING DONE! Processed in {formulae_elapsed:,.2f} seconds."
-    )
+    logger.info(f"{status_msg} Processed in {formulae_elapsed:,.2f} seconds.")
 
     # ============================================================
     # UPDATE METADATA
