@@ -1207,12 +1207,6 @@ def _push_to_datastore(
     # and are rendered using the Jinja2 template engine.
     formulae_start = time.perf_counter()
 
-    # Clear all lru_cache before processing formulae
-    dsu.datastore_search.cache_clear()
-    dsu.datastore_search_sql.cache_clear()
-    dsu.datastore_info.cache_clear()
-    dsu.index_exists.cache_clear()
-
     # Fetch the scheming_yaml and package
     package_id = resource["package_id"]
     scheming_yaml, package = dsu.get_scheming_yaml(
@@ -1247,6 +1241,17 @@ def _push_to_datastore(
         dataset_stats,
         logger,
     )
+
+    package.setdefault("dpp_suggestions", {})[
+        "STATUS"
+    ] = "STARTING FORMULAE PROCESSING..."
+    dsu.patch_package(package)
+
+    # Clear all lru_cache before processing formulae
+    dsu.datastore_search.cache_clear()
+    dsu.datastore_search_sql.cache_clear()
+    dsu.datastore_info.cache_clear()
+    dsu.index_exists.cache_clear()
 
     # SECOND, WE PROCESS THE FORMULAE THAT UPDATE THE
     # PACKAGE AND RESOURCE FIELDS DIRECTLY
@@ -1291,7 +1296,7 @@ def _push_to_datastore(
         revise_update_content = {"package": package_suggestions}
         try:
             status_msg = "PACKAGE suggestion formulae processed..."
-            revise_update_content["dpp_suggestions"]["STATUS"] = status_msg
+            revise_update_content["STATUS"] = status_msg
             revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
@@ -1323,7 +1328,8 @@ def _push_to_datastore(
 
         try:
             status_msg = "RESOURCE suggestion formulae processed..."
-            revise_update_content["dpp_suggestions"]["STATUS"] = status_msg
+            revise_update_content["STATUS"] = status_msg
+
             revised_package = dsu.revise_package(
                 package_id, update={"dpp_suggestions": revise_update_content}
             )
@@ -1334,15 +1340,13 @@ def _push_to_datastore(
             logger.error(f"Error revising package: {str(e)}")
 
     # -------------------- FORMULAE PROCESSING DONE --------------------
-    status_msg = "FORMULAE PROCESSING DONE!"
-    package["dpp_suggestions"]["STATUS"] = status_msg
-    dsu.patch_package(package)
-
     formulae_elapsed = time.perf_counter() - formulae_start
-    logger.info(f"{status_msg} Processed in {formulae_elapsed:,.2f} seconds.")
+    logger.info(
+        f"FORMULAE PROCESSING DONE! Processed in {formulae_elapsed:,.2f} seconds."
+    )
 
     # ============================================================
-    # UPDATE METADATA
+    # UPDATE RESOURCE METADATA
     # ============================================================
     metadata_start = time.perf_counter()
     logger.info("UPDATING RESOURCE METADATA...")
@@ -1556,8 +1560,12 @@ def _push_to_datastore(
 
     metadata_elapsed = time.perf_counter() - metadata_start
     logger.info(
-        f"METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
+        f"RESOURCE METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
     )
+
+    # -------------------- DONE --------------------
+    package.setdefault("dpp_suggestions", {})["STATUS"] = "DONE"
+    dsu.patch_package(package)
 
     total_elapsed = time.perf_counter() - timer_start
     newline_var = "\n"
@@ -1568,7 +1576,7 @@ def _push_to_datastore(
       COPYing: {copy_elapsed:,.2f}
       Indexing: {index_elapsed:,.2f}
       Formulae processing: {formulae_elapsed:,.2f}
-      Metadata updates: {metadata_elapsed:,.2f}
+      Resource metadata updates: {metadata_elapsed:,.2f}
     TOTAL ELAPSED TIME: {total_elapsed:,.2f}
     """
     logger.info(end_msg)
