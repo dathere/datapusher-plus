@@ -305,8 +305,7 @@ ckan.plugins = <other plugins> datapusher_plus
 
 ## Usage
 
-Any file that has one of the supported formats (defined in [`ckanext.datapusher_plus.formats`](https://docs.ckan.org/en/latest/maintaining/configuration.html#ckan-datapusher-formats)) will be attempted to be loaded
-into the DataStore.
+Any file that has one of the supported formats (defined in `ckanext.datapusher_plus.formats`) will be attempted to be loaded into the DataStore.
 
 You can also manually trigger resources to be resubmitted. When editing a resource in CKAN (clicking the "Manage" button on a resource page), a new tab named "DataStore" will appear. This will contain a log of the last attempted upload and a button to retry the upload. Once a resource has been "pushed" into the Datastore, a "Data Dictionary" tab will also be available where the data pusblisher can fine-tune the inferred data dictionary.
 
@@ -329,7 +328,7 @@ To Resubmit a specific resource, whether or not the hash of the data file has ch
 
 ## License
 
-This material is copyright (c) 2020 Open Knowledge Foundation and other contributors
+This material is copyright (c) 2025, datHere, Open Knowledge Foundation and other contributors
 
 It is open and licensed under the GNU Affero General Public License (AGPL) v3.0
 whose full text may be found at:
