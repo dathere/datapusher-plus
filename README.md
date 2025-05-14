@@ -6,7 +6,7 @@
 
 > NOTE: v2 is a major revamp. Documentation is currently WIP.
 
-DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher - super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file.
+DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher - [super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file](docs/dataset_schema.yaml).
 
 The Formulas have access to not just the `package` and `resource` fields (in the same namespaces), it also has access to the following information in these additional namespaces that can be used in Jinja2 expressions:
 * `dpps` - with the "s" for stats.<br/>Each field will have an extensive list of summary statistics (by default: 
