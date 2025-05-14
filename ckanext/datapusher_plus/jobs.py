@@ -1284,7 +1284,7 @@ def _push_to_datastore(
         # Update resource with formula results
         resource.update(resource_updates)
         status_msg = "RESOURCE formulae processed..."
-        if resource.get ("dpp_suggestions"):
+        if resource.get("dpp_suggestions"):
             resource["dpp_suggestions"]["STATUS"] = status_msg
         else:
             resource["dpp_suggestions"] = {"STATUS": status_msg}
