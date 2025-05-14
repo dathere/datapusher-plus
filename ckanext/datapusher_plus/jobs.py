@@ -1284,7 +1284,10 @@ def _push_to_datastore(
         # Update resource with formula results
         resource.update(resource_updates)
         status_msg = "RESOURCE formulae processed..."
-        resource["dpp_suggestions"]["STATUS"] = status_msg
+        if resource.get("dpp_suggestions"):
+            resource["dpp_suggestions"]["STATUS"] = status_msg
+        else:
+            resource["dpp_suggestions"] = {"STATUS": status_msg}
         logger.info(status_msg)
 
     # THIRD, WE PROCESS THE SUGGESTIONS THAT SHOW UP IN THE SUGGESTION POPOVER
