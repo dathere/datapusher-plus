@@ -23,29 +23,35 @@ dataset_fields:
 
 - field_name: latitude_range
   label: Latitude Range
-  # this is a suggestion formula, so it's offered as a suggestion to the user.
+  # This is a suggestion formula, so it's offered as a suggestion to the user
+  # WHILE they're entering metadata in the dataset form, right after the Dataset
+  # Resource is Uploaded First (DRUF).
   # Note how we use the dpp.LAT_FIELD variable to access the latitude field
   # dpp.LAT_FIELD is inferred based on heuristics (column name pattern is in
   # ckanext.datapusher_plus.latitude_fields and is a Float with range of -90.0 to 90.0)
-  # and the stats.max and stats.min to get the range of values
+  # and the stats.max and stats.min to get the range of values.
+  # Note how we're using the custom truncate_with_ellipsis Jinja2 filter to limit
+  # the length of the literal string "the quick brown fox" to 5 characters.
   suggestion_formula: Latitudinal range {{dpps[dpp.LAT_FIELD].stats.max|float - dpps[dpp.LAT_FIELD].stats.min|float }} {{"the quick brown fox"|truncate_with_ellipsis(5)}}
 
 - field_name: spatial_extent
   label: Spatial Extent
   form_snippet: markdown.html
-  # spatial_extent_wkt() is a formula that returns the spatial extent of the dataset
-  # as a WKT string, automatically using the inferred latitude and longitude fields
-  # unless they're explicitly specified in the Jinja2 helper function below
+  # spatial_extent_wkt() is a custom Jinja2 function that returns the spatial extent
+  # of the dataset as a WKT string, automatically using the inferred latitude and longitude
+  # fields unless they're explicitly specified. You can add custom Jinja2 filters and functions
+  # in the jinja2_helpers.py file.
   suggestion_formula: '{{ spatial_extent_wkt() }}'
 
 - field_name: test_field
   label: Test Field
-  # note how this is a formula and NOT a suggestion formula
-  # so it's directly set at creation/update time and is not offered as a suggestion
-  # This is just a simple Jinja2 expression where we accessing the package.author, with
-  # the Jinja2 built-in filter to title case the author name,
-  # and the package.author_email fields
-  formula: 'Test formula field value:{{package.author|title}}: {{package.author_email}}'
+  # Note how this is a formula and NOT a "suggestion" formula.
+  # Unlike a SUGGESTION formula, it directly sets the field's value at creation/update.
+  # In this case, we're setting test_field's value to the package.author, using the
+  # the Jinja2 built-in filter to title case the author name, along with the
+  # package.author_email field prefixed with the literals "Contact: " and  "Email: "
+  # respectively.
+  formula: 'Contact: {{package.author|title}} - Email: {{package.author_email}}'
 
 - field_name: tag_string
   label: Tags
@@ -99,8 +105,8 @@ dataset_fields:
 - field_name: frequency_info
   label: Frequency Info
   form_snippet: markdown.html
-  # get_frequency_top_values() is a formula that returns the top values for the
-  # frequency field, which is calculated using qsv frequency
+  # get_frequency_top_values() is a Jinja2 function that returns the top values for the
+  # frequency field, which is calculated with the "qsv frequency" command.
   suggestion_formula: '{{ get_frequency_top_values("department") }}'
 
 - field_name: dpp_suggestions
@@ -122,12 +128,13 @@ resource_fields:
   form_snippet: markdown.html
   form_placeholder: Some useful notes about the data
 
-- field_name: spatial_extent
-  label: Spatial Extent
+- field_name: resource_spatial_extent
+  label: Resource Spatial Extent
   form_snippet: markdown.html
   # This is a suggestion formula that returns the spatial extent of the dataset
   # as a WKT string. Here, we're doing it "manually" using a Jinja2 expression, 
-  # but you could also use the spatial_extent_wkt() formula instead.
+  # instead of the spatial_extent_wkt() function we used in the spatial extent
+  # field above.
   suggestion_formula: POLYGON(({{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}))
 
 
