@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 * Jobs cleanup by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/193
 * Fix datastore upload log timestamps by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/194
 * DCAT 3 formula helpers by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/195
+* fix: tmp input was being wrongfully assigned  by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/197
+* refactored SQL-enabled formulas by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/199
+* auto unzip one file setting by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/200
+* add LRU caches to potentially expensive Formula methods by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/201
+* feat: add `dpp_suggestions.STATUS` to track formulae processing progress by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/202
+* refactor dpp_suggestions.STATUS to sync with Suggestions UI by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/203
+* Refactor: remove stats & freq  table save to datastore by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/204
 
 ## New Contributors
 * @rzmk made their first contribution in https://github.com/dathere/datapusher-plus/pull/186
@@ -41,6 +48,8 @@ A workflow that flips the old CKAN traditional data ingestion on its head.
 The DRUF reinvents CKAN data ingestion - by automatically calculating/suggesting "**Automagical Metadata**" - high-quality, high-resolution metadata that reflects and describes what's **INSIDE** the dataset (e.g. summary stats; frequency table; spatial extent, date range, outliers, etc. calculated with Metadata Formulae) in addition to metadata about the dataset **FILE** (e.g. last updated, size of the file, owner, format, license, etc - what's normally found in traditional data catalogs).
 
 Future improvements planned:
+- **Expanded Data Dictionary**
+
 - **"entry-time" Metadata Formulae**
 In addition to the two formula types (`formula` to set a metadata field directly during creation/update; and `suggestion_formula` to suggest values using the Bootstap Popover UI), we'll add the ability to allow Data Publishers to enter formulas while they're entering metadata - fully embracing the Excel formula UI/UX aesthetic.
 - **DCAT3-optimized reference profiles**
