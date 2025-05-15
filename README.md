@@ -255,6 +255,13 @@ Add `datapusher_plus` to the plugins in your CKAN configuration file
 ckan.plugins = <other plugins> datapusher_plus
 ```
 
+Use a DP+ extended scheming schema:
+
+```ini
+scheming.dataset_schemas =  ckanext.datapusher_plus:dataset_schema.yaml
+```
+
+Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) for details.
 
 >```ini
 > ckanext.datapusher_plus.use_proxy = false
@@ -305,7 +312,7 @@ ckan.plugins = <other plugins> datapusher_plus
 >
 >and add this entry to your CKAN's `resource_formats.json` file.
 >
->```json
+>```
 > ["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
 >```
 
