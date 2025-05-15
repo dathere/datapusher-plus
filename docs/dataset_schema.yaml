@@ -21,26 +21,28 @@ dataset_fields:
     label: Description
     form_snippet: markdown.html
     form_placeholder: eg. Some useful notes/blurb about the data
-    # TODO: Add a formula that suggests an LLM-generated description of the dataset
-    # based on the dataset's metadata, ALL the dataset's resources and
-    # their statistical properties.
+    # TODO: Add a suggestion formula that suggests an LLM-generated description
+    # of the dataset based on the dataset's metadata, ALL the dataset's resources
+    # and their statistical properties.
 
   - field_name: latitude_range
     label: Latitude Range
     # This is a suggestion formula that calculates the latitudinal range of the dataset.
     # It uses the inferred latitude field (dpp.LAT_FIELD) which is automatically detected
     # based on column name patterns and value ranges (-90 to 90 for latitude).
-    # The formula calculates the difference between max and min values, which is automatically
-    # computed by DataPusher+ using the qsv stats command.
+    # The formula calculates the difference between max and min values, which is
+    # automatically computed by DataPusher+ using the qsv stats command.
     # The truncate_with_ellipsis filter is used to limit text length.
-    suggestion_formula: Latitudinal range {{dpps[dpp.LAT_FIELD].stats.max|float - dpps[dpp.LAT_FIELD].stats.min|float }} {{"the quick brown fox"|truncate_with_ellipsis(5)}}
+    suggestion_formula: >
+      Latitudinal range {{dpps[dpp.LAT_FIELD].stats.max|float - dpps[dpp.LAT_FIELD].stats.min|float }}
+      {{"the quick brown fox"|truncate_with_ellipsis(5)}}
 
   - field_name: spatial_extent
     label: Spatial Extent
     form_snippet: markdown.html
-    # This formula generates a WKT (Well-Known Text) representation of the dataset's spatial extent.
+    # This suggestion formula generates a WKT (Well-Known Text) representation of the dataset's spatial extent.
     # It automatically uses the inferred latitude and longitude fields unless explicitly specified.
-    # The spatial_extent_wkt() Jinja2 function creates a POLYGON that encompasses all data points.
+    # The spatial_extent_wkt() Jinja2 custom function creates a POLYGON that encompasses all data points.
     # By leveraging the extensive statistical info compiled by DP+ and the expressiveness
     # of Jinja2, we have a powerful, easily extensible Formula Language for DataPusher+!
     # Check out jinja2_helpers.py for more examples of custom Jinja2 filters and functions.
@@ -50,6 +52,9 @@ dataset_fields:
     label: Tags
     preset: tag_string_autocomplete
     form_placeholder: eg. economy, mental health, government
+    # TODO: Add a suggestion formula that suggests tags based on the dataset's metadata,
+    # ALL the dataset's resources and their statistical properties. The tags
+    # will be compiled at the same time the notes field above is derived using an LLM.
 
   - field_name: license_id
     label: License
@@ -123,7 +128,7 @@ resource_fields:
     label: Description
     form_snippet: markdown.html
     form_placeholder: Some useful notes about the data
-    # TODO: Add a formula that suggests an LLM-generated description of the resource
+    # TODO: Add a suggestion formula that suggests an LLM-generated description of the resource
     # based on the resource's metadata, the resource's data and its statistical properties.
 
   - field_name: format
@@ -133,23 +138,28 @@ resource_fields:
   - field_name: resource_spatial_extent
     label: Resource Spatial Extent
     form_snippet: markdown.html
-    # This formula creates a WKT POLYGON representing the spatial extent of the dataset.
+    # This suggestion formula creates a WKT POLYGON representing the spatial extent of the dataset.
     # It uses the inferred latitude and longitude fields to calculate the bounding box.
     # The coordinates are ordered as: (min_lat, min_lon), (min_lat, max_lon),
     # (max_lat, max_lon), (max_lat, min_lon), (min_lat, min_lon).
-    suggestion_formula: POLYGON(({{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}))
+    suggestion_formula: >
+      POLYGON(({{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}},
+      {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, 
+      {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, 
+      {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, 
+      {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}))
 
   - field_name: frequency_info
     label: Frequency Info
     form_snippet: markdown.html
-    # This formula uses get_frequency_top_values() to analyze the frequency distribution
-    # of values in the "department" field. It returns the top N most common values
-    # with their counts and percentages.
+    # This suggestion formula uses get_frequency_top_values() to analyze the
+    # frequency distribution of values in the "department" field. It returns
+    # the top N most common values with their counts and percentages.
     suggestion_formula: '{{ get_frequency_top_values("department") }}'
 
   - field_name: temporal_resolution
     label: Temporal Resolution
-    # This formula calculates the minimum time interval between dates in the dataset.
+    # This suggestion formula calculates the minimum time interval between dates in the dataset.
     # It automatically detects date columns based on configurable patterns.
     # Returns an ISO 8601 duration string (e.g., "P1D" for daily, "P1M" for monthly).
     # Requires datastore.sqlsearch.enabled to be true in CKAN config.
