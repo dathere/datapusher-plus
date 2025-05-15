@@ -1,6 +1,6 @@
 scheming_version: 2
 dataset_type: dataset
-about: A reimplementation of the default CKAN dataset schema extended with DataPusher+ Formulas!
+about: A reimplementation of the default CKAN dataset schema extended with DataPusher+ Jinja2 Formulas!
 about_url: http://github.com/ckan/ckanext-scheming
 
 
@@ -23,34 +23,30 @@ dataset_fields:
 
 - field_name: latitude_range
   label: Latitude Range
-  # This is a suggestion formula, so it's offered as a suggestion to the user
-  # WHILE they're entering metadata in the dataset form, right after the Dataset
-  # Resource is Uploaded First (DRUF).
-  # Note how we use the dpp.LAT_FIELD variable to access the latitude field
-  # dpp.LAT_FIELD is inferred based on heuristics (column name pattern is in
-  # ckanext.datapusher_plus.latitude_fields and is a Float with range of -90.0 to 90.0)
-  # and the stats.max and stats.min to get the range of values.
-  # Note how we're using the custom truncate_with_ellipsis Jinja2 filter to limit
-  # the length of the literal string "the quick brown fox" to 5 characters.
+  # This is a suggestion formula that calculates the latitudinal range of the dataset.
+  # It uses the inferred latitude field (dpp.LAT_FIELD) which is automatically detected
+  # based on column name patterns and value ranges (-90 to 90 for latitude).
+  # The formula calculates the difference between max and min values, which is automatically
+  # computed by DataPusher+ using the qsv stats command.
+  # The truncate_with_ellipsis filter is used to limit text length.
   suggestion_formula: Latitudinal range {{dpps[dpp.LAT_FIELD].stats.max|float - dpps[dpp.LAT_FIELD].stats.min|float }} {{"the quick brown fox"|truncate_with_ellipsis(5)}}
 
 - field_name: spatial_extent
   label: Spatial Extent
   form_snippet: markdown.html
-  # spatial_extent_wkt() is a custom Jinja2 function that returns the spatial extent
-  # of the dataset as a WKT string, automatically using the inferred latitude and longitude
-  # fields unless they're explicitly specified. You can add custom Jinja2 filters and functions
-  # in the jinja2_helpers.py file.
+  # This formula generates a WKT (Well-Known Text) representation of the dataset's spatial extent.
+  # It automatically uses the inferred latitude and longitude fields unless explicitly specified.
+  # The spatial_extent_wkt() Jinja2 function creates a POLYGON that encompasses all data points.
+  # By leveraging the extensive statistical info compiled by DP+ and the expressiveness
+  # of Jinja2, we have a powerful, easily extensible Formula Language for DataPusher+!
+  # Check out jinja2_helpers.py for more examples of custom Jinja2 filters and functions.
   suggestion_formula: '{{ spatial_extent_wkt() }}'
 
 - field_name: test_field
   label: Test Field
-  # Note how this is a formula and NOT a "suggestion" formula.
-  # Unlike a SUGGESTION formula, it directly sets the field's value at creation/update.
-  # In this case, we're setting test_field's value to the package.author, using the
-  # the Jinja2 built-in filter to title case the author name, along with the
-  # package.author_email field prefixed with the literals "Contact: " and  "Email: "
-  # respectively.
+  # This is a direct formula (not a suggestion) that sets the field's value at creation/update.
+  # It combines the package author name (title-cased) with their email address.
+  # The result is stored directly in the field rather than as a suggestion.
   formula: 'Contact: {{package.author|title}} - Email: {{package.author_email}}'
 
 - field_name: tag_string
@@ -105,8 +101,9 @@ dataset_fields:
 - field_name: frequency_info
   label: Frequency Info
   form_snippet: markdown.html
-  # get_frequency_top_values() is a Jinja2 function that returns the top values for the
-  # frequency field, which is calculated with the "qsv frequency" command.
+  # This formula uses get_frequency_top_values() to analyze the frequency distribution
+  # of values in the "department" field. It returns the top N most common values
+  # with their counts and percentages.
   suggestion_formula: '{{ get_frequency_top_values("department") }}'
 
 - field_name: dpp_suggestions
@@ -131,10 +128,10 @@ resource_fields:
 - field_name: resource_spatial_extent
   label: Resource Spatial Extent
   form_snippet: markdown.html
-  # This is a suggestion formula that returns the spatial extent of the dataset
-  # as a WKT string. Here, we're doing it "manually" using a Jinja2 expression, 
-  # instead of the spatial_extent_wkt() function we used in the spatial extent
-  # field above.
+  # This formula creates a WKT POLYGON representing the spatial extent of the dataset.
+  # It uses the inferred latitude and longitude fields to calculate the bounding box.
+  # The coordinates are ordered as: (min_lat, min_lon), (min_lat, max_lon),
+  # (max_lat, max_lon), (max_lat, min_lon), (min_lat, min_lon).
   suggestion_formula: POLYGON(({{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}))
 
 
@@ -144,8 +141,8 @@ resource_fields:
 
 - field_name: temporal_resolution
   label: Temporal Resolution
-  # This is a suggestion formula that returns the temporal resolution of the dataset
-  # as a string. Similar to lat/lon field inferencing, this uses the ckanext.datapusher_plus.qsv_dates_whitelist
-  # config option to infer date columns. The first column that matches the pattern is used by default,
-  # but you can also specify a different column in the formula.
+  # This formula calculates the minimum time interval between dates in the dataset.
+  # It automatically detects date columns based on configurable patterns.
+  # Returns an ISO 8601 duration string (e.g., "P1D" for daily, "P1M" for monthly).
+  # Requires datastore.sqlsearch.enabled to be true in CKAN config.
   suggestion_formula: '{{ temporal_resolution() }}'
