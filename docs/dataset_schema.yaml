@@ -1,148 +1,158 @@
 scheming_version: 2
 dataset_type: dataset
-about: A reimplementation of the default CKAN dataset schema extended with DataPusher+ Jinja2 Formulas!
-about_url: http://github.com/ckan/ckanext-scheming
-
+about: >
+  A reimplementation of the default CKAN dataset schema
+  extended with DataPusher+ Jinja2 Formulas to make
+  DCAT3 metadata generation easier!
+about_url: https://github.com/dathere/datapusher-plus
 
 dataset_fields:
+  - field_name: title
+    label: Title
+    preset: title
+    form_placeholder: eg. A descriptive title
 
-- field_name: title
-  label: Title
-  preset: title
-  form_placeholder: eg. A descriptive title
+  - field_name: name
+    label: URL
+    preset: dataset_slug
+    form_placeholder: eg. my-dataset
 
-- field_name: name
-  label: URL
-  preset: dataset_slug
-  form_placeholder: eg. my-dataset
+  - field_name: notes
+    label: Description
+    form_snippet: markdown.html
+    form_placeholder: eg. Some useful notes/blurb about the data
+    # TODO: Add a formula that suggests an LLM-generated description of the dataset
+    # based on the dataset's metadata, ALL the dataset's resources and
+    # their statistical properties.
 
-- field_name: notes
-  label: Description
-  form_snippet: markdown.html
-  form_placeholder: eg. Some useful notes/blurb about the data
+  - field_name: latitude_range
+    label: Latitude Range
+    # This is a suggestion formula that calculates the latitudinal range of the dataset.
+    # It uses the inferred latitude field (dpp.LAT_FIELD) which is automatically detected
+    # based on column name patterns and value ranges (-90 to 90 for latitude).
+    # The formula calculates the difference between max and min values, which is automatically
+    # computed by DataPusher+ using the qsv stats command.
+    # The truncate_with_ellipsis filter is used to limit text length.
+    suggestion_formula: Latitudinal range {{dpps[dpp.LAT_FIELD].stats.max|float - dpps[dpp.LAT_FIELD].stats.min|float }} {{"the quick brown fox"|truncate_with_ellipsis(5)}}
 
-- field_name: latitude_range
-  label: Latitude Range
-  # This is a suggestion formula that calculates the latitudinal range of the dataset.
-  # It uses the inferred latitude field (dpp.LAT_FIELD) which is automatically detected
-  # based on column name patterns and value ranges (-90 to 90 for latitude).
-  # The formula calculates the difference between max and min values, which is automatically
-  # computed by DataPusher+ using the qsv stats command.
-  # The truncate_with_ellipsis filter is used to limit text length.
-  suggestion_formula: Latitudinal range {{dpps[dpp.LAT_FIELD].stats.max|float - dpps[dpp.LAT_FIELD].stats.min|float }} {{"the quick brown fox"|truncate_with_ellipsis(5)}}
+  - field_name: spatial_extent
+    label: Spatial Extent
+    form_snippet: markdown.html
+    # This formula generates a WKT (Well-Known Text) representation of the dataset's spatial extent.
+    # It automatically uses the inferred latitude and longitude fields unless explicitly specified.
+    # The spatial_extent_wkt() Jinja2 function creates a POLYGON that encompasses all data points.
+    # By leveraging the extensive statistical info compiled by DP+ and the expressiveness
+    # of Jinja2, we have a powerful, easily extensible Formula Language for DataPusher+!
+    # Check out jinja2_helpers.py for more examples of custom Jinja2 filters and functions.
+    suggestion_formula: "{{ spatial_extent_wkt() }}"
 
-- field_name: spatial_extent
-  label: Spatial Extent
-  form_snippet: markdown.html
-  # This formula generates a WKT (Well-Known Text) representation of the dataset's spatial extent.
-  # It automatically uses the inferred latitude and longitude fields unless explicitly specified.
-  # The spatial_extent_wkt() Jinja2 function creates a POLYGON that encompasses all data points.
-  # By leveraging the extensive statistical info compiled by DP+ and the expressiveness
-  # of Jinja2, we have a powerful, easily extensible Formula Language for DataPusher+!
-  # Check out jinja2_helpers.py for more examples of custom Jinja2 filters and functions.
-  suggestion_formula: '{{ spatial_extent_wkt() }}'
+  - field_name: tag_string
+    label: Tags
+    preset: tag_string_autocomplete
+    form_placeholder: eg. economy, mental health, government
 
-- field_name: test_field
-  label: Test Field
-  # This is a direct formula (not a suggestion) that sets the field's value at creation/update.
-  # It combines the package author name (title-cased) with their email address.
-  # The result is stored directly in the field rather than as a suggestion.
-  formula: 'Contact: {{package.author|title}} - Email: {{package.author_email}}'
+  - field_name: license_id
+    label: License
+    form_snippet: license.html
+    help_text: License definitions and additional information can be found at http://opendefinition.org/
 
-- field_name: tag_string
-  label: Tags
-  preset: tag_string_autocomplete
-  form_placeholder: eg. economy, mental health, government
+  - field_name: owner_org
+    label: Organization
+    preset: dataset_organization
 
-- field_name: license_id
-  label: License
-  form_snippet: license.html
-  help_text: License definitions and additional information can be found at http://opendefinition.org/
+  - field_name: url
+    label: Source
+    form_placeholder: http://example.com/dataset.json
+    display_property: foaf:homepage
+    display_snippet: link.html
 
-- field_name: owner_org
-  label: Organization
-  preset: dataset_organization
+  - field_name: version
+    label: Version
+    validators: ignore_missing unicode_safe package_version_validator
+    form_placeholder: "1.0"
 
-- field_name: url
-  label: Source
-  form_placeholder: http://example.com/dataset.json
-  display_property: foaf:homepage
-  display_snippet: link.html
+  - field_name: author
+    label: Author
+    form_placeholder: Joe Bloggs
+    display_property: dc:creator
 
-- field_name: version
-  label: Version
-  validators: ignore_missing unicode_safe package_version_validator
-  form_placeholder: '1.0'
+  - field_name: author_email
+    label: Author Email
+    form_placeholder: joe@example.com
+    display_property: dc:creator
+    display_snippet: email.html
+    display_email_name_field: author
 
-- field_name: author
-  label: Author
-  form_placeholder: Joe Bloggs
-  display_property: dc:creator
+  - field_name: test_derived_field
+    label: Test Derived Field
+    # This is a DIRECT formula (not a suggestion) that sets the field's value at creation/update.
+    # It combines the package author name (title-cased) with their email address.
+    # The result is stored directly in the field rather than as a suggestion.
+    formula: "Contact: {{package.author|title}} - Email: {{package.author_email}}"
 
-- field_name: author_email
-  label: Author Email
-  form_placeholder: joe@example.com
-  display_property: dc:creator
-  display_snippet: email.html
-  display_email_name_field: author
+  - field_name: maintainer
+    label: Maintainer
+    form_placeholder: Joe Bloggs
+    display_property: dc:contributor
 
-- field_name: maintainer
-  label: Maintainer
-  form_placeholder: Joe Bloggs
-  display_property: dc:contributor
+  - field_name: maintainer_email
+    label: Maintainer Email
+    form_placeholder: joe@example.com
+    display_property: dc:contributor
+    display_snippet: email.html
+    display_email_name_field: maintainer
 
-- field_name: maintainer_email
-  label: Maintainer Email
-  form_placeholder: joe@example.com
-  display_property: dc:contributor
-  display_snippet: email.html
-  display_email_name_field: maintainer
-
-- field_name: frequency_info
-  label: Frequency Info
-  form_snippet: markdown.html
-  # This formula uses get_frequency_top_values() to analyze the frequency distribution
-  # of values in the "department" field. It returns the top N most common values
-  # with their counts and percentages.
-  suggestion_formula: '{{ get_frequency_top_values("department") }}'
-
-- field_name: dpp_suggestions
-  label: DPP Suggestion
-  preset: json_object
+  # DP+ uses this field to store the suggestions it generates for the dataset
+  # and its resources. It also has a STATUS field to track the progress of
+  # formula processing, which is used by the Suggestion UI to indicate when
+  # all suggestions have been processed.
+  - field_name: dpp_suggestions
+    label: DPP Suggestion
+    preset: json_object
 
 resource_fields:
+  - field_name: url
+    label: URL
+    preset: resource_url_upload
 
-- field_name: url
-  label: URL
-  preset: resource_url_upload
+  - field_name: name
+    label: Name
+    form_placeholder: eg. January 2011 Gold Prices
 
-- field_name: name
-  label: Name
-  form_placeholder: eg. January 2011 Gold Prices
+  - field_name: description
+    label: Description
+    form_snippet: markdown.html
+    form_placeholder: Some useful notes about the data
+    # TODO: Add a formula that suggests an LLM-generated description of the resource
+    # based on the resource's metadata, the resource's data and its statistical properties.
 
-- field_name: description
-  label: Description
-  form_snippet: markdown.html
-  form_placeholder: Some useful notes about the data
+  - field_name: format
+    label: Format
+    preset: resource_format_autocomplete
 
-- field_name: resource_spatial_extent
-  label: Resource Spatial Extent
-  form_snippet: markdown.html
-  # This formula creates a WKT POLYGON representing the spatial extent of the dataset.
-  # It uses the inferred latitude and longitude fields to calculate the bounding box.
-  # The coordinates are ordered as: (min_lat, min_lon), (min_lat, max_lon),
-  # (max_lat, max_lon), (max_lat, min_lon), (min_lat, min_lon).
-  suggestion_formula: POLYGON(({{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}))
+  - field_name: resource_spatial_extent
+    label: Resource Spatial Extent
+    form_snippet: markdown.html
+    # This formula creates a WKT POLYGON representing the spatial extent of the dataset.
+    # It uses the inferred latitude and longitude fields to calculate the bounding box.
+    # The coordinates are ordered as: (min_lat, min_lon), (min_lat, max_lon),
+    # (max_lat, max_lon), (max_lat, min_lon), (min_lat, min_lon).
+    suggestion_formula: POLYGON(({{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}, {{dpps[dpp.LAT_FIELD].stats.max|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.max|float}}, {{dpps[dpp.LAT_FIELD].stats.min|float}}, {{dpps[dpp.LON_FIELD].stats.min|float}}))
 
+  - field_name: frequency_info
+    label: Frequency Info
+    form_snippet: markdown.html
+    # This formula uses get_frequency_top_values() to analyze the frequency distribution
+    # of values in the "department" field. It returns the top N most common values
+    # with their counts and percentages.
+    suggestion_formula: '{{ get_frequency_top_values("department") }}'
 
-- field_name: format
-  label: Format
-  preset: resource_format_autocomplete
-
-- field_name: temporal_resolution
-  label: Temporal Resolution
-  # This formula calculates the minimum time interval between dates in the dataset.
-  # It automatically detects date columns based on configurable patterns.
-  # Returns an ISO 8601 duration string (e.g., "P1D" for daily, "P1M" for monthly).
-  # Requires datastore.sqlsearch.enabled to be true in CKAN config.
-  suggestion_formula: '{{ temporal_resolution() }}'
+  - field_name: temporal_resolution
+    label: Temporal Resolution
+    # This formula calculates the minimum time interval between dates in the dataset.
+    # It automatically detects date columns based on configurable patterns.
+    # Returns an ISO 8601 duration string (e.g., "P1D" for daily, "P1M" for monthly).
+    # Requires datastore.sqlsearch.enabled to be true in CKAN config.
+    # This is illustrative of how otherwise "expensive", hard-to-compile, optional
+    # but recommended DCAT3 metadata can be computed on-demand using DP+ and Jinja2.
+    suggestion_formula: "{{ temporal_resolution() }}"
