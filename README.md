@@ -35,10 +35,10 @@ type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_leng
       * its in a comma-separated priority-order list of lat/long name patterns
       * for latitude, if its of type "Float" with a range of -90.0 to 90.0, and
       * for longitude, if its a "Float" with a range of -180.0 to 180.0.
-    * `LAT_FIELD` and `LON_FIELD` - lat/long columns
+    * `LAT_FIELD` and `LON_FIELD` - the inferred lat/long columns
     * `NO_LAT_LONG_FIELDS` (bool)
 
-Beyond the extensive list of built-in Jinja2 [filters](https://jinja.palletsprojects.com/en/stable/templates/#list-of-builtin-filters)/[functions](https://jinja.palletsprojects.com/en/stable/templates/#list-of-global-functions), DP+ also supports an extensive list of additional [custom filters/functions](https://github.com/dathere/datapusher-plus/blob/607e7c5e5d75c5dc7ac55d684522c7972bc33d1d/ckanext/datapusher_plus/jinja2_helpers.py#L171).
+Beyond the extensive list of built-in Jinja2 [filters](https://jinja.palletsprojects.com/en/stable/templates/#list-of-builtin-filters)/[functions](https://jinja.palletsprojects.com/en/stable/templates/#list-of-global-functions), DP+ also supports an extensive list of additional [custom filters/functions](https://github.com/dathere/datapusher-plus/blob/607e7c5e5d75c5dc7ac55d684522c7972bc33d1d/ckanext/datapusher_plus/jinja2_helpers.py#L171). Several of these helper functions make it trivially easy to calculate [DCAT 3](https://doi-do.github.io/dcat-us/) recommended, optional properties that would ordinarily be too expensive to compile (e.g `dcat-us:GeographicBoundingBox`, `dcat:temporalResolution`, `dcat:startDate`, `dcat:endDate`, etc. ).
 
 There are two Formula types that are indicated by adding these keywords to the scheming yaml file:
  * `formula` - the formula will be evaluated at resource creation/update time and the result is assigned to the corresponding package/resource field immediately.
@@ -144,7 +144,6 @@ Without an index, it takes 1.3 seconds.
       caused the job to fail! YIKES!!!!
 
 ## Requirements:
-Datapusher+ requires:
 * CKAN 2.10+
 * Python 3.10+
 * tested and developed on Ubuntu 22.04.5
