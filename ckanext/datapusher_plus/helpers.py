@@ -518,3 +518,76 @@ def extract_zip_or_metadata(
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         return 0, "", ""
+
+
+def scheming_field_suggestion(field):
+    """
+    Returns suggestion data for a field if it exists
+    """
+    suggestion_label = field.get('suggestion_label', field.get('label', ''))
+    suggestion_formula = field.get('suggestion_formula', field.get('suggest_jinja2', None))
+
+    if suggestion_formula:
+        return {
+            'label': suggestion_label,
+            'formula': suggestion_formula
+        }
+    return None
+
+
+
+def scheming_get_suggestion_value(field_name, data=None, errors=None, lang=None):
+    if not data:
+        return ''
+
+    try:
+        # Log the field name
+        logger.info(f"Field name extracted: {field_name}")
+
+        # Get package data (where dpp_suggestions is stored)
+        package_data = data
+        logger.info(f"Data passed to scheming_get_suggestion_value: {data}")
+
+        # Check if dpp_suggestions exists and has the package section
+        if (package_data and 'dpp_suggestions' in package_data and 
+            isinstance(package_data['dpp_suggestions'], dict) and
+            'package' in package_data['dpp_suggestions']):
+
+            # Get the suggestion value if it exists
+            if field_name in package_data['dpp_suggestions']['package']:
+                logger.info(f"Suggestion value found for field '{field_name}': {package_data['dpp_suggestions']['package'][field_name]}")
+                return package_data['dpp_suggestions']['package'][field_name]
+
+        # No suggestion value found
+        return ''
+    except Exception as e:
+        # Log the error but don't crash
+        logger.warning(f"Error getting suggestion value: {e}")
+        return ''
+
+def scheming_is_valid_suggestion(field, value):
+    """
+    Check if a suggested value is valid for a field, particularly for select fields
+    """
+    # If not a select/choice field, always valid
+    if not field.get('choices') and not field.get('choices_helper'):
+        return True
+
+    # Get all valid choices for this field
+    choices = scheming_field_choices(field)
+    if not choices:
+        return True
+
+    # Check if the value is in the list of valid choices
+    for choice in choices:
+        if choice['value'] == value:
+            return True
+
+    return False
+
+def is_preformulated_field(field):
+    """
+    Check if a field is preformulated (has formula attribute)
+    This helper returns True only if the field has a 'formula' key with a non-empty value
+    """
+    return bool(field.get('formula', False))

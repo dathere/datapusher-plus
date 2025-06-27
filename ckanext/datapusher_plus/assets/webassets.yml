@@ -1,0 +1,16 @@
+suggestions_css:
+  filter: cssrewrite
+  output: datapusher_plus/%(version)s_suggestions_css.css
+  contents:
+    - styles/suggestions.css
+
+
+suggestions:
+  filters: rjsmin
+  output: datapusher_plus/%(version)s_scheming_suggestions.js
+  extra:
+    preload:
+      - base/main
+  contents:
+    - js/scheming-suggestions.js
+

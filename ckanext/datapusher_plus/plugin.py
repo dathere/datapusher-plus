@@ -5,13 +5,15 @@ from __future__ import annotations
 
 from ckan.common import CKANConfig
 import logging
-from typing import Any, Callable
+from typing import Any, Callable, Optional, Literal
 
+from ckan.plugins.toolkit import add_template_directory, h
 from ckan.types import Action, AuthFunction, Context
 
 import ckan.model as model
 import ckan.plugins as p
 import ckanext.datapusher_plus.views as views
+import ckanext.datapusher_plus.druf_view as druf_view
 import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.logic.action as action
 import ckanext.datapusher_plus.logic.auth as auth
@@ -34,6 +36,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
     p.implements(p.IConfigurer, inherit=True)
     p.implements(p.IConfigurable, inherit=True)
     p.implements(p.IActions)
+    p.implements(p.IFormRedirect)
     p.implements(p.IAuthFunctions)
     p.implements(p.IPackageController, inherit=True)
     p.implements(p.IResourceUrlChange)
@@ -169,13 +172,47 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         return {
             "datapusher_plus_status": dph.datapusher_status,
             "datapusher_plus_status_description": dph.datapusher_status_description,
+            "scheming_field_suggestion": dph.scheming_field_suggestion,
+            "scheming_get_suggestion_value": dph.scheming_get_suggestion_value,
+            "scheming_is_valid_suggestion": dph.scheming_is_valid_suggestion,
+            "is_preformulated_field": dph.is_preformulated_field,
         }
 
     # IBlueprint
-
     def get_blueprint(self):
-        return views.get_blueprints()
+        """Register plugin blueprints"""
+        blueprints = []
+        blueprints.extend(views.get_blueprints())
+        blueprints.extend(druf_view.get_blueprints())  
+        return blueprints 
 
     # IClick
     def get_commands(self):
         return cli.get_commands()
+
+    # IFormRedirect
+
+    def dataset_save_redirect(
+            self, package_type: str, package_name: str,
+            action: Literal['create', 'edit'], save_action: Optional[str],
+            data: dict[str, Any],
+            ) -> Optional[str]:
+        # done after dataset metadata
+        return h.url_for(f'{package_type}.read', id=package_name)
+
+    def resource_save_redirect(
+            self, package_type: str, package_name: str, resource_id: Optional[str],
+            action: Literal['create', 'edit'], save_action: str,
+            data: dict[str, Any],
+            ) -> Optional[str]:
+        if action == 'edit':
+            return h.url_for(
+                f'{package_type}_resource.read',
+                id=package_name, resource_id=resource_id
+            )
+        if save_action == 'again':
+            return h.url_for(
+                '{}_resource.new'.format(package_type), id=package_name,
+            )
+        # edit dataset page after resource
+        return h.url_for(u'{}.edit'.format(package_type), id=package_name)

@@ -1,0 +1,141 @@
+scheming_version: 2
+dataset_type: dataset
+about: A re-implementation of the default CKAN dataset schema
+about_url: http://github.com/ckan/ckanext-scheming
+
+draft_fields_required: false
+
+display_group_order:
+  [
+    "Basic Info",
+    "Detailed Info",
+  ]
+
+dataset_fields:
+
+  - start_form_page:
+      title: Basic Info
+      description: Required and core dataset fields
+
+    field_name: title
+    label: Title
+    preset: title
+    required: True
+    form_placeholder: eg. A descriptive title
+
+  - field_name: name
+    label: URL
+    preset: dataset_slug
+    form_placeholder: eg. my-dataset
+
+  - field_name: notes
+    label: Abstract
+    validators: scheming_required
+    required: false
+    form_snippet: markdown.html
+    form_placeholder: eg. Some useful notes about the data
+    
+  - field_name: spatial_extent
+    label: Spatial Extent
+    validators: scheming_required
+    form_snippet: markdown.html
+    suggestion_formula: '{{ spatial_extent_wkt() }}'
+
+  - field_name: owner_org
+    label: Organization
+    required: True
+    preset: dataset_organization
+
+  - start_form_page:
+      title: Detailed Info
+      description:
+        These fields improve search and give users important links
+
+    field_name: update_type
+    label: Update Type
+    help_text: Select Update Type
+    help_inline: true
+    form_include_blank_choice: true
+    preset: select
+    choices:
+      - label: Automatic
+        value: automatic
+      - label: Manual
+        value: manual
+      - label: None
+        value: none
+
+  - field_name: end_date
+    label: Automatic Update End Date
+    form_snippet: date.html
+    validators: ignore_missing check_end_date
+    help_text: If this dataset has an Update Type of Automatic and Automatic Updates should stop at some point, please indicate the end date at which Automatic Updates should stop. If not, leave this field blank.
+    help_inline: true
+
+  - field_name: update_frequency
+    label: Update Frequency
+    #required: True
+    form_include_blank_choice: true
+    preset: select
+    choices:
+      - label: Real-time
+        value: real-time
+      - label: 15 minutes or less
+        value: 15 minutes or less
+      - label: Hourly
+        value: hourly
+      - label: Daily
+        value: daily
+      - label: Weekly
+        value: weekly
+      - label: Monthly
+        value: monthly
+      - label: Quarterly
+        value: quarterly
+      - label: Every 6 months
+        value: every 6 months
+      - label: Annually
+        value: annually
+      - label: As needed
+        value: as needed
+      - label: Never
+        value: never
+      - label: Other
+        value: other
+
+  - field_name: next_update
+    label: Next Update
+    form_snippet: date.html
+
+    field_name: caveats_usage
+    label: Caveats and Usage
+    form_snippet: markdown.html
+    help_text: this help is going to be displayed inline.
+    help_inline: true
+
+  - field_name: tag_string
+    label: Tags
+    preset: tag_string_autocomplete_hidden
+    form_placeholder: eg. economy, mental health, government
+
+  - field_name: dpp_suggestions
+    label: DPP Suggestions
+    preset: json_object
+
+resource_fields:
+  - field_name: url
+    label: URL
+    preset: resource_url_upload
+
+  - field_name: name
+    label: Name
+    form_placeholder: eg. January 2011
+
+  - field_name: description
+    label: Description
+    form_snippet: markdown.html
+    form_placeholder: Some useful notes about the data
+
+  - field_name: format
+    label: Format
+    preset: resource_format_autocomplete
