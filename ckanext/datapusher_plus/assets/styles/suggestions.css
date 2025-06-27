@@ -1,0 +1,655 @@
+/* --- General Suggestion UI Enhancements --- */
+.control-group.has-suggestion .control-label {
+    position: relative;
+    /* For potential loader positioning */
+    display: flex;
+    /* To align label text and button nicely */
+    align-items: center;
+    /* Vertical alignment */
+}
+
+
+.suggestion-field-loader {
+    margin-left: 5px;
+    /* Space from label text */
+}
+
+.suggestion-field-loader i.fa {
+    color: #007bff;
+    /* CKAN blue */
+    font-size: 0.9em;
+}
+
+/* Processing Banner & Temporary Messages */
+.scheming-alert {
+    padding: 15px 20px;
+    margin-bottom: 20px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    font-size: 14px;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.08);
+    transition: background-color 0.3s ease, color 0.3s ease;
+    /* Smooth transitions */
+}
+
+.scheming-alert i.fa {
+    margin-right: 12px;
+    font-size: 1.3em;
+}
+
+.scheming-alert-info {
+    background-color: #e7f3fe;
+    border-color: #d0eaff;
+    color: #0c5460;
+}
+
+.scheming-alert-success {
+    background-color: #d4edda;
+    border-color: #c3e6cb;
+    color: #155724;
+}
+
+.scheming-alert-warning {
+    background-color: #fff3cd;
+    border-color: #ffeeba;
+    color: #856404;
+}
+
+.scheming-alert-danger {
+    background-color: #f8d7da;
+    border-color: #f5c6cb;
+    color: #721c24;
+}
+
+
+.suggestion-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    border: none;
+    background-color: transparent;
+    color: #2a9134;
+    /* darker green */
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    position: relative;
+    top: -1px;
+}
+
+.suggestion-btn:hover,
+.suggestion-btn:focus {
+    background-color: rgba(0, 123, 255, 0.1);
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(0, 123, 255, 0.2);
+    outline: none;
+}
+
+.suggestion-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: #2a9134;
+    /* darker green */
+    transition: stroke 0.25s ease-in-out;
+    /* Smooth color transition for icon */
+}
+
+/* Suggestion Button Error State */
+.suggestion-btn.suggestion-btn-error {
+    color: #dc3545;
+    /* Bootstrap danger red */
+}
+
+.suggestion-btn.suggestion-btn-error svg {
+    stroke: #dc3545;
+    /* Red icon stroke */
+}
+
+.suggestion-btn.suggestion-btn-error:hover,
+.suggestion-btn.suggestion-btn-error:focus {
+    background-color: rgba(220, 53, 69, 0.1);
+    /* Light red background on hover */
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.2);
+}
+
+
+/* --- Custom Popover Modernization --- */
+.custom-suggestion-popover {
+    max-width: 380px;
+    width: auto;
+    background-color: #ffffff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 4px 10px rgba(0, 0, 0, 0.08);
+    padding: 18px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.5;
+    /* Improved line height for readability */
+}
+
+.custom-suggestion-popover:before {
+    display: none;
+}
+
+/* Removed default arrow */
+
+.suggestion-popover-content strong {
+    display: block;
+    margin-bottom: 12px;
+    color: #212529;
+    font-size: 17px;
+    /* Slightly larger title */
+    font-weight: 600;
+}
+
+.suggestion-value {
+    margin: 15px 0;
+    padding: 12px;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+    word-break: break-all;
+    border-left: 4px solid #007bff;
+    font-size: 14px;
+    color: #343a40;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04);
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+/* Formula Toggle & Display */
+.formula-toggle {
+    margin: 10px 0 5px 0;
+}
+
+.formula-toggle-btn {
+    background: none;
+    border: none;
+    color: #007bff;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 5px 0;
+    display: flex;
+    align-items: center;
+    opacity: 0.9;
+    transition: opacity 0.2s ease;
+}
+
+.formula-toggle-btn:hover {
+    opacity: 1;
+    text-decoration: underline;
+}
+
+.formula-toggle-active {
+    opacity: 1;
+}
+
+/* Class for active (expanded) state */
+.formula-toggle-icon {
+    font-size: 11px;
+    margin-right: 6px;
+    transition: transform 0.2s ease;
+}
+
+.formula-toggle-active .formula-toggle-icon {
+    transform: rotate(180deg);
+}
+
+/* Icon rotation */
+
+
+.suggestion-formula {
+    margin: 8px 0 15px 0;
+    padding: 12px;
+    background-color: #e9ecef;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #495057;
+    border-left: 3px solid #28a745;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace;
+}
+
+.formula-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-weight: 500;
+    color: #333;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.copy-formula-btn {
+    background: none;
+    border: none;
+    color: #007bff;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.7;
+    transition: all 0.2s ease;
+    border-radius: 4px;
+}
+
+.copy-formula-btn:hover {
+    opacity: 1;
+    background-color: rgba(0, 123, 255, 0.08);
+}
+
+.copy-formula-btn.copy-success {
+    color: #28a745;
+    opacity: 1;
+    background-color: rgba(40, 167, 69, 0.1);
+}
+
+.copy-formula-btn svg {
+    width: 16px;
+    height: 16px;
+}
+
+.suggestion-formula code {
+    white-space: pre-wrap;
+    word-break: break-all;
+    display: block;
+}
+
+/* Apply Button */
+.suggestion-apply-btn {
+    margin-top: 15px;
+    padding: 10px 15px;
+    font-size: 14px;
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    display: block;
+    width: 100%;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    text-transform: none;
+    letter-spacing: 0;
+    box-shadow: 0 2px 5px rgba(40, 167, 69, 0.25);
+}
+
+.suggestion-apply-btn:hover:not(.suggestion-apply-btn-disabled) {
+    background-color: #218838;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+}
+
+.suggestion-apply-btn:active:not(.suggestion-apply-btn-disabled) {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(40, 167, 69, 0.3);
+}
+
+.suggestion-apply-btn-disabled {
+    background-color: #adb5bd !important;
+    color: #495057 !important;
+    /* Darker text on grey */
+    cursor: not-allowed !important;
+    box-shadow: none !important;
+    opacity: 0.65;
+}
+
+/* Popover Error State Styling */
+.suggestion-popover-error strong {
+    color: #721c24;
+    /* Darker red for title in error popover */
+}
+
+.suggestion-error-text {
+    display: flex;
+    align-items: flex-start;
+    /* Align icon and text nicely */
+    margin-top: 8px;
+    margin-bottom: 8px;
+    /* Consistent margin */
+    padding: 10px;
+    background-color: #f8d7da;
+    border-radius: 6px;
+    border-left: 3px solid #dc3545;
+    font-size: 13px;
+    line-height: 1.4;
+    color: #721c24;
+}
+
+.suggestion-error-text svg {
+    flex-shrink: 0;
+    margin-right: 8px;
+    stroke: #dc3545;
+    margin-top: 2px;
+}
+
+.suggestion-value-error {
+    border-left-color: #dc3545 !important;
+    background-color: #f8d7da !important;
+    color: #721c24 !important;
+}
+
+
+/* Warning for invalid select */
+.suggestion-warning {
+    display: flex;
+    /* For icon alignment */
+    align-items: flex-start;
+    padding: 10px;
+    background-color: #fff3cd;
+    border-left: 3px solid #ffc107;
+    color: #856404;
+    border-radius: 4px;
+    margin: 10px 0;
+    font-size: 13px;
+}
+
+.suggestion-warning svg {
+    stroke: #ffc107;
+    margin-right: 8px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+
+
+/* Applied field animation (for manual suggestion apply) */
+@keyframes highlightSuccessPulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.4);
+    }
+
+    70% {
+        box-shadow: 0 0 0 10px rgba(40, 167, 69, 0);
+    }
+
+    100% {
+        box-shadow: 0 0 0 0 rgba(40, 167, 69, 0);
+    }
+}
+
+input.suggestion-applied,
+textarea.suggestion-applied,
+select.suggestion-applied {
+    animation: highlightSuccessPulse 1s ease-out;
+    border-color: #28a745 !important;
+}
+
+/* NEW: Styles for auto-applied formula fields */
+@keyframes highlightAutoApplied {
+    0% {
+        background-color: rgba(0, 123, 255, 0);
+    }
+
+    /* Blueish highlight */
+    50% {
+        background-color: rgba(0, 123, 255, 0.12);
+    }
+
+    100% {
+        background-color: rgba(0, 123, 255, 0);
+    }
+}
+
+input.formula-auto-applied,
+textarea.formula-auto-applied,
+select.formula-auto-applied {
+    animation: highlightAutoApplied 1.2s ease-in-out;
+}
+
+/* NEW: Style for fields where auto-apply formula resulted in an error */
+@keyframes highlightFormulaError {
+    0% {
+        background-color: rgba(220, 53, 69, 0);
+    }
+
+    /* Reddish highlight */
+    50% {
+        background-color: rgba(220, 53, 69, 0.12);
+    }
+
+    100% {
+        background-color: rgba(220, 53, 69, 0);
+    }
+}
+
+input.formula-apply-error,
+textarea.formula-apply-error,
+select.formula-apply-error {
+    animation: highlightFormulaError 1.5s ease-in-out;
+    border-color: #dc3545 !important;
+    /* Persistent red border for a bit if needed */
+}
+
+
+
+/* Responsive adjustments */
+@media (max-width: 767px) {
+    .custom-suggestion-popover {
+        width: calc(100% - 30px) !important;
+        max-width: none;
+        left: 15px !important;
+        right: 15px !important;
+        padding: 15px;
+    }
+
+    .suggestion-btn {
+        width: 30px;
+        height: 30px;
+    }
+
+    .suggestion-btn svg {
+        width: 18px;
+        height: 18px;
+    }
+
+    .control-group.has-suggestion .control-label {
+        flex-wrap: wrap;
+        /* Allow button to wrap if label is very long */
+    }
+
+    .suggestion-btn {
+        margin-top: 4px;
+        /* Add some space if it wraps */
+        margin-left: 0;
+        /* Align to left if wrapped */
+    }
+}
+
+/* Styles for preformulated fields (from original CSS, ensure they are still relevant) */
+.preformulated-field {
+    position: relative;
+    background-color: #f9f9f9;
+    border-left: 3px solid #2a9134;
+    padding-left: 10px;
+}
+
+.preformulated-field input,
+.preformulated-field textarea,
+.preformulated-field select {
+    background-color: #f9f9f9 !important;
+    border-color: #e0e0e0 !important;
+    color: #555 !important;
+}
+
+.preformulated-field-notice {
+    display: block;
+    margin-top: 5px;
+    font-size: 12px;
+    color: #555;
+    font-style: italic;
+    background-color: #f3f3f3;
+    padding: 5px 10px;
+    border-radius: 3px;
+}
+
+/* Fix for colon issue (from original CSS) */
+.form-label label::after,
+.control-label-with-suggestion label:after,
+label:after,
+.control-label-with-suggestion .form-label::after {
+    content: none !important;
+}
+
+/* Ensure the icon for preformulated field is vertically aligned */
+#dataset-edit div[class*="control-group"]>label>span.preformulated-icon>svg {
+    vertical-align: middle;
+    /* Better alignment */
+    margin-left: 5px;
+}
+
+
+
+/* Add to /ckanext/scheming/assets/styles/scheming.css */
+
+/* AI Suggestion button on fields */
+.ai-suggestion-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    margin-left: 8px;
+    border: none;
+    background-color: transparent;
+    color: #4a86e8;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    cursor: pointer;
+    position: relative;
+    top: -1px;
+}
+
+.ai-suggestion-btn:hover,
+.ai-suggestion-btn:focus {
+    transform: scale(1.2);
+    outline: none;
+}
+
+.ai-suggestion-btn svg {
+    height: 30px;
+    fill: #2f9eff;
+    stroke: #0040ff;
+}
+
+
+/* AI Suggestion popover */
+.ai-suggestion-popover {
+    max-width: 350px;
+    position: absolute;
+    background-color: #fff;
+    border: none;
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 4px 8px rgba(0, 0, 0, 0.08);
+    padding: 16px;
+    z-index: 1000;
+}
+
+.ai-suggestion-popover:before {
+    content: '';
+    display: block;
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    transform: rotate(45deg);
+    top: -6px;
+    left: 15px;
+    box-shadow: -2px -2px 5px rgba(0, 0, 0, 0.05);
+}
+
+.ai-suggestion-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.ai-suggestion-header strong {
+    color: #4a86e8;
+    font-size: 16px;
+}
+
+.ai-suggestion-source {
+    font-size: 12px;
+    color: #666;
+    font-style: italic;
+}
+
+/* AI Suggestion context section */
+.ai-suggestion-context-section {
+    margin-top: 15px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+}
+
+.ai-suggestion-context-label {
+    font-size: 13px;
+    color: #333;
+    margin-bottom: 8px;
+}
+
+.ai-suggestion-context {
+    width: 100%;
+    min-height: 60px;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    resize: vertical;
+}
+
+.ai-suggestion-regenerate-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background-color: #4a86e8;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    font-size: 13px;
+}
+
+.ai-suggestion-regenerate-btn:hover {
+    background-color: #3a76d8;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(74, 134, 232, 0.3);
+}
+
+.ai-suggestion-regenerate-btn.regenerating {
+    background-color: #999;
+    transform: none;
+    box-shadow: none;
+    cursor: wait;
+}
+
+.ai-suggestion-regenerate-btn svg {
+    width: 16px;
+    height: 16px;
+    stroke: #fff;
+}
+
+/* AI Suggestion apply button styling */
+.ai-suggestion-apply-btn {
+    background-color: #4a86e8 !important;
+    /* Override the regular suggestion button color */
+}
+
+.ai-suggestion-apply-btn:hover {
+    background-color: #3a76d8 !important;
+    /* Darker on hover */
+}
