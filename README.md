@@ -243,6 +243,12 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$(ckan -c /etc/ckan/default/ckan.ini user token add CKAN_ADMIN dpplus | tail -n 1 | tr -d '\t')"
     ```
 
+7. DataPusher+ Database Setup
+
+   ```
+   ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
+   ```
+
 ## Configuring
 
 ### CKAN Configuration
@@ -253,6 +259,9 @@ Add `datapusher_plus` to the plugins in your CKAN configuration file
 ```ini
 ckan.plugins = <other plugins> datapusher_plus
 ```
+
+**Note on DRUF :**
+DRUF is enabled by default when using `datapusher_plus`. If you wish to **disable** DRUF behavior, ensure that the `scheming_datasets` plugin is listed **before** `datapusher_plus` in the plugin list:
 
 Use a DP+ extended scheming schema:
 
