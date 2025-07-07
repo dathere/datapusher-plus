@@ -60,8 +60,8 @@ setup(
         "fiona==1.10.1",
         "pandas>=2.2.3",
         "semver==3.0.4",
-        "shapely>=2.1.0",
-        "pyproj>=3.7.1",
+        "shapely==2.0.6",
+        "pyproj>=3.6.0",
     ],
     # If there are data files included in your packages that need to be
     # installed, specify them here.  If using Python 2.6 or less, then these
