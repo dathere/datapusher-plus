@@ -2,7 +2,7 @@
 """
 Vector Store integration for DataPusher Plus
 Embeds resource data and metadata during the upload process
-Using local embeddings and OpenRouter for LLM
+Using Pinecone vector database and OpenRouter for LLM
 """
 
 import os
@@ -11,9 +11,7 @@ import json
 import requests
 from typing import Dict, Any, Optional, List, Union
 from datetime import datetime
-import chromadb
-from sentence_transformers import SentenceTransformer
-import numpy as np
+from pinecone import Pinecone
 import ckanext.datapusher_plus.config as conf
 
 log = logging.getLogger(__name__)
@@ -28,8 +26,8 @@ class DataPusherVectorStore:
             log.info("Vector store embedding is disabled")
             return
             
-        self.persist_directory = conf.VECTOR_STORE_PATH
-        self.collection_name = conf.VECTOR_STORE_COLLECTION
+        self.index_name = conf.VECTOR_STORE_INDEX_NAME
+        self.namespace = conf.VECTOR_STORE_NAMESPACE
         
         # Initialize components
         self._initialize_components()
@@ -37,44 +35,11 @@ class DataPusherVectorStore:
     def _initialize_components(self):
         """Initialize vector store components"""
         try:
-            # Ensure directory exists
-            os.makedirs(self.persist_directory, exist_ok=True)
+            # Initialize Pinecone
+            self.pc = Pinecone(api_key=conf.PINECONE_API_KEY)
+            self.index = self.pc.Index(self.index_name)
             
-            # Initialize ChromaDB
-            settings = chromadb.config.Settings(
-                persist_directory=self.persist_directory,
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
-            
-            self.client = chromadb.PersistentClient(
-                path=self.persist_directory,
-                settings=settings
-            )
-            
-            # Get or create collection
-            try:
-                self.collection = self.client.get_collection(name=self.collection_name)
-                log.info(f"Retrieved collection '{self.collection_name}'")
-            except:
-                self.collection = self.client.create_collection(
-                    name=self.collection_name,
-                    metadata={"hnsw:space": "cosine"}
-                )
-                log.info(f"Created collection '{self.collection_name}'")
-            
-            # Initialize local embedding model
-            device = conf.EMBEDDING_DEVICE  # 'cuda', 'cpu', or 'mps'
-            self.embedding_model = SentenceTransformer(
-                conf.EMBEDDING_MODEL,
-                trust_remote_code=True,
-                device=device,
-                config_kwargs={
-                    "use_memory_efficient_attention": False,
-                    "unpad_inputs": False
-                }
-            )
-            log.info(f"Loaded embedding model {conf.EMBEDDING_MODEL} on {device}")
+            log.info(f"Connected to Pinecone index '{self.index_name}'")
             
             # Initialize OpenRouter configuration
             self.openrouter_api_key = conf.OPENROUTER_API_KEY
@@ -198,38 +163,37 @@ class DataPusherVectorStore:
             # Create document content
             doc_content = self._create_document_content(profile)
             
-            # Create metadata for ChromaDB
+            # Create metadata for Pinecone
             metadata = self._create_metadata(profile)
             
             # Split document if too long
             chunks = self._split_text(doc_content)
             
-            # Generate embeddings using local model
-            embeddings = []
-            for chunk in chunks:
-                embedding = self.embedding_model.encode(chunk, convert_to_numpy=True)
-                embeddings.append(embedding.tolist())
-            
             # Remove existing entries for this resource
             try:
-                self.collection.delete(where={"resource_id": resource_id})
+                # Delete existing vectors for this resource
+                existing_ids = [f"{resource_id}_{i}" for i in range(100)]  # Assume max 100 chunks
+                self.index.delete(ids=existing_ids, namespace=self.namespace)
             except Exception as e:
                 logger.warning(f"Could not delete existing entries: {e}")
             
-            # Add new entries
-            ids = [f"{resource_id}_{i}" for i in range(len(chunks))]
-            metadatas = [metadata.copy() for _ in chunks]
+            # Prepare data for Pinecone upsert
+            records = []
+            for i, chunk in enumerate(chunks):
+                chunk_metadata = metadata.copy()
+                chunk_metadata['chunk_index'] = i
+                chunk_metadata['total_chunks'] = len(chunks)
+                
+                records.append({
+                    "id": f"{resource_id}_{i}",
+                    "text": chunk,
+                    "metadata": chunk_metadata
+                })
             
-            # Add chunk info to metadata
-            for i, meta in enumerate(metadatas):
-                meta['chunk_index'] = i
-                meta['total_chunks'] = len(chunks)
-            
-            self.collection.add(
-                embeddings=embeddings,
-                documents=chunks,
-                metadatas=metadatas,
-                ids=ids
+            # Upsert to Pinecone (embeddings are generated automatically)
+            self.index.upsert_records(
+                namespace=self.namespace,
+                records=records
             )
             
             logger.info(f"Successfully embedded {len(chunks)} chunks for resource {resource_id}")
@@ -241,44 +205,34 @@ class DataPusherVectorStore:
     
     def search_resources(self, query: str, n_results: int = 10, 
                         filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-        """Search for resources using the local embedding model"""
+        """Search for resources using Pinecone hosted embeddings"""
         try:
-            # Generate query embedding using the query prompt
-            query_embedding = self.embedding_model.encode(
-                query, 
-                prompt_name="s2p_query" if hasattr(self.embedding_model, 'prompts') else None,
-                convert_to_numpy=True
-            )
-            
-            # Build where clause
-            where_clause = filters if filters else None
-            
-            # Search
-            search_kwargs = {
-                "query_embeddings": [query_embedding.tolist()],
-                "n_results": n_results,
+            # Build search query for Pinecone
+            search_query = {
+                "inputs": {"text": query},
+                "top_k": n_results
             }
             
-            if where_clause:
-                search_kwargs["where"] = where_clause
+            # Add metadata filters if provided
+            if filters:
+                search_query["filter"] = filters
             
-            results = self.collection.query(**search_kwargs)
+            # Search using Pinecone
+            results = self.index.search(
+                namespace=self.namespace,
+                query=search_query
+            )
             
             # Format results
             formatted_results = []
-            if results and 'documents' in results and results['documents']:
-                documents = results['documents'][0]
-                metadatas = results['metadatas'][0] if results.get('metadatas') else []
-                distances = results['distances'][0] if results.get('distances') else []
-                ids = results['ids'][0] if results.get('ids') else []
-                
-                for i, doc in enumerate(documents):
+            if results and 'matches' in results:
+                for match in results['matches']:
                     formatted_results.append({
-                        'id': ids[i] if i < len(ids) else None,
-                        'content': doc,
-                        'metadata': metadatas[i] if i < len(metadatas) else {},
-                        'distance': distances[i] if i < len(distances) else 1.0,
-                        'score': 1.0 - (distances[i] if i < len(distances) else 1.0)
+                        'id': match.get('id'),
+                        'content': match.get('text', ''),
+                        'metadata': match.get('metadata', {}),
+                        'score': match.get('score', 0.0),
+                        'distance': 1.0 - match.get('score', 0.0)
                     })
             
             return formatted_results
@@ -291,20 +245,18 @@ class DataPusherVectorStore:
                                n_results: int = 20) -> List[Dict[str, Any]]:
         """Search for resources containing specific years"""
         try:
-            # Build where clause for temporal filtering
-            where_clause = {
-                "$and": [
-                    {"has_temporal": True},
-                    {"temporal_min": {"$lte": year_filter[1]}},
-                    {"temporal_max": {"$gte": year_filter[0]}}
-                ]
+            # Build filter for temporal filtering using Pinecone metadata filters
+            filters = {
+                "has_temporal": True,
+                "temporal_min": {"$lte": year_filter[1]},
+                "temporal_max": {"$gte": year_filter[0]}
             }
             
             # Search with year filter
             return self.search_resources(
                 query=f"{query} {year_filter[0]} {year_filter[1]} year temporal data",
                 n_results=n_results,
-                filters=where_clause
+                filters=filters
             )
             
         except Exception as e:
@@ -583,7 +535,11 @@ Format: {profile['format']}
             return False
             
         try:
-            self.collection.delete(where={"resource_id": resource_id})
+            # Delete vectors by resource_id filter
+            self.index.delete(
+                filter={"resource_id": resource_id},
+                namespace=self.namespace
+            )
             log.info(f"Deleted embeddings for resource {resource_id}")
             return True
         except Exception as e:

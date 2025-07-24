@@ -175,21 +175,18 @@ AUTO_UNZIP_ONE_FILE = tk.asbool(
 ENABLE_VECTOR_STORE = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.enable_vector_store", False)
 )
-VECTOR_STORE_PATH = tk.config.get(
-    "ckanext.datapusher_plus.vector_store_path", "/var/lib/ckan/vector_store"
+
+# Pinecone configuration
+PINECONE_API_KEY = tk.config.get(
+    "ckanext.datapusher_plus.pinecone_api_key"
 )
-VECTOR_STORE_ENABLED = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.vector_store_enabled", False)
+VECTOR_STORE_INDEX_NAME = tk.config.get(
+    "ckanext.datapusher_plus.vector_store_index_name", "datapusher-resources"
 )
-VECTOR_STORE_COLLECTION = tk.config.get(
-    "ckanext.datapusher_plus.vector_store_collection", "default"
-)   
-EMBEDDING_MODEL = tk.config.get(
-    "ckanext.datapusher_plus.embedding_model", "dunzhang/stella_en_400M_v5"
+VECTOR_STORE_NAMESPACE = tk.config.get(
+    "ckanext.datapusher_plus.vector_store_namespace", "default"
 )
-EMBEDDING_DEVICE = tk.config.get(
-    "ckanext.datapusher_plus.embedding_device", "cpu"
-)   
+
 # OpenRouter API Key
 OPENROUTER_API_KEY = tk.config.get(
     "ckanext.datapusher_plus.openrouter_api_key", "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"
@@ -197,8 +194,12 @@ OPENROUTER_API_KEY = tk.config.get(
 # OpenRouter Model
 OPENROUTER_MODEL = tk.config.get(
     "ckanext.datapusher_plus.openrouter_model", "google/gemini-2.0-flash-001"
-)           
-# Text chunking overlap 
+)
+
+# Text chunking settings
+CHUNK_SIZE = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.chunk_size", "1000")
+)
 CHUNK_OVERLAP = tk.asint(
     tk.config.get("ckanext.datapusher_plus.chunk_overlap", "400")
 )   
