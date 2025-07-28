@@ -47,29 +47,49 @@ class DataPusherVectorStore:
             self.openrouter_base_url = "https://openrouter.ai/api/v1"
             
             # Text splitter settings
-            self.chunk_size = conf.CHUNK_SIZE
+            self.chunk_size = conf.VECTOR_CHUNK_SIZE
             self.chunk_overlap = conf.CHUNK_OVERLAP
             
-            log.info("Vector store components initialized successfully")
+            log.info("Vector store components initialized successfully") 
             
         except Exception as e:
             log.error(f"Failed to initialize vector store: {e}")
             self.enabled = False
     
     def _split_text(self, text: str, chunk_size: int = None, chunk_overlap: int = None) -> List[str]:
-        """Simple text splitter"""
+        """Simple text splitter with safeguards against infinite loops"""
         if chunk_size is None:
             chunk_size = self.chunk_size
         if chunk_overlap is None:
             chunk_overlap = self.chunk_overlap
+        
+        log.debug(f"Text splitting - Input length: {len(text)}, chunk_size: {chunk_size}, chunk_overlap: {chunk_overlap}")
+        
+        # Validate inputs to prevent infinite loops
+        if chunk_size <= 0:
+            chunk_size = 1000  # fallback
+        if chunk_overlap < 0:
+            chunk_overlap = 0
+        if chunk_overlap >= chunk_size:
+            chunk_overlap = chunk_size // 2  # ensure overlap is less than chunk size
+            log.debug(f"Adjusted chunk_overlap to {chunk_overlap} to prevent infinite loop")
             
         if len(text) <= chunk_size:
+            log.debug("Text fits in single chunk")
             return [text]
         
         chunks = []
         start = 0
+        max_iterations = len(text) // max(1, chunk_size - chunk_overlap) + 10  # safety limit
+        iteration_count = 0
         
-        while start < len(text):
+        log.debug(f"Starting text splitting with max_iterations: {max_iterations}")
+        
+        while start < len(text) and iteration_count < max_iterations:
+            iteration_count += 1
+            if iteration_count % 100 == 0:  # Log every 100 iterations
+                log.debug(f"Text splitting iteration {iteration_count}, start position: {start}")
+            
             end = start + chunk_size
             
             # Try to find a good break point
@@ -85,10 +105,22 @@ class DataPusherVectorStore:
                 if break_point > start:
                     end = break_point + 1
             
-            chunks.append(text[start:end].strip())
-            start = end - chunk_overlap
+            chunk = text[start:end].strip()
+            if chunk:  # only add non-empty chunks
+                chunks.append(chunk)
+            
+            # Ensure we always advance by at least 1 character to prevent infinite loops
+            next_start = end - chunk_overlap
+            if next_start <= start:
+                next_start = start + max(1, chunk_size - chunk_overlap)
+            start = next_start
         
-        return chunks
+        # Safety check - if we hit max iterations, log a warning
+        if iteration_count >= max_iterations:
+            log.warning(f"Text splitting hit maximum iterations ({max_iterations}). Text length: {len(text)}")
+        
+        log.debug(f"Text splitting completed in {iteration_count} iterations, created {len(chunks)} chunks")
+        return chunks if chunks else [text]  # ensure we always return at least the original text
     
     def _call_openrouter(self, prompt: str, system_prompt: str = None, 
                         temperature: float = 0.1, max_tokens: int = 500) -> str:
@@ -113,20 +145,28 @@ class DataPusherVectorStore:
         }
         
         try:
+            log.debug("Calling OpenRouter API...")
             response = requests.post(
                 f"{self.openrouter_base_url}/chat/completions",
                 headers=headers,
                 json=data,
-                timeout=30
+                timeout=60  # Increased timeout to 60 seconds
             )
             
             if response.status_code == 200:
                 result = response.json()
+                log.debug("OpenRouter API call successful")
                 return result["choices"][0]["message"]["content"].strip()
             else:
                 log.error(f"OpenRouter API error {response.status_code}: {response.text}")
                 return ""
                 
+        except requests.exceptions.Timeout:
+            log.error("OpenRouter API timeout after 60 seconds")
+            return ""
+        except requests.exceptions.RequestException as e:
+            log.error(f"OpenRouter API request error: {e}")
+            return ""
         except Exception as e:
             log.error(f"Error calling OpenRouter: {e}")
             return ""
@@ -151,86 +191,135 @@ class DataPusherVectorStore:
             logger.info(f"Starting vector embedding for resource {resource_id}")
             
             # Create resource profile from available data
+            logger.debug("Creating resource profile...")
             profile = self._create_resource_profile(
                 resource_id, resource_metadata, dataset_metadata, 
                 stats_data, freq_data, temporal_info
             )
+            logger.debug("Resource profile created successfully")
             
             # Generate AI description using OpenRouter
-            ai_description = self._generate_ai_description(profile)
-            profile['ai_description'] = ai_description
+            logger.debug("Generating AI description...")
+            try:
+                ai_description = self._generate_ai_description(profile)
+                profile['ai_description'] = ai_description
+                logger.debug("AI description generated successfully")
+            except Exception as e:
+                logger.warning(f"Failed to generate AI description: {e}")
+                profile['ai_description'] = f"Resource containing {profile['resource_name']} data"
             
             # Create document content
+            logger.debug("Creating document content...")
             doc_content = self._create_document_content(profile)
+            logger.debug(f"Document content created, length: {len(doc_content)} characters")
             
             # Create metadata for Pinecone
+            logger.debug("Creating metadata...")
             metadata = self._create_metadata(profile)
+            logger.debug(f"Metadata created with {len(metadata)} fields")
             
             # Split document if too long
-            chunks = self._split_text(doc_content)
+            logger.debug("Splitting text into chunks...")
+            try:
+                chunks = self._split_text(doc_content)
+                logger.info(f"Split document into {len(chunks)} chunks")
+            except Exception as e:
+                logger.error(f"Text splitting failed: {e}")
+                # Fallback to simple chunking
+                logger.debug("Using fallback chunking strategy")
+                chunk_size = getattr(self, 'chunk_size', 1000)
+                chunks = [doc_content[i:i+chunk_size] for i in range(0, len(doc_content), chunk_size)]
+                logger.info(f"Fallback chunking created {len(chunks)} chunks")
             
             # Remove existing entries for this resource
+            logger.debug("Checking for existing entries to delete...")
             try:
-                # Delete existing vectors for this resource
-                existing_ids = [f"{resource_id}_{i}" for i in range(100)]  # Assume max 100 chunks
-                self.index.delete(ids=existing_ids, namespace=self.namespace)
+                # Delete existing vectors for this resource by filter
+                self.index.delete(
+                    filter={"resource_id": resource_id},
+                    namespace=self.namespace
+                )
+                logger.debug("Existing entries deleted successfully")
             except Exception as e:
-                logger.warning(f"Could not delete existing entries: {e}")
+                # Ignore namespace not found errors on first upload
+                if "Namespace not found" not in str(e):
+                    logger.warning(f"Could not delete existing entries: {e}")
+                else:
+                    logger.debug("Namespace not found - this is expected on first upload")
             
             # Prepare data for Pinecone upsert
+            logger.debug("Preparing records for Pinecone upsert...")
             records = []
             for i, chunk in enumerate(chunks):
                 chunk_metadata = metadata.copy()
-                chunk_metadata['chunk_index'] = i
-                chunk_metadata['total_chunks'] = len(chunks)
+                chunk_metadata['chunk_index'] = int(i)
+                chunk_metadata['total_chunks'] = int(len(chunks))
                 
-                records.append({
-                    "id": f"{resource_id}_{i}",
-                    "text": chunk,
-                    "metadata": chunk_metadata
-                })
+                # Create record for integrated embedding
+                record = {
+                    "_id": f"{resource_id}_{i}",
+                    "text": chunk  # This field name must match your index's field_map
+                }
+                # Add metadata as separate fields (Pinecone will automatically store them as metadata)
+                record.update(chunk_metadata)
+                records.append(record)
+            
+            logger.debug(f"Prepared {len(records)} records for upsert")
             
             # Upsert to Pinecone (embeddings are generated automatically)
-            self.index.upsert_records(
-                namespace=self.namespace,
-                records=records
-            )
+            logger.debug("Starting Pinecone upsert...")
+            try:
+                self.index.upsert_records(
+                    self.namespace,  # namespace first
+                    records         # then records list
+                )
+                logger.debug("Pinecone upsert completed successfully")
+            except Exception as e:
+                logger.error(f"Pinecone upsert failed: {e}")
+                raise
             
             logger.info(f"Successfully embedded {len(chunks)} chunks for resource {resource_id}")
             return True
             
         except Exception as e:
             logger.error(f"Error embedding resource {resource_id}: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     def search_resources(self, query: str, n_results: int = 10, 
                         filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """Search for resources using Pinecone hosted embeddings"""
         try:
-            # Build search query for Pinecone
-            search_query = {
-                "inputs": {"text": query},
-                "top_k": n_results
+            # Build search parameters for Pinecone integrated embedding
+            search_params = {
+                "namespace": self.namespace,
+                "query": {
+                    "inputs": {"text": query},
+                    "top_k": n_results
+                }
             }
             
             # Add metadata filters if provided
             if filters:
-                search_query["filter"] = filters
+                search_params["query"]["filter"] = filters
             
             # Search using Pinecone
-            results = self.index.search(
-                namespace=self.namespace,
-                query=search_query
-            )
+            results = self.index.search(**search_params)
             
             # Format results
             formatted_results = []
             if results and 'matches' in results:
                 for match in results['matches']:
+                    # For integrated embedding, the original text is in the 'text' field
+                    content = match.get('text', '')
+                    metadata = match.get('metadata', {})
+                    
                     formatted_results.append({
                         'id': match.get('id'),
-                        'content': match.get('text', ''),
-                        'metadata': match.get('metadata', {}),
+                        'content': content,
+                        'metadata': metadata,
                         'score': match.get('score', 0.0),
                         'distance': 1.0 - match.get('score', 0.0)
                     })
@@ -239,28 +328,6 @@ class DataPusherVectorStore:
             
         except Exception as e:
             log.error(f"Error searching resources: {e}")
-            return []
-    
-    def search_resources_by_year(self, query: str, year_filter: tuple, 
-                               n_results: int = 20) -> List[Dict[str, Any]]:
-        """Search for resources containing specific years"""
-        try:
-            # Build filter for temporal filtering using Pinecone metadata filters
-            filters = {
-                "has_temporal": True,
-                "temporal_min": {"$lte": year_filter[1]},
-                "temporal_max": {"$gte": year_filter[0]}
-            }
-            
-            # Search with year filter
-            return self.search_resources(
-                query=f"{query} {year_filter[0]} {year_filter[1]} year temporal data",
-                n_results=n_results,
-                filters=filters
-            )
-            
-        except Exception as e:
-            log.error(f"Error in year-based search: {e}")
             return []
     
     def _create_resource_profile(self, 
@@ -282,7 +349,6 @@ class DataPusherVectorStore:
                            for tag in dataset_metadata.get('tags', [])],
             'dataset_notes': dataset_metadata.get('notes', ''),
             'resource_description': resource_metadata.get('description', ''),
-            'temporal_coverage': temporal_info,
             'stats_summary': stats_data,
             'frequency_summary': self._summarize_frequencies(freq_data),
             'profiling_timestamp': datetime.now().isoformat()
@@ -308,7 +374,6 @@ class DataPusherVectorStore:
                     'non_null_count': int(stats.get('count', 0)),
                     'null_count': int(stats.get('nullcount', 0)),
                     'unique_count': int(stats.get('cardinality', 0)),
-                    'is_temporal': stats.get('type') == 'DateTime',
                     'is_numeric': stats.get('type') in ['Integer', 'Float'],
                 }
                 
@@ -339,7 +404,6 @@ class DataPusherVectorStore:
     def _detect_patterns_from_stats(self, stats_data: Dict[str, Any]) -> Dict[str, Any]:
         """Detect data patterns from stats"""
         patterns = {
-            'has_temporal': False,
             'has_geographic': False,
             'has_financial': False,
             'data_categories': []
@@ -352,10 +416,6 @@ class DataPusherVectorStore:
         for field_name, field_info in stats_data.items():
             if isinstance(field_info, dict):
                 field_lower = field_name.lower()
-                
-                # Check temporal
-                if field_info.get('stats', {}).get('type') == 'DateTime':
-                    patterns['has_temporal'] = True
                 
                 # Check geographic
                 if self._is_geographic_column(field_name):
@@ -404,13 +464,6 @@ Dataset Description: {profile['dataset_notes'][:500] if profile['dataset_notes']
 Resource Description: {profile['resource_description'] or 'Not provided'}
 """
             
-            # Add temporal coverage
-            if profile.get('temporal_coverage'):
-                temp = profile['temporal_coverage']
-                context += f"\n\nTemporal Coverage: {temp.get('min')} to {temp.get('max')}"
-                if temp.get('year_count'):
-                    context += f" ({temp['year_count']} years)"
-            
             # Add column information
             if profile.get('columns_info'):
                 context += "\n\nKey Columns:"
@@ -426,38 +479,37 @@ Resource Description: {profile['resource_description'] or 'Not provided'}
             if profile.get('data_patterns', {}).get('data_categories'):
                 context += f"\n\nData Categories: {', '.join(profile['data_patterns']['data_categories'])}"
             
+            # Limit context length to prevent API issues
+            if len(context) > 3000:
+                context = context[:3000] + "..."
+                log.debug("Truncated context due to length")
+            
             prompt = f"""Based on the following resource information, generate a comprehensive description that will help users understand exactly what data this resource contains and how it can be used.
 
 {context}
 
 Generate a clear, informative description (2-3 sentences) that:
 1. Clearly states what specific data this resource contains
-2. Mentions the temporal coverage if available
-3. Highlights key variables or metrics
-4. Suggests potential use cases
+2. Highlights key variables or metrics
+3. Suggests potential use cases
 
 Be specific and factual."""
             
+            log.debug("Calling OpenRouter for AI description...")
             description = self._call_openrouter(prompt)
             
             if description:
+                log.debug("AI description generated successfully")
                 return description
             else:
                 # Fallback description
-                fallback = f"Resource containing {profile['resource_name']} data"
-                if profile.get('temporal_coverage'):
-                    temp = profile['temporal_coverage']
-                    fallback += f" from {temp.get('min')} to {temp.get('max')}"
-                return fallback
+                log.debug("OpenRouter returned empty response, using fallback")
+                return f"Resource containing {profile['resource_name']} data"
             
         except Exception as e:
             log.error(f"Error generating AI description: {e}")
             # Fallback description
-            fallback = f"Resource containing {profile['resource_name']} data"
-            if profile.get('temporal_coverage'):
-                temp = profile['temporal_coverage']
-                fallback += f" from {temp.get('min')} to {temp.get('max')}"
-            return fallback
+            return f"Resource containing {profile['resource_name']} data"
     
     def _create_document_content(self, profile: Dict[str, Any]) -> str:
         """Create searchable document content"""
@@ -468,13 +520,6 @@ Format: {profile['format']}
 
 {profile['ai_description']}
 """
-        
-        # Add temporal coverage
-        if profile.get('temporal_coverage'):
-            temp = profile['temporal_coverage']
-            doc += f"\n\n**TEMPORAL COVERAGE: {temp.get('min')} to {temp.get('max')}**"
-            if temp.get('year_count'):
-                doc += f"\nTotal Years: {temp['year_count']}"
         
         # Add column information
         if profile.get('columns_info'):
@@ -498,34 +543,28 @@ Format: {profile['format']}
         return doc
     
     def _create_metadata(self, profile: Dict[str, Any]) -> Dict[str, Any]:
-        """Create metadata for ChromaDB"""
+        """Create metadata for Pinecone (only simple types allowed)"""
         metadata = {
-            'resource_id': profile['resource_id'],
-            'resource_name': profile.get('resource_name', ''),
-            'dataset_id': profile.get('dataset_id', ''),
-            'dataset_title': profile.get('dataset_title', ''),
-            'format': profile.get('format', 'unknown'),
-            'has_temporal': bool(profile.get('temporal_coverage')),
+            'resource_id': str(profile['resource_id']),
+            'resource_name': str(profile.get('resource_name', '')),
+            'dataset_id': str(profile.get('dataset_id', '')),
+            'dataset_title': str(profile.get('dataset_title', '')),
+            'format': str(profile.get('format', 'unknown')),
             'indexed_at': datetime.now().isoformat()
         }
         
-        # Add temporal metadata
-        if profile.get('temporal_coverage'):
-            temp = profile['temporal_coverage']
-            metadata['temporal_min'] = int(temp.get('min', 0))
-            metadata['temporal_max'] = int(temp.get('max', 0))
-            metadata['year_count'] = int(temp.get('year_count', 0))
-        else:
-            metadata['temporal_min'] = 0
-            metadata['temporal_max'] = 0
-            metadata['year_count'] = 0
-        
-        # Add pattern metadata
+        # Add pattern metadata (as simple types)
         if profile.get('data_patterns'):
             patterns = profile['data_patterns']
-            metadata['has_geographic'] = patterns.get('has_geographic', False)
-            metadata['has_financial'] = patterns.get('has_financial', False)
-            metadata['data_categories'] = ','.join(patterns.get('data_categories', []))
+            metadata['has_geographic'] = bool(patterns.get('has_geographic', False))
+            metadata['has_financial'] = bool(patterns.get('has_financial', False))
+            # Convert data categories to a single string
+            categories = patterns.get('data_categories', [])
+            metadata['data_categories'] = ','.join(categories) if categories else ''
+        else:
+            metadata['has_geographic'] = False
+            metadata['has_financial'] = False
+            metadata['data_categories'] = ''
         
         return metadata
     

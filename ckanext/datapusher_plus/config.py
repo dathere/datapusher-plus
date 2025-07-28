@@ -173,7 +173,7 @@ AUTO_UNZIP_ONE_FILE = tk.asbool(
 )
 
 ENABLE_VECTOR_STORE = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.enable_vector_store", False)
+    tk.config.get("ckanext.datapusher_plus.enable_vector_store", True)
 )
 
 # Pinecone configuration
@@ -196,9 +196,9 @@ OPENROUTER_MODEL = tk.config.get(
     "ckanext.datapusher_plus.openrouter_model", "google/gemini-2.0-flash-001"
 )
 
-# Text chunking settings
-CHUNK_SIZE = tk.asint(
-    tk.config.get("ckanext.datapusher_plus.chunk_size", "1000")
+# Text chunking settings for vector store
+VECTOR_CHUNK_SIZE = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_chunk_size", "1000")
 )
 CHUNK_OVERLAP = tk.asint(
     tk.config.get("ckanext.datapusher_plus.chunk_overlap", "400")

@@ -1590,12 +1590,11 @@ def _push_to_datastore(
       Resource metadata updates: {metadata_elapsed:,.2f}
     TOTAL ELAPSED TIME: {total_elapsed:,.2f}
     """
-    logger.info(end_msg)
-    
             
     # ============================================================
     # VECTOR STORE EMBEDDING
     # ============================================================
+
     if conf.ENABLE_VECTOR_STORE and VECTOR_STORE_AVAILABLE:
         vector_start = time.perf_counter()
         logger.info("STARTING VECTOR STORE EMBEDDING...")
@@ -1673,3 +1672,5 @@ def _push_to_datastore(
             
         vector_elapsed = time.perf_counter() - vector_start
         logger.info(f"VECTOR STORE EMBEDDING completed in {vector_elapsed:,.2f} seconds")
+
+    logger.info(end_msg)    
