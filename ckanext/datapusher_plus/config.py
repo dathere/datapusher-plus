@@ -171,3 +171,39 @@ JINJA2_BYTECODE_CACHE_DIR = tk.config.get(
 AUTO_UNZIP_ONE_FILE = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_unzip_one_file", True)
 )
+
+ENABLE_VECTOR_STORE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.enable_vector_store", True)
+)
+
+# Pinecone configuration
+PINECONE_API_KEY = tk.config.get(
+    "ckanext.datapusher_plus.pinecone_api_key"
+)
+VECTOR_STORE_INDEX_NAME = tk.config.get(
+    "ckanext.datapusher_plus.vector_store_index_name", "datapusher-resources"
+)
+VECTOR_STORE_NAMESPACE = tk.config.get(
+    "ckanext.datapusher_plus.vector_store_namespace", "default"
+)
+
+# OpenRouter API Key
+OPENROUTER_API_KEY = tk.config.get(
+    "ckanext.datapusher_plus.openrouter_api_key", "sk-or-v1-fc2502ac10"
+)
+# OpenRouter Model
+OPENROUTER_MODEL = tk.config.get(
+    "ckanext.datapusher_plus.openrouter_model", "google/gemini-2.0-flash-001"
+)
+
+# Text chunking settings for vector store
+VECTOR_CHUNK_SIZE = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_chunk_size", "1000")
+)
+CHUNK_OVERLAP = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.chunk_overlap", "400")
+)   
+# Temporal coverage detection
+DETECT_TEMPORAL_COVERAGE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.detect_temporal_coverage", True)
+)
