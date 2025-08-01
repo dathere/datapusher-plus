@@ -172,38 +172,99 @@ AUTO_UNZIP_ONE_FILE = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_unzip_one_file", True)
 )
 
+# ====== VECTOR STORE CONFIGURATION ======
+# Enable/disable vector store embedding
 ENABLE_VECTOR_STORE = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.enable_vector_store", True)
 )
 
-# Pinecone configuration
+# Pinecone Configuration
 PINECONE_API_KEY = tk.config.get(
     "ckanext.datapusher_plus.pinecone_api_key"
 )
 VECTOR_STORE_INDEX_NAME = tk.config.get(
-    "ckanext.datapusher_plus.vector_store_index_name", "datapusher-resources"
+    "ckanext.datapusher_plus.vector_store_index_name", "ckan-test-index"
 )
 VECTOR_STORE_NAMESPACE = tk.config.get(
-    "ckanext.datapusher_plus.vector_store_namespace", "default"
+    "ckanext.datapusher_plus.vector_store_namespace", "ckan-namespace"
 )
 
-# OpenRouter API Key
-OPENROUTER_API_KEY = tk.config.get(
-    "ckanext.datapusher_plus.openrouter_api_key", "sk-or-v1-fc2502ac10"
+# Text field name for embedding (must match your index field_map)
+VECTOR_TEXT_FIELD = tk.config.get(
+    "ckanext.datapusher_plus.vector_text_field", "text"
 )
-# OpenRouter Model
+
+# OpenRouter Configuration for AI Analysis
+OPENROUTER_API_KEY = tk.config.get(
+    "ckanext.datapusher_plus.openrouter_api_key"
+)
 OPENROUTER_MODEL = tk.config.get(
     "ckanext.datapusher_plus.openrouter_model", "google/gemini-2.0-flash-001"
 )
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
-# Text chunking settings for vector store
+# Enhanced Vector Store Settings (Single Resource Per Chunk Strategy)
+VECTOR_CONTENT_TARGET_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_content_target_length", "8000")
+)
+VECTOR_MAX_CONTEXT_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_max_context_length", "6000")
+)
+VECTOR_LLM_SAMPLE_ROWS = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_llm_sample_rows", "5")
+)
+
+# AI Description and Tagging Settings
+VECTOR_AI_MAX_TOKENS = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_ai_max_tokens", "800")
+)
+VECTOR_AI_TEMPERATURE = float(
+    tk.config.get("ckanext.datapusher_plus.vector_ai_temperature", "0.1")
+)
+VECTOR_MAX_AI_TAGS = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_max_ai_tags", "12")
+)
+VECTOR_MIN_DESCRIPTION_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_min_description_length", "50")
+)
+
+# Content Composition Settings
+VECTOR_INCLUDE_AI_DESCRIPTION = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.vector_include_ai_description", True)
+)
+VECTOR_INCLUDE_AI_TAGS = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.vector_include_ai_tags", True)
+)
+VECTOR_INCLUDE_COLUMN_ANALYSIS = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.vector_include_column_analysis", True)
+)
+VECTOR_INCLUDE_FREQUENCY_INSIGHTS = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.vector_include_frequency_insights", True)
+)
+VECTOR_INCLUDE_SAMPLE_DATA = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.vector_include_sample_data", True)
+)
+
+# Performance and Error Handling
+VECTOR_TIMEOUT = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_timeout", "120")
+)
+VECTOR_RETRY_ATTEMPTS = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.vector_retry_attempts", "3")
+)
+VECTOR_FALLBACK_ON_AI_FAILURE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.vector_fallback_on_ai_failure", True)
+)
+
+# Temporal coverage detection
+DETECT_TEMPORAL_COVERAGE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.detect_temporal_coverage", True)
+)
+
+# Legacy settings (deprecated - single chunk strategy doesn't use these)
 VECTOR_CHUNK_SIZE = tk.asint(
     tk.config.get("ckanext.datapusher_plus.vector_chunk_size", "1000")
 )
 CHUNK_OVERLAP = tk.asint(
     tk.config.get("ckanext.datapusher_plus.chunk_overlap", "400")
-)   
-# Temporal coverage detection
-DETECT_TEMPORAL_COVERAGE = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.detect_temporal_coverage", True)
 )

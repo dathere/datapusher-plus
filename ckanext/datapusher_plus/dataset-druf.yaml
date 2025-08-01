@@ -115,7 +115,7 @@ dataset_fields:
 
   - field_name: tag_string
     label: Tags
-    preset: tag_string_autocomplete_hidden
+    preset: tag_string_autocomplete
     form_placeholder: eg. economy, mental health, government
 
   - field_name: dpp_suggestions

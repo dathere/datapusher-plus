@@ -1595,18 +1595,36 @@ def _push_to_datastore(
     # VECTOR STORE EMBEDDING
     # ============================================================
 
-    if conf.ENABLE_VECTOR_STORE and VECTOR_STORE_AVAILABLE:
+    if conf.ENABLE_VECTOR_STORE:
         vector_start = time.perf_counter()
-        logger.info("STARTING VECTOR STORE EMBEDDING...")
+        logger.info("STARTING ENHANCED VECTOR STORE EMBEDDING...")
 
         try:
             # Initialize vector store
             vector_store = DataPusherVectorStore()
 
             if vector_store.enabled:
+                # Generate sample data for LLM analysis using QSV
+                sample_data = None
+                if conf.VECTOR_INCLUDE_SAMPLE_DATA:
+                    try:
+                        # Get a small sample for LLM analysis
+                        qsv_sample_csv = os.path.join(temp_dir, "qsv_sample_for_llm.csv")
+                        qsv.slice(tmp, length=conf.VECTOR_LLM_SAMPLE_ROWS, output_file=qsv_sample_csv)
+                        
+                        # Read sample as text
+                        with open(qsv_sample_csv, 'r', encoding='utf-8') as f:
+                            sample_data = f.read()
+                        
+                        logger.debug(f"Generated sample data for LLM: {len(sample_data)} characters")
+                        
+                    except Exception as e:
+                        logger.warning(f"Could not generate sample data: {e}")
+                        sample_data = None
+
                 # Prepare temporal information if available
                 temporal_info = None
-                if dataset_stats.get('IS_SORTED') and datetimecols_list:
+                if conf.DETECT_TEMPORAL_COVERAGE and datetimecols_list:
                     # Extract temporal coverage from the data
                     temporal_years = set()
 
@@ -1650,27 +1668,33 @@ def _push_to_datastore(
                         }
                         logger.info(f"Detected temporal coverage: {temporal_info['min']} to {temporal_info['max']}")
 
-                # Embed the resource
+                # Add record count to resource metadata for embedding
+                resource_with_stats = dict(resource)
+                resource_with_stats['record_count'] = record_count
+
+                # Embed the resource with enhanced data
                 success = vector_store.embed_resource(
                     resource_id=resource_id,
-                    resource_metadata=resource,
+                    resource_metadata=resource_with_stats,
                     dataset_metadata=package,
                     stats_data=resource_fields_stats,
                     freq_data=resource_fields_freqs,
                     temporal_info=temporal_info,
+                    sample_data=sample_data,  # Pass sample data for LLM analysis
                     logger=logger
                 )
 
                 if success:
-                    logger.info("Vector store embedding completed successfully")
+                    logger.info("✅ Enhanced vector store embedding completed successfully")
+                    logger.info(f"Resource {resource_id} embedded as single comprehensive vector")
                 else:
-                    logger.warning("Vector store embedding failed")
+                    logger.warning("❌ Enhanced vector store embedding failed")
 
         except Exception as e:
-            logger.error(f"Error during vector store embedding: {e}")
+            logger.error(f"Error during enhanced vector store embedding: {e}")
             # Don't fail the job if embedding fails
 
         vector_elapsed = time.perf_counter() - vector_start
-        logger.info(f"VECTOR STORE EMBEDDING completed in {vector_elapsed:,.2f} seconds")
+        logger.info(f"ENHANCED VECTOR STORE EMBEDDING completed in {vector_elapsed:,.2f} seconds")
 
     logger.info(end_msg)    
