@@ -189,6 +189,7 @@ DRUF is completely optional and disabled by default. When disabled:
 * Python 3.10+
 * tested and developed on Ubuntu 22.04.5
 * [`ckan.datastore.sqlsearch.enabled`](https://docs.ckan.org/en/2.10/maintaining/datastore.html#ckanext.datastore.logic.action.datastore_search_sql) set to `true` if you want to use the `temporal_resolution` and `guess_accrual_periodicity` Formula helpers
+* ckanext-scheming extension
 
 ## Development Installation
 
