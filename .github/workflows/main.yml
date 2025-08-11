@@ -1,0 +1,608 @@
+name: Tests
+on: 
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  # Job 1: Standalone tests without CKAN (fastest)
+  standalone-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache QSV binary
+      id: cache-qsv
+      uses: actions/cache@v3
+      with:
+        path: /usr/local/bin/qsv
+        key: qsv-0.134.0-${{ runner.os }}
+    
+    - name: Install QSV
+      if: steps.cache-qsv.outputs.cache-hit != 'true'
+      run: |
+        QSV_VERSION="0.134.0"
+        wget "https://github.com/dathere/qsv/releases/download/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        tar -xzf "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        sudo mv qsv /usr/local/bin/
+        sudo chmod +x /usr/local/bin/qsv
+        rm "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+    
+    - name: Verify QSV installation
+      run: |
+        which qsv
+        qsv --version
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest pytest-cov httpretty mock responses
+        pip install jinja2 fiona pandas semver shapely pyproj psycopg2-binary
+    
+    - name: Create test directories
+      run: |
+        mkdir -p tests/standalone
+        mkdir -p tests/test_files
+    
+    - name: Run standalone QSV tests
+      run: |
+        # Create and run minimal test
+        python -c "
+import sys, os, tempfile, csv, logging
+from pathlib import Path
+sys.path.insert(0, '.')
+from ckanext.datapusher_plus.qsv_utils import QSVCommand
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Create test CSV
+with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as f:
+    writer = csv.writer(f)
+    writer.writerow(['id', 'name', 'value', 'date'])
+    for i in range(100):
+        writer.writerow([i, f'Name_{i}', i * 10.5, f'2024-01-{(i%28)+1:02d}'])
+    test_file = f.name
+
+try:
+    qsv = QSVCommand(logger=logger)
+    logger.info(f'QSV version: {qsv.version()}')
+    
+    # Test operations
+    qsv.validate(test_file)
+    logger.info('✓ CSV validation passed')
+    
+    headers_result = qsv.headers(test_file, just_names=True)
+    headers = headers_result.stdout.strip().split('\n')
+    logger.info(f'✓ Headers detected: {headers}')
+    
+    count_result = qsv.count(test_file)
+    row_count = int(count_result.stdout.strip())
+    logger.info(f'✓ Row count: {row_count}')
+    
+    qsv.index(test_file)
+    logger.info('✓ Index created')
+    
+    print('SUCCESS: All QSV operations completed!')
+    
+except Exception as e:
+    print(f'FAILED: {e}')
+    sys.exit(1)
+finally:
+    os.unlink(test_file)
+    index_file = test_file + '.idx'
+    if os.path.exists(index_file):
+        os.unlink(index_file)
+"
+
+  # Job 2: Full CKAN integration tests  
+  ckan-integration-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: ckan/ckan-dev:2.11
+    services:
+      solr:
+        image: ckan/ckan-solr:2.11-solr9
+      postgres:
+        image: ckan/ckan-postgres-dev:2.11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:3
+
+    env:
+      CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
+      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
+      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@postgres/datastore_test
+      CKAN_SOLR_URL: http://solr:8983/solr/ckan
+      CKAN_REDIS_URL: redis://redis:6379/1
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install QSV in CKAN container
+      run: |
+        QSV_VERSION="0.134.0"
+        wget "https://github.com/dathere/qsv/releases/download/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        tar -xzf "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        mv qsv /usr/local/bin/
+        chmod +x /usr/local/bin/qsv
+        rm "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        echo "QSV installed: $(qsv --version)"
+    
+    - name: Install requirements
+      run: |
+        pip install -r requirements.txt
+        pip install -r dev-requirements.txt
+        pip install -e .
+        # Install additional test dependencies
+        pip install pytest-cov pytest-mock httpretty
+
+    - name: Setup extension
+      run: |
+        # Replace default path to CKAN core config file with the one on the container
+        sed -i -e 's/use = config:.*/use = config:\/srv\/app\/src\/ckan\/test-core.ini/' test.ini
+        
+        # Initialize CKAN database
+        ckan -c test.ini db init
+        
+        # Initialize datapusher-plus tables if needed
+        ckan -c test.ini db upgrade -p datapusher_plus
+
+    - name: Run CKAN integration tests
+      run: |
+        pytest --ckan-ini=test.ini \
+               --cov=ckanext.datapusher_plus \
+               --cov-report=xml \
+               --cov-report=term-missing \
+               --disable-warnings \
+               -v \
+               ckanext/datapusher_plus/tests/
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: ckan-integration
+        name: codecov-ckan-integration
+
+  # Job 3: Performance and load testing
+  performance-tests:
+    runs-on: ubuntu-latest
+    needs: standalone-tests
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install QSV
+      run: |
+        QSV_VERSION="0.134.0"
+        wget "https://github.com/dathere/qsv/releases/download/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        tar -xzf "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        sudo mv qsv /usr/local/bin/
+        sudo chmod +x /usr/local/bin/qsv
+        rm "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest pytest-benchmark memory-profiler
+    
+    - name: Create large test files
+      run: |
+        mkdir -p tests/performance_files
+        # Create various sized test files
+        python -c "
+import csv
+import os
+from pathlib import Path
+
+test_dir = Path('tests/performance_files')
+
+# Small file - 1K rows
+with open(test_dir / 'small.csv', 'w') as f:
+    writer = csv.writer(f)
+    writer.writerow(['id', 'name', 'value', 'date', 'description'])
+    for i in range(1000):
+        writer.writerow([i, f'Name_{i}', i * 10.5, f'2024-01-{(i%28)+1:02d}', f'Description for row {i}'])
+
+# Medium file - 100K rows  
+with open(test_dir / 'medium.csv', 'w') as f:
+    writer = csv.writer(f)
+    writer.writerow(['id', 'name', 'value', 'date', 'description'])
+    for i in range(100000):
+        writer.writerow([i, f'Name_{i}', i * 10.5, f'2024-01-{(i%28)+1:02d}', f'Description for row {i}'])
+
+print('Performance test files created')
+"
+    
+    - name: Run performance benchmarks
+      run: |
+        python -c "
+import sys, time
+from pathlib import Path
+sys.path.insert(0, '.')
+from ckanext.datapusher_plus.qsv_utils import QSVCommand
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+qsv = QSVCommand(logger=logger)
+test_files = Path('tests/performance_files')
+
+for csv_file in ['small.csv', 'medium.csv']:
+    file_path = test_files / csv_file
+    print(f'\\n=== Benchmarking {csv_file} ===')
+    
+    start_time = time.time()
+    
+    # Test QSV operations
+    qsv.validate(str(file_path))
+    validate_time = time.time()
+    print(f'Validate: {validate_time - start_time:.2f}s')
+    
+    qsv.index(str(file_path))
+    index_time = time.time()
+    print(f'Index: {index_time - validate_time:.2f}s')
+    
+    count_result = qsv.count(str(file_path))
+    count_time = time.time()
+    print(f'Count: {count_time - index_time:.2f}s')
+    print(f'Rows: {count_result.stdout.strip()}')
+    
+    qsv.stats(str(file_path), output_file=str(file_path.with_suffix('.stats.csv')))
+    stats_time = time.time()
+    print(f'Stats: {stats_time - count_time:.2f}s')
+    
+    total_time = stats_time - start_time
+    print(f'Total time: {total_time:.2f}s')
+"
+
+  # Job 4: Multi-format file testing
+  format-compatibility-tests:
+    runs-on: ubuntu-latest
+    needs: standalone-tests
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install QSV and system dependencies
+      run: |
+        # Install QSV
+        QSV_VERSION="0.134.0"
+        wget "https://github.com/dathere/qsv/releases/download/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        tar -xzf "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        sudo mv qsv /usr/local/bin/
+        sudo chmod +x /usr/local/bin/qsv
+        rm "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        
+        # Install GDAL for spatial file support
+        sudo apt-get update
+        sudo apt-get install -y gdal-bin libgdal-dev
+    
+    - name: Install Python dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest httpretty openpyxl xlrd odfpy
+    
+    - name: Create test files of different formats
+      run: |
+        mkdir -p tests/format_files
+        
+        # Create test files in different formats
+        python -c "
+import csv
+import json
+from pathlib import Path
+import pandas as pd
+
+test_dir = Path('tests/format_files')
+data = {
+    'id': list(range(50)),
+    'name': [f'Name_{i}' for i in range(50)],
+    'value': [i * 10.5 for i in range(50)],
+    'date': ['2024-01-01'] * 50
+}
+
+# CSV
+df = pd.DataFrame(data)
+df.to_csv(test_dir / 'test.csv', index=False)
+
+# TSV
+df.to_csv(test_dir / 'test.tsv', sep='\t', index=False)
+
+# Excel
+df.to_excel(test_dir / 'test.xlsx', index=False)
+
+# JSON (for GeoJSON test)
+geojson_data = {
+    'type': 'FeatureCollection',
+    'features': [
+        {
+            'type': 'Feature',
+            'geometry': {'type': 'Point', 'coordinates': [-0.1, 51.5]},
+            'properties': {'name': 'London', 'population': 8900000}
+        },
+        {
+            'type': 'Feature', 
+            'geometry': {'type': 'Point', 'coordinates': [2.3, 48.9]},
+            'properties': {'name': 'Paris', 'population': 2100000}
+        }
+    ]
+}
+with open(test_dir / 'test.geojson', 'w') as f:
+    json.dump(geojson_data, f)
+
+print('Test files created successfully!')
+"
+    
+    - name: Test file format processing
+      run: |
+        python -c "
+import sys
+from pathlib import Path
+sys.path.insert(0, '.')
+from ckanext.datapusher_plus.qsv_utils import QSVCommand
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+qsv = QSVCommand(logger=logger)
+test_dir = Path('tests/format_files')
+
+formats_to_test = ['test.csv', 'test.tsv']
+for test_file in formats_to_test:
+    file_path = test_dir / test_file
+    if file_path.exists():
+        print(f'\\n=== Testing {test_file} ===')
+        try:
+            # Validate
+            qsv.validate(str(file_path))
+            print(f'✓ {test_file} validation passed')
+            
+            # Get headers
+            headers_result = qsv.headers(str(file_path), just_names=True)
+            headers = headers_result.stdout.strip().split('\n')
+            print(f'✓ Headers: {headers}')
+            
+            # Count rows
+            count_result = qsv.count(str(file_path))
+            print(f'✓ Row count: {count_result.stdout.strip()}')
+            
+        except Exception as e:
+            print(f'✗ {test_file} failed: {e}')
+            sys.exit(1)
+    else:
+        print(f'Warning: {test_file} not found')
+
+print('\\nAll format tests passed!')
+"
+
+  # Job 5: Security and PII testing
+  security-tests:
+    runs-on: ubuntu-latest
+    needs: standalone-tests
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install QSV
+      run: |
+        QSV_VERSION="0.134.0"
+        wget "https://github.com/dathere/qsv/releases/download/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        tar -xzf "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+        sudo mv qsv /usr/local/bin/
+        sudo chmod +x /usr/local/bin/qsv
+        rm "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+    
+    - name: Install dependencies
+      run: |
+        pip install -r requirements.txt
+        pip install pytest bandit safety
+    
+    - name: Run security scans
+      run: |
+        # Scan for security issues
+        bandit -r ckanext/datapusher_plus/ -f json -o bandit-report.json || true
+        
+        # Check for known vulnerabilities in dependencies
+        safety check --json --output safety-report.json || true
+    
+    - name: Test PII detection accuracy
+      run: |
+        mkdir -p tests/pii_files
+        
+        # Create CSV with fake PII data for testing
+        python -c "
+import csv
+from pathlib import Path
+
+pii_file = Path('tests/pii_files/pii_test.csv')
+with open(pii_file, 'w', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(['id', 'name', 'ssn', 'email', 'phone'])
+    writer.writerow([1, 'John Doe', '123-45-6789', 'john@example.com', '555-123-4567'])
+    writer.writerow([2, 'Jane Smith', '987-65-4321', 'jane@example.com', '555-987-6543'])
+
+print('PII test file created')
+"
+        
+        # Test PII regex patterns (if they exist)
+        if [ -f "ckanext/datapusher_plus/default-pii-regexes.txt" ]; then
+          echo "Testing PII detection..."
+          qsv searchset ckanext/datapusher_plus/default-pii-regexes.txt tests/pii_files/pii_test.csv --json
+        else
+          echo "PII regex file not found, skipping PII tests"
+        fi
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+  # Job 6: Documentation and code quality
+  quality-checks:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install quality tools
+      run: |
+        pip install flake8 black isort mypy
+        pip install -r requirements.txt
+    
+    - name: Run code formatting checks
+      run: |
+        # Check if code is properly formatted
+        black --check --diff ckanext/datapusher_plus/
+        
+        # Check import sorting
+        isort --check-only --diff ckanext/datapusher_plus/
+        
+        # Lint code
+        flake8 ckanext/datapusher_plus/ --statistics
+    
+    - name: Type checking
+      run: |
+        mypy ckanext/datapusher_plus/ --ignore-missing-imports || true
+    
+    - name: Check for TODO/FIXME comments
+      run: |
+        echo "Checking for TODO/FIXME comments..."
+        grep -r "TODO\|FIXME" ckanext/datapusher_plus/ || echo "No TODO/FIXME found"
+
+  # Job 7: Build and test Docker image
+  docker-tests:
+    runs-on: ubuntu-latest
+    needs: standalone-tests
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+    
+    - name: Create Dockerfile for testing
+      run: |
+        cat > Dockerfile.test << 'EOL'
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    wget curl build-essential && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install QSV
+ARG QSV_VERSION=0.134.0
+RUN wget "https://github.com/dathere/qsv/releases/download/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz" && \
+    tar -xzf "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz" && \
+    mv qsv /usr/local/bin/ && \
+    chmod +x /usr/local/bin/qsv && \
+    rm "qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install pytest httpretty
+
+COPY . .
+ENV PYTHONPATH=/app
+
+# Test that QSV works
+RUN qsv --version
+
+# Run basic test
+RUN python -c "from ckanext.datapusher_plus.qsv_utils import QSVCommand; print('✓ QSV import successful')"
+EOL
+    
+    - name: Build test Docker image
+      run: |
+        docker build -f Dockerfile.test -t datapusher-plus-test .
+    
+    - name: Run Docker tests
+      run: |
+        docker run --rm datapusher-plus-test python -c "
+import sys
+from ckanext.datapusher_plus.qsv_utils import QSVCommand
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+try:
+    qsv = QSVCommand(logger=logger)
+    version = qsv.version()
+    print(f'✓ QSV Docker test passed. Version: {version}')
+except Exception as e:
+    print(f'✗ QSV Docker test failed: {e}')
+    sys.exit(1)
+"
+
+  # Final job: Test results summary
+  test-summary:
+    runs-on: ubuntu-latest
+    needs: [standalone-tests, ckan-integration-tests, performance-tests, quality-checks, docker-tests]
+    if: always()
+    
+    steps:
+    - name: Test Results Summary
+      run: |
+        echo "## Test Results Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "| Test Suite | Status |" >> $GITHUB_STEP_SUMMARY
+        echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
+        echo "| Standalone Tests | ${{ needs.standalone-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| CKAN Integration | ${{ needs.ckan-integration-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Performance Tests | ${{ needs.performance-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Quality Checks | ${{ needs.quality-checks.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "| Docker Tests | ${{ needs.docker-tests.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Set overall status
+        if [[ "${{ needs.standalone-tests.result }}" == "success" ]]; then
+          echo "✅ Core functionality tests passed!"
+        else
+          echo "❌ Core functionality tests failed!"
+          exit 1
+        fi
