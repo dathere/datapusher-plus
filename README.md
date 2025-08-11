@@ -12,7 +12,7 @@ DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that c
 https://github.com/user-attachments/assets/b2fc2c3a-d244-4d11-9cf3-8270f0e99162
 
 
-The Formulas have access to not just the `package` and `resource` fields (in the same namespaces), it also has access to the following information in these additional namespaces that can be used in Jinja2 expressions:
+The Formulas have access to not just the `package` and `resource` fields (in the same namespaces), it also has access to the following information in these additional namespaces that can be used in Jinja2 expressions:-
 * `dpps` - with the "s" for stats.<br/>Each field will have an extensive list of summary statistics (by default: 
 type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_length, sum_length, avg_length, stddev_length, variance_length, cv_length, mean, sem, geometric_mean, harmonic_mean, stddev, variance, cv, nullcount, max_precision, sparsity, cardinality, uniqueness_ratio.) Check [here](https://github.com/dathere/qsv/wiki/Supplemental#stats-command-output-explanation) for all other available statistics.
 * `dppf` - with the "f" for frequency table.<br/>Each field will have its frequency table available sorted in descending order the top N (configurable, default 10) values, with a corresponding count & percentage. "Other (COUNT)" will be used as a "basket" for other values with COUNT set to the count of other values beyond the top N. ID fields will be indicated by "<ALL_UNIQUE>" in the table.
