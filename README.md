@@ -304,7 +304,7 @@ ckan.plugins = <other plugins> datapusher_plus
 Use a DP+ extended scheming schema:
 
 ```ini
-scheming.dataset_schemas =  ckanext.datapusher_plus:dataset_schema.yaml
+scheming.dataset_schemas =  ckanext.datapusher_plus:dataset-druf.yaml
 ```
 
 Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) for details.
