@@ -5,3 +5,4 @@ fiona==1.10.1
 pandas==2.2.3
 shapely==2.1.0
 pyproj>=3.7.1
+pinecone

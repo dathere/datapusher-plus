@@ -39,6 +39,12 @@ from ckanext.datapusher_plus.logging_utils import TRACE
 from ckanext.datapusher_plus.qsv_utils import QSVCommand
 from ckanext.datapusher_plus.pii_screening import screen_for_pii
 
+try:
+    from ckanext.datapusher_plus.vector_store import DataPusherVectorStore
+    VECTOR_STORE_AVAILABLE = True
+except ImportError:
+    VECTOR_STORE_AVAILABLE = False
+
 if locale.getdefaultlocale()[0]:
     lang, encoding = locale.getdefaultlocale()
     locale.setlocale(locale.LC_ALL, locale=(lang, encoding))
@@ -1584,4 +1590,87 @@ def _push_to_datastore(
       Resource metadata updates: {metadata_elapsed:,.2f}
     TOTAL ELAPSED TIME: {total_elapsed:,.2f}
     """
-    logger.info(end_msg)
+            
+    # ============================================================
+    # VECTOR STORE EMBEDDING
+    # ============================================================
+
+    if conf.ENABLE_VECTOR_STORE and VECTOR_STORE_AVAILABLE:
+        vector_start = time.perf_counter()
+        logger.info("STARTING VECTOR STORE EMBEDDING...")
+        
+        try:
+            # Initialize vector store
+            vector_store = DataPusherVectorStore()
+            
+            if vector_store.enabled:
+                # Prepare temporal information if available
+                temporal_info = None
+                if dataset_stats.get('IS_SORTED') and datetimecols_list:
+                    # Extract temporal coverage from the data
+                    temporal_years = set()
+                    
+                    # If we have year columns, extract years
+                    for col in datetimecols_list:
+                        if 'year' in col.lower():
+                            # Get year range from min/max
+                            col_idx = headers.index(col)
+                            if col_idx < len(headers_min) and col_idx < len(headers_max):
+                                try:
+                                    min_year = int(float(headers_min[col_idx]))
+                                    max_year = int(float(headers_max[col_idx]))
+                                    temporal_years.update(range(min_year, max_year + 1))
+                                except (ValueError, TypeError):
+                                    pass
+                    
+                    # Also check for date columns
+                    if not temporal_years and datetimecols_list:
+                        # Sample approach - get min/max dates
+                        for idx, col in enumerate(headers):
+                            if col in datetimecols_list:
+                                try:
+                                    # Parse dates from min/max values
+                                    min_date = headers_min[idx]
+                                    max_date = headers_max[idx]
+                                    if min_date and max_date:
+                                        # Extract years from dates
+                                        min_year = parsedate(str(min_date)).year
+                                        max_year = parsedate(str(max_date)).year
+                                        temporal_years.update(range(min_year, max_year + 1))
+                                except Exception as e:
+                                    logger.warning(f"Could not parse dates from column {col}: {e}")
+                    
+                    if temporal_years:
+                        temporal_info = {
+                            'min': min(temporal_years),
+                            'max': max(temporal_years),
+                            'all_years': sorted(list(temporal_years)),
+                            'year_count': len(temporal_years),
+                            'temporal_columns': {col: True for col in datetimecols_list}
+                        }
+                        logger.info(f"Detected temporal coverage: {temporal_info['min']} to {temporal_info['max']}")
+                
+                # Embed the resource
+                success = vector_store.embed_resource(
+                    resource_id=resource_id,
+                    resource_metadata=resource,
+                    dataset_metadata=package,
+                    stats_data=resource_fields_stats,
+                    freq_data=resource_fields_freqs,
+                    temporal_info=temporal_info,
+                    logger=logger
+                )
+                
+                if success:
+                    logger.info("Vector store embedding completed successfully")
+                else:
+                    logger.warning("Vector store embedding failed")
+                    
+        except Exception as e:
+            logger.error(f"Error during vector store embedding: {e}")
+            # Don't fail the job if embedding fails
+            
+        vector_elapsed = time.perf_counter() - vector_start
+        logger.info(f"VECTOR STORE EMBEDDING completed in {vector_elapsed:,.2f} seconds")
+
+    logger.info(end_msg)    

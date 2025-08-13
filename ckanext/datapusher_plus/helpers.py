@@ -591,3 +591,21 @@ def is_preformulated_field(field):
     This helper returns True only if the field has a 'formula' key with a non-empty value
     """
     return bool(field.get('formula', False))
+
+
+def get_resource_embedding_status(resource_id):
+    """Check if a resource has been embedded in the vector store"""
+    try:
+        from ckanext.datapusher_plus.vector_store import DataPusherVectorStore
+        vector_store = DataPusherVectorStore()
+        if vector_store.enabled:
+            # Check if resource exists in vector store
+            results = vector_store.collection.query(
+                query_embeddings=[[0.0] * 384],  # Dummy embedding
+                n_results=1,
+                where={"resource_id": resource_id}
+            )
+            return bool(results and results.get('ids') and results['ids'][0])
+    except Exception:
+        pass
+    return False
