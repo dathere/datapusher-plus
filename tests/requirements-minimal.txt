@@ -1,0 +1,23 @@
+# tests/requirements-minimal.txt
+# Minimal requirements for running tests without CKAN
+
+# Core testing
+pytest>=7.0.0
+pytest-mock>=3.10.0
+pytest-cov>=4.0.0
+
+# Mocking
+mock>=4.0.3
+factory-boy>=3.2.0
+faker>=15.0.0
+
+# Required by DataPusher+ itself
+requests>=2.25.0
+psycopg2-binary>=2.9.0
+python-dateutil>=2.8.2
+datasize>=1.1.0
+rq>=1.10.0
+sqlalchemy>=1.4.0
+
+# For testing file operations
+openpyxl>=3.1.0  # Excel files (optional)
