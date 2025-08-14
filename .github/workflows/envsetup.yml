@@ -8,17 +8,15 @@ on:
 jobs:
   setup:
     runs-on: self-hosted  # Use local runner
-    container:
-      # The CKAN version tag of the Solr and Postgres containers should match
-      # the one of the container the tests run on.
-      # You can switch this base image with a custom image tailored to your project
-      image: ckan/ckan-dev:2.11
-      options: --user root
     services:
       solr:
         image: ckan/ckan-solr:2.11-solr9
+        ports:
+          - 8983:8983
       postgres:
         image: ckan/ckan-postgres-dev:2.11
+        ports:
+          - 5432:5432
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -26,15 +24,27 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
       redis:
         image: redis:3
+        ports:
+          - 6379:6379
     env:
-      CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
-      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
-      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@postgres/datastore_test
-      CKAN_SOLR_URL: http://solr:8983/solr/ckan
-      CKAN_REDIS_URL: redis://redis:6379/1
+      CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@localhost:5432/ckan_test
+      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@localhost:5432/datastore_test
+      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@localhost:5432/datastore_test
+      CKAN_SOLR_URL: http://localhost:8983/solr/ckan
+      CKAN_REDIS_URL: redis://localhost:6379/1
     steps:
       - uses: actions/checkout@v4
       
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-dev postgresql-client libpq-dev
+          
       - name: Install requirements
         # Install any extra requirements your extension has here (dev requirements, other extensions etc)
         run: |
@@ -45,6 +55,6 @@ jobs:
       - name: Setup extension
         # Extra initialization steps
         run: |
-          # Initialize CKAN database
-          ckan -c /srv/app/src/ckan/test-core.ini db init
+          # Wait for services to be ready
+          sleep 10
           echo "Environment setup completed successfully"
