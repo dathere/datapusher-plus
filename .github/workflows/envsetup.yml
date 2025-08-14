@@ -13,6 +13,7 @@ jobs:
       # the one of the container the tests run on.
       # You can switch this base image with a custom image tailored to your project
       image: ckan/ckan-dev:2.11
+      options: --user root
     services:
       solr:
         image: ckan/ckan-solr:2.11-solr9
@@ -32,6 +33,13 @@ jobs:
       CKAN_SOLR_URL: http://solr:8983/solr/ckan
       CKAN_REDIS_URL: redis://redis:6379/1
     steps:
+      - name: Fix permissions
+        run: |
+          # Ensure the workspace directory has proper permissions
+          mkdir -p /__w/_temp
+          chmod -R 777 /__w/_temp
+          chmod -R 777 /__w/
+      
       - uses: actions/checkout@v4
       
       - name: Install requirements
