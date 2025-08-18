@@ -1,9 +1,10 @@
 name: DataPusher+ Test Suite
 on:
-  push:
-    branches: [ main, master, develop ]
-  pull_request:
-    branches: [ main, master, develop ]
+  workflow_dispatch: 
+  ##push:
+  ## branches: [ main, master, develop ]
+  ##pull_request:
+  ##  branches: [ main, master, develop ]
 
 jobs:
   test:
