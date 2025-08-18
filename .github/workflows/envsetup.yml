@@ -1,8 +1,8 @@
 name: Setup Environment
 
 on: 
-  push:
-  pull_request:
+ # push:
+ # pull_request:
   workflow_dispatch:  # Allows manual trigger from GitHub UI
 
 jobs:
