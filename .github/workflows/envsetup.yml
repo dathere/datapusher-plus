@@ -1,8 +1,8 @@
 name: Setup Environment
 
 on: 
-  # push:
-  # pull_request:
+  push:
+  pull_request:
   workflow_dispatch:  # Allows manual trigger from GitHub UI
 
 jobs:
@@ -98,24 +98,28 @@ jobs:
           if [ "$http_code" = "200" ]; then
             echo "✅ CKAN API status check successful!"
             
-            # Optional: Parse and display key information
+            # Create a temporary Python script for parsing
+            cat > parse_status.py << 'EOF'
+          import json, sys
+          try:
+              data = json.load(sys.stdin)
+              if data.get('success'):
+                  result = data.get('result', {})
+                  print(f'CKAN Version: {result.get("ckan_version", "Unknown")}')
+                  print(f'Site Title: {result.get("site_title", "Unknown")}')
+                  print(f'Site URL: {result.get("site_url", "Unknown")}')
+                  print(f'Extensions: {result.get("extensions", [])}')
+              else:
+                  print('API call was not successful')
+                  print(f'Error: {data.get("error", "Unknown error")}')
+          except Exception as e:
+              print(f'Error parsing JSON: {e}')
+          EOF
+            
+            # Parse and display key information
             echo "Parsing status information..."
-            echo "$json_response" | python -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    if data.get('success'):
-        result = data.get('result', {})
-        print(f'CKAN Version: {result.get(\"ckan_version\", \"Unknown\")}')
-        print(f'Site Title: {result.get(\"site_title\", \"Unknown\")}')
-        print(f'Site URL: {result.get(\"site_url\", \"Unknown\")}')
-        print(f'Extensions: {result.get(\"extensions\", [])}')
-    else:
-        print('API call was not successful')
-        print(f'Error: {data.get(\"error\", \"Unknown error\")}')
-except Exception as e:
-    print(f'Error parsing JSON: {e}')
-"
+            echo "$json_response" | python parse_status.py
+            rm parse_status.py
           else
             echo "❌ CKAN API status check failed with HTTP code: $http_code"
             echo "Response: $json_response"
