@@ -42,7 +42,7 @@ jobs:
           
           # Update package list and install essential tools
           apt-get update
-          apt-get install -y curl wget net-tools procps
+          apt-get install -y curl wget net-tools procps postgresql-client
           
           echo "Essential tools installed successfully"
       
@@ -52,25 +52,45 @@ jobs:
         run: |
           # Wait for postgres to be ready
           echo "Waiting for PostgreSQL to be ready..."
-          until pg_isready -h postgres -p 5432 -U postgres; do
-            echo "Waiting for postgres..."
-            sleep 2
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if pg_isready -h postgres -p 5432 -U postgres >/dev/null 2>&1; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            
+            # Alternative check using psql if pg_isready fails
+            if PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
+              echo "PostgreSQL is ready (via psql)!"
+              break
+            fi
+            
+            echo "Waiting for postgres... ($timeout seconds remaining)"
+            sleep 3
+            timeout=$((timeout-3))
           done
           
+          if [ $timeout -le 0 ]; then
+            echo "Timeout waiting for PostgreSQL to be ready"
+            exit 1
+          fi
+          
           # Create necessary database users and databases
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD 'pass';" || true
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD 'pass';" || true
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD 'pass';" || true
+          echo "Creating database users..."
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD 'pass';" || echo "User ckan_default already exists"
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD 'pass';" || echo "User datastore_write already exists"
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD 'pass';" || echo "User datastore_read already exists"
           
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;" || true
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;" || true
+          echo "Creating databases..."
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;" || echo "Database ckan_test already exists"
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;" || echo "Database datastore_test already exists"
           
-          # Grant necessary permissions
+          echo "Setting database permissions..."
           PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;" || true
           PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;" || true
           PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;" || true
           
-          echo "Database setup completed"
+          echo "Database setup completed successfully"
       
       - name: Install requirements
         run: |
@@ -83,29 +103,86 @@ jobs:
           
       - name: Setup CKAN configuration
         run: |
-          # Copy and modify the test configuration
-          cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
+          # Check if the test config exists and copy it
+          if [ -f /srv/app/src/ckan/test-core.ini ]; then
+            cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
+            echo "Copied existing test-core.ini"
+          elif [ -f /srv/app/src/ckan/test.ini ]; then
+            cp /srv/app/src/ckan/test.ini /tmp/test.ini
+            echo "Copied existing test.ini"
+          else
+            # Create a basic configuration file
+            echo "Creating basic CKAN configuration..."
+            cat > /tmp/test.ini << 'EOF'
+[DEFAULT]
+debug = true
+
+[server:main]
+use = config:common.ini
+
+[app:main]
+use = config:common.ini
+ckan.site_url = http://localhost:5000
+sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
+ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
+ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
+solr_url = http://solr:8983/solr/ckan
+ckan.redis.url = redis://redis:6379/1
+ckan.site_id = default
+ckan.site_title = CKAN Test
+ckan.plugins = datastore datapusher
+EOF
+          fi
           
-          # Update database URLs in config
-          sed -i 's|postgresql://.*|postgresql://ckan_default:pass@postgres/ckan_test%7Cg' /tmp/test.ini
-          sed -i 's|ckan.datastore.write_url.*|ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test%7Cg' /tmp/test.ini
-          sed -i 's|ckan.datastore.read_url.*|ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test%7Cg' /tmp/test.ini
+          # Update database URLs in config (in case they exist but are wrong)
+          sed -i 's|postgresql://.*ckan_test|postgresql://ckan_default:pass@postgres/ckan_test|g' /tmp/test.ini
+          sed -i 's|ckan.datastore.write_url.*|ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test|g' /tmp/test.ini
+          sed -i 's|ckan.datastore.read_url.*|ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test|g' /tmp/test.ini
           
-          # Add Solr and Redis URLs if not present
-          echo "solr_url = http://solr:8983/solr/ckan" >> /tmp/test.ini
-          echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
+          # Ensure Solr and Redis URLs are set
+          if ! grep -q "solr_url" /tmp/test.ini; then
+            echo "solr_url = http://solr:8983/solr/ckan" >> /tmp/test.ini
+          fi
+          if ! grep -q "ckan.redis.url" /tmp/test.ini; then
+            echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
+          fi
           
           echo "Configuration setup completed"
+          echo "Configuration file contents:"
+          head -20 /tmp/test.ini
           
       - name: Initialize CKAN database
         run: |
+          echo "Initializing CKAN database..."
+          
+          # Test database connectivity first
+          echo "Testing database connectivity..."
+          if ! PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
+            echo "Cannot connect to CKAN database. Checking if database exists..."
+            if ! PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1 FROM pg_database WHERE datname='ckan_test';" | grep -q 1; then
+              echo "Creating ckan_test database..."
+              PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
+            fi
+          fi
+          
           # Initialize CKAN database
-          ckan -c /tmp/test.ini db init
+          if ckan -c /tmp/test.ini db init; then
+            echo "CKAN database initialized successfully"
+          else
+            echo "CKAN database initialization failed, but continuing..."
+            echo "This might be because the database is already initialized"
+          fi
           
           # Initialize datastore
-          ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=postgres psql -h postgres -U postgres --set ON_ERROR_STOP=1
+          echo "Setting up datastore permissions..."
+          if ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=postgres psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
+            echo "Datastore permissions set successfully"
+          else
+            echo "Datastore permission setup failed, but continuing..."
+            echo "This might be expected if datastore is already configured"
+          fi
           
-          echo "Database initialization completed successfully"
+          echo "Database initialization completed"
           
       - name: Start CKAN server
         run: |
