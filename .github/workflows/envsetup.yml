@@ -135,26 +135,20 @@ jobs:
           # Check if the request was successful
           if [ "$http_code" = "200" ]; then
             echo "✅ CKAN API status check successful!"
+            echo "Full API Response saved for inspection"
             
-            # Parse and display key information using inline Python
+            # Simple parsing using grep and sed
             echo "Parsing status information..."
-            echo "$json_response" | python -c "
-import json, sys
-try:
-    data = json.load(sys.stdin)
-    if data.get('success'):
-        result = data.get('result', {})
-        print(f'CKAN Version: {result.get(\"ckan_version\", \"Unknown\")}')
-        print(f'Site Title: {result.get(\"site_title\", \"Unknown\")}')
-        print(f'Site URL: {result.get(\"site_url\", \"Unknown\")}')
-        extensions = result.get('extensions', [])
-        print(f'Extensions: {\", \".join(extensions) if extensions else \"None\"}')
-    else:
-        print('API call was not successful')
-        print(f'Error: {data.get(\"error\", \"Unknown error\")}')
-except Exception as e:
-    print(f'Error parsing JSON: {e}')
-"
+            echo "$json_response" | grep -o '"ckan_version":"[^"]*"' | sed 's/"ckan_version":"\(.*\)"/CKAN Version: \1/' || echo "CKAN Version: Unknown"
+            echo "$json_response" | grep -o '"site_title":"[^"]*"' | sed 's/"site_title":"\(.*\)"/Site Title: \1/' || echo "Site Title: Unknown"
+            echo "$json_response" | grep -o '"site_url":"[^"]*"' | sed 's/"site_url":"\(.*\)"/Site URL: \1/' || echo "Site URL: Unknown"
+            
+            # Check if success is true
+            if echo "$json_response" | grep -q '"success":true'; then
+              echo "API call was successful!"
+            else
+              echo "API call reported failure"
+            fi
           else
             echo "❌ CKAN API status check failed with HTTP code: $http_code"
             echo "Response: $json_response"
