@@ -260,11 +260,15 @@ jobs:
             echo "$json_response" | grep -o '"site_title":"[^"]*"' | sed 's/"site_title":"\(.*\)"/Site Title: \1/' || echo "Site Title: Unknown"
             echo "$json_response" | grep -o '"site_url":"[^"]*"' | sed 's/"site_url":"\(.*\)"/Site URL: \1/' || echo "Site URL: Unknown"
             
-            # Check if success is true
-            if echo "$json_response" | grep -q '"success":true'; then
+            # FIXED: Check if success is true - allow for optional whitespace around colon
+            if echo "$json_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
               echo "✅ API call was successful!"
             else
               echo "❌ API call reported failure"
+              echo "Debug: Raw JSON response:"
+              echo "$json_response"
+              echo "Debug: Searching for success pattern..."
+              echo "$json_response" | grep '"success"' || echo "No success field found"
               exit 1
             fi
           else
