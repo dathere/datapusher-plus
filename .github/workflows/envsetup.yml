@@ -58,33 +58,71 @@ jobs:
 
       - name: Start CKAN server
         run: |
+          # Get the container's IP address
+          CONTAINER_IP=$(hostname -i | awk '{print $1}')
+          echo "Container IP: $CONTAINER_IP"
+          
           # Start CKAN server in background
           ckan -c /srv/app/src/ckan/test-core.ini run --host 0.0.0.0 --port 5000 &
+          CKAN_PID=$!
+          echo "CKAN PID: $CKAN_PID"
           
           # Wait for server to start up
           echo "Waiting for CKAN server to start..."
           timeout=60
           while [ $timeout -gt 0 ]; do
-            if curl http://127.0.0.1:5000 > /dev/null 2>&1; then
+            # Try multiple connection methods
+            if curl -f http://localhost:5000/api/3/action/status_show > /dev/null 2>&1 || \
+               curl -f http://127.0.0.1:5000/api/3/action/status_show > /dev/null 2>&1 || \
+               curl -f http://$CONTAINER_IP:5000/api/3/action/status_show > /dev/null 2>&1 || \
+               curl -f http://0.0.0.0:5000/api/3/action/status_show > /dev/null 2>&1; then
               echo "CKAN server is running!"
               break
             fi
+            
+            # Check if process is still running
+            if ! kill -0 $CKAN_PID 2>/dev/null; then
+              echo "CKAN process died unexpectedly"
+              # Show last logs
+              tail -n 50 /var/log/ckan/*.log 2>/dev/null || true
+              exit 1
+            fi
+            
             echo "Still waiting... ($timeout seconds remaining)"
-            sleep 2
-            timeout=$((timeout-2))
+            sleep 3
+            timeout=$((timeout-3))
           done
           
           if [ $timeout -le 0 ]; then
             echo "Timeout waiting for CKAN server to start"
+            # Try to diagnose the issue
+            echo "Checking process status..."
+            ps aux | grep ckan || true
+            echo "Checking network listeners..."
+            netstat -tlnp || ss -tlnp || true
+            echo "Trying direct curl to different endpoints..."
+            curl -v http://localhost:5000 2>&1 || true
             exit 1
+          fi
+          
+          # Export the working URL for next steps
+          if curl -f http://localhost:5000/api/3/action/status_show > /dev/null 2>&1; then
+            echo "CKAN_URL=http://localhost:5000" >> $GITHUB_ENV
+          elif curl -f http://127.0.0.1:5000/api/3/action/status_show > /dev/null 2>&1; then
+            echo "CKAN_URL=http://127.0.0.1:5000" >> $GITHUB_ENV
+          elif curl -f http://$CONTAINER_IP:5000/api/3/action/status_show > /dev/null 2>&1; then
+            echo "CKAN_URL=http://$CONTAINER_IP:5000" >> $GITHUB_ENV
+          else
+            echo "CKAN_URL=http://0.0.0.0:5000" >> $GITHUB_ENV
           fi
 
       - name: Test CKAN API Status
         run: |
           echo "Testing CKAN API status endpoint..."
+          echo "Using CKAN URL: ${CKAN_URL:-http://localhost:5000}"
           
           # Make API call to status_show endpoint
-          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://localhost:5000/api/3/action/status_show)
+          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" ${CKAN_URL:-http://localhost:5000}/api/3/action/status_show)
           
           # Extract HTTP status code
           http_code=$(echo "$response" | grep "HTTP_CODE:" | cut -d: -f2)
@@ -92,7 +130,7 @@ jobs:
           
           echo "HTTP Status Code: $http_code"
           echo "API Response:"
-          echo "$json_response" | python -m json.tool
+          echo "$json_response" | python -m json.tool || echo "$json_response"
           
           # Check if the request was successful
           if [ "$http_code" = "200" ]; then
@@ -100,21 +138,21 @@ jobs:
             
             # Create a temporary Python script for parsing
             cat > parse_status.py << 'EOF'
-          import json, sys
-          try:
-              data = json.load(sys.stdin)
-              if data.get('success'):
-                  result = data.get('result', {})
-                  print(f'CKAN Version: {result.get("ckan_version", "Unknown")}')
-                  print(f'Site Title: {result.get("site_title", "Unknown")}')
-                  print(f'Site URL: {result.get("site_url", "Unknown")}')
-                  print(f'Extensions: {result.get("extensions", [])}')
-              else:
-                  print('API call was not successful')
-                  print(f'Error: {data.get("error", "Unknown error")}')
-          except Exception as e:
-              print(f'Error parsing JSON: {e}')
-          EOF
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if data.get('success'):
+        result = data.get('result', {})
+        print(f'CKAN Version: {result.get("ckan_version", "Unknown")}')
+        print(f'Site Title: {result.get("site_title", "Unknown")}')
+        print(f'Site URL: {result.get("site_url", "Unknown")}')
+        print(f'Extensions: {", ".join(result.get("extensions", []))}')
+    else:
+        print('API call was not successful')
+        print(f'Error: {data.get("error", "Unknown error")}')
+except Exception as e:
+    print(f'Error parsing JSON: {e}')
+EOF
             
             # Parse and display key information
             echo "Parsing status information..."
@@ -123,8 +161,24 @@ jobs:
           else
             echo "❌ CKAN API status check failed with HTTP code: $http_code"
             echo "Response: $json_response"
+            
+            # Additional debugging
+            echo "Attempting direct connection test..."
+            curl -v ${CKAN_URL:-http://localhost:5000}/ 2>&1 || true
             exit 1
           fi
+
+      - name: Run additional CKAN tests (optional)
+        run: |
+          echo "Running additional API tests..."
+          
+          # Test package list endpoint
+          echo "Testing package_list endpoint..."
+          curl -s ${CKAN_URL:-http://localhost:5000}/api/3/action/package_list | python -m json.tool | head -20
+          
+          # Test organization list endpoint
+          echo "Testing organization_list endpoint..."
+          curl -s ${CKAN_URL:-http://localhost:5000}/api/3/action/organization_list | python -m json.tool | head -20
 
       - name: Cleanup
         if: always()
