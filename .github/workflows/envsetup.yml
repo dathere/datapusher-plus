@@ -65,7 +65,7 @@ jobs:
           echo "Waiting for CKAN server to start..."
           timeout=60
           while [ $timeout -gt 0 ]; do
-            if curl http://localhost:5000 > /dev/null 2>&1; then
+            if curl http://127.0.0.1:5000 > /dev/null 2>&1; then
               echo "CKAN server is running!"
               break
             fi
