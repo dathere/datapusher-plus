@@ -1,8 +1,8 @@
 name: Setup Environment
 
 on: 
-  push:
-  pull_request:
+  # push:
+  # pull_request:
   workflow_dispatch:  # Allows manual trigger from GitHub UI
 
 jobs:
@@ -55,3 +55,76 @@ jobs:
           # Initialize CKAN database
           ckan -c /srv/app/src/ckan/test-core.ini db init
           echo "Environment setup completed successfully"
+
+      - name: Start CKAN server
+        run: |
+          # Start CKAN server in background
+          ckan -c /srv/app/src/ckan/test-core.ini run --host 0.0.0.0 --port 5000 &
+          
+          # Wait for server to start up
+          echo "Waiting for CKAN server to start..."
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if curl -f -s http://localhost:5000 > /dev/null 2>&1; then
+              echo "CKAN server is running!"
+              break
+            fi
+            echo "Still waiting... ($timeout seconds remaining)"
+            sleep 2
+            timeout=$((timeout-2))
+          done
+          
+          if [ $timeout -le 0 ]; then
+            echo "Timeout waiting for CKAN server to start"
+            exit 1
+          fi
+
+      - name: Test CKAN API Status
+        run: |
+          echo "Testing CKAN API status endpoint..."
+          
+          # Make API call to status_show endpoint
+          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" http://localhost:5000/api/3/action/status_show)
+          
+          # Extract HTTP status code
+          http_code=$(echo "$response" | grep "HTTP_CODE:" | cut -d: -f2)
+          json_response=$(echo "$response" | grep -v "HTTP_CODE:")
+          
+          echo "HTTP Status Code: $http_code"
+          echo "API Response:"
+          echo "$json_response" | python -m json.tool
+          
+          # Check if the request was successful
+          if [ "$http_code" = "200" ]; then
+            echo "✅ CKAN API status check successful!"
+            
+            # Optional: Parse and display key information
+            echo "Parsing status information..."
+            echo "$json_response" | python -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    if data.get('success'):
+        result = data.get('result', {})
+        print(f'CKAN Version: {result.get(\"ckan_version\", \"Unknown\")}')
+        print(f'Site Title: {result.get(\"site_title\", \"Unknown\")}')
+        print(f'Site URL: {result.get(\"site_url\", \"Unknown\")}')
+        print(f'Extensions: {result.get(\"extensions\", [])}')
+    else:
+        print('API call was not successful')
+        print(f'Error: {data.get(\"error\", \"Unknown error\")}')
+except Exception as e:
+    print(f'Error parsing JSON: {e}')
+"
+          else
+            echo "❌ CKAN API status check failed with HTTP code: $http_code"
+            echo "Response: $json_response"
+            exit 1
+          fi
+
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Stopping any running CKAN processes..."
+          pkill -f "ckan.*run" || true
+          echo "Cleanup completed"
