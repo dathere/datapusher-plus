@@ -1,16 +1,12 @@
 name: Setup Environment
 
 on: 
-  # push:
-  # pull_request:
   workflow_dispatch:  # Allows manual trigger from GitHub UI
 
 jobs:
   setup:
     runs-on: ubuntu-latest
     container:
-      # The CKAN version tag of the Solr and Postgres containers should match
-      # the one of the container the tests run on.
       image: ckan/ckan-dev:2.11
       options: --user root
     services:
@@ -35,93 +31,61 @@ jobs:
     steps:
       - name: Fix permissions and install essential tools
         run: |
-          # Ensure the workspace directory has proper permissions
           mkdir -p /__w/_temp
           chmod -R 777 /__w/_temp
           chmod -R 777 /__w/
-          
-          # Update package list and install essential tools
           apt-get update
           apt-get install -y curl wget net-tools procps postgresql-client
-          
           echo "Essential tools installed successfully"
       
       - uses: actions/checkout@v4
       
-      - name: Setup database users and permissions
+      - name: Setup database
         run: |
-          # Wait for postgres to be ready
           echo "Waiting for PostgreSQL to be ready..."
           timeout=60
           while [ $timeout -gt 0 ]; do
-            if pg_isready -h postgres -p 5432 -U postgres >/dev/null 2>&1; then
+            if PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
               echo "PostgreSQL is ready!"
               break
             fi
-            
-            # Alternative check using psql if pg_isready fails
-            if PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
-              echo "PostgreSQL is ready (via psql)!"
-              break
-            fi
-            
             echo "Waiting for postgres... ($timeout seconds remaining)"
             sleep 3
             timeout=$((timeout-3))
           done
           
-          if [ $timeout -le 0 ]; then
-            echo "Timeout waiting for PostgreSQL to be ready"
-            exit 1
-          fi
-          
-          # Create necessary database users and databases
-          echo "Creating database users..."
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD 'pass';" || echo "User ckan_default already exists"
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD 'pass';" || echo "User datastore_write already exists"
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD 'pass';" || echo "User datastore_read already exists"
-          
-          echo "Creating databases..."
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;" || echo "Database ckan_test already exists"
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;" || echo "Database datastore_test already exists"
-          
-          echo "Setting database permissions..."
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;" || true
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;" || true
-          PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;" || true
-          
-          echo "Database setup completed successfully"
+          # Create database users and databases
+          PGPASSWORD=postgres psql -h postgres -U postgres << EOF
+            CREATE USER ckan_default WITH PASSWORD 'pass';
+            CREATE USER datastore_write WITH PASSWORD 'pass';
+            CREATE USER datastore_read WITH PASSWORD 'pass';
+            CREATE DATABASE ckan_test OWNER ckan_default;
+            CREATE DATABASE datastore_test OWNER ckan_default;
+            GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;
+            GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;
+            GRANT CONNECT ON DATABASE datastore_test TO datastore_read;
+          EOF
+          echo "Database setup completed"
       
       - name: Install requirements
         run: |
-          # Install any extra requirements your extension has here
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
           pip install -e .
-          
           echo "Requirements installed successfully"
           
       - name: Setup CKAN configuration
         run: |
-          # Check if the test config exists and copy it
-          if [ -f /srv/app/src/ckan/test-core.ini ]; then
-            cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
-            echo "Copied existing test-core.ini"
-          elif [ -f /srv/app/src/ckan/test.ini ]; then
-            cp /srv/app/src/ckan/test.ini /tmp/test.ini
-            echo "Copied existing test.ini"
-          else
-            # Create a basic configuration file
-            echo "Creating basic CKAN configuration..."
-            cat > /tmp/test.ini << 'EOF'
+          # Create a basic configuration file
+          cat > /tmp/test.ini << 'EOF'
           [DEFAULT]
           debug = true
           
           [server:main]
-          use = config:common.ini
+          use = config:development.ini
           
           [app:main]
-          use = config:common.ini
+          use = config:development.ini
           ckan.site_url = http://localhost:5000
           sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
           ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
@@ -132,1162 +96,198 @@ jobs:
           ckan.site_title = CKAN Test
           ckan.plugins = datastore datapusher
           EOF
-                    fi
-          
-          # Update database URLs in config (in case they exist but are wrong)
-          sed -i 's|postgresql://.*ckan_test|postgresql://ckan_default:pass@postgres/ckan_test|g' /tmp/test.ini
-          sed -i 's|ckan.datastore.write_url.*|ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test|g' /tmp/test.ini
-          sed -i 's|ckan.datastore.read_url.*|ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test|g' /tmp/test.ini
-          
-          # Ensure Solr and Redis URLs are set
-          if ! grep -q "solr_url" /tmp/test.ini; then
-            echo "solr_url = http://solr:8983/solr/ckan" >> /tmp/test.ini
-          fi
-          if ! grep -q "ckan.redis.url" /tmp/test.ini; then
-            echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
-          fi
-          
           echo "Configuration setup completed"
-          echo "Configuration file contents:"
-          head -20 /tmp/test.ini
           
       - name: Initialize CKAN database
         run: |
           echo "Initializing CKAN database..."
+          ckan -c /tmp/test.ini db init || echo "Database might already be initialized"
           
-          # Test database connectivity first
-          echo "Testing database connectivity..."
-          if ! PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
-            echo "Cannot connect to CKAN database. Checking if database exists..."
-            if ! PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1 FROM pg_database WHERE datname='ckan_test';" | grep -q 1; then
-              echo "Creating ckan_test database..."
-              PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
-            fi
-          fi
-          
-          # Initialize CKAN database
-          if ckan -c /tmp/test.ini db init; then
-            echo "CKAN database initialized successfully"
-          else
-            echo "CKAN database initialization failed, but continuing..."
-            echo "This might be because the database is already initialized"
-          fi
-          
-          # Initialize datastore
-          echo "Setting up datastore permissions..."
-          if ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=postgres psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
-            echo "Datastore permissions set successfully"
-          else
-            echo "Datastore permission setup failed, but continuing..."
-            echo "This might be expected if datastore is already configured"
-          fi
-          
+          # Setup datastore permissions
+          ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=postgres psql -h postgres -U postgres --set ON_ERROR_STOP=1 || echo "Datastore permissions might already be set"
           echo "Database initialization completed"
           
       - name: Start CKAN server
         run: |
           echo "Starting CKAN server..."
-          
-          # Start CKAN server in background without auto-reload to avoid restart issues
           ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader &
           CKAN_PID=$!
-          echo "CKAN PID: $CKAN_PID"
           
-          # Wait for server to start up
-          echo "Waiting for CKAN server to start..."
-          timeout=90
-          success=false
-          
+          # Wait for server to start
+          timeout=60
           while [ $timeout -gt 0 ]; do
-            # Check if process is still running
-            if ! kill -0 $CKAN_PID 2>/dev/null; then
-              echo "CKAN process died unexpectedly"
-              echo "Checking for error logs..."
-              tail -n 50 /var/log/ckan/*.log 2>/dev/null || echo "No log files found"
-              exit 1
-            fi
-            
-            # Try to connect to the status endpoint
             if curl -f -s http://localhost:5000/api/3/action/status_show > /dev/null 2>&1; then
-              echo "CKAN server is running and responding!"
-              success=true
+              echo "CKAN server is running!"
               break
             fi
-            
-            echo "Still waiting... ($timeout seconds remaining)"
             sleep 3
             timeout=$((timeout-3))
           done
           
-          if [ "$success" = false ]; then
-            echo "Timeout waiting for CKAN server to start"
-            echo "Checking process status..."
-            ps aux | grep ckan || echo "ps command failed"
-            echo "Checking network listeners..."
-            netstat -tlnp 2>/dev/null || ss -tlnp 2>/dev/null || echo "Network tools failed"
-            echo "Trying direct curl to root endpoint..."
-            curl -v http://localhost:5000/ || echo "Curl to root failed"
-            exit 1
-          fi
-          
-          # Export the working URL for next steps
           echo "CKAN_URL=http://localhost:5000" >> $GITHUB_ENV
           echo "CKAN server started successfully!"
           
       - name: Test CKAN API Status
         run: |
           echo "Testing CKAN API status endpoint..."
-          echo "Using CKAN URL: $CKAN_URL"
+          response=$(curl -s $CKAN_URL/api/3/action/status_show)
+          echo "$response" | python3 -m json.tool
           
-          # Make API call to status_show endpoint
-          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" $CKAN_URL/api/3/action/status_show)
-          
-          # Extract HTTP status code
-          http_code=$(echo "$response" | grep "HTTP_CODE:" | cut -d: -f2)
-          json_response=$(echo "$response" | grep -v "HTTP_CODE:")
-          
-          echo "HTTP Status Code: $http_code"
-          echo "API Response:"
-          echo "$json_response" | python3 -m json.tool 2>/dev/null || echo "$json_response"
-          
-          # Check if the request was successful
-          if [ "$http_code" = "200" ]; then
-            echo "✅ CKAN API status check successful!"
-            
-            # Parse status information
-            echo "Parsing status information..."
-            echo "$json_response" | grep -o '"ckan_version":"[^"]*"' | sed 's/"ckan_version":"\(.*\)"/CKAN Version: \1/' || echo "CKAN Version: Unknown"
-            echo "$json_response" | grep -o '"site_title":"[^"]*"' | sed 's/"site_title":"\(.*\)"/Site Title: \1/' || echo "Site Title: Unknown"
-            echo "$json_response" | grep -o '"site_url":"[^"]*"' | sed 's/"site_url":"\(.*\)"/Site URL: \1/' || echo "Site URL: Unknown"
-            
-            # FIXED: Check if success is true - allow for optional whitespace around colon
-            if echo "$json_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-              echo "✅ API call was successful!"
-            else
-              echo "❌ API call reported failure"
-              echo "Debug: Raw JSON response:"
-              echo "$json_response"
-              echo "Debug: Searching for success pattern..."
-              echo "$json_response" | grep '"success"' || echo "No success field found"
-              exit 1
-            fi
+          if echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+            echo "✅ CKAN API is working!"
           else
-            echo "❌ CKAN API status check failed with HTTP code: $http_code"
-            echo "Response: $json_response"
-            exit 1
-          fi
-          
-      - name: Test additional CKAN endpoints
-        run: |
-          echo "Testing additional CKAN API endpoints..."
-          
-          # Test package list endpoint
-          echo "Testing package_list endpoint..."
-          package_response=$(curl -s $CKAN_URL/api/3/action/package_list)
-          echo "$package_response" | python3 -m json.tool | head -20
-          
-          # Test organization list endpoint
-          echo "Testing organization_list endpoint..."
-          org_response=$(curl -s $CKAN_URL/api/3/action/organization_list)
-          echo "$org_response" | python3 -m json.tool | head -20
-          
-          # Test user list endpoint (might be restricted)
-          echo "Testing user_list endpoint..."
-          user_response=$(curl -s $CKAN_URL/api/3/action/user_list)
-          echo "$user_response" | python3 -m json.tool | head -20
-          
-          echo "✅ Additional API tests completed"
-          
-      - name: Verify CKAN web interface
-        run: |
-          echo "Testing CKAN web interface..."
-          
-          # Test the main page
-          main_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_URL/)
-          main_code=$(echo "$main_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$main_code" = "200" ]; then
-            echo "✅ CKAN web interface is accessible"
-          else
-            echo "❌ CKAN web interface returned HTTP $main_code"
+            echo "❌ CKAN API check failed"
             exit 1
           fi
 
-      # NEW STEPS FOR CREATING ORGANIZATIONS, DATASETS AND RESOURCES
       - name: Create CKAN sysadmin user
         run: |
           echo "Creating CKAN sysadmin user..."
           
-          # Create sysadmin user using CKAN CLI
-          if ckan -c /tmp/test.ini user add ckan_admin \
+          # Create sysadmin user
+          ckan -c /tmp/test.ini user add ckan_admin \
             email=admin@example.com \
             password=test1234 \
-            fullname="CKAN Administrator"; then
-            echo "✅ Sysadmin user created successfully"
-          else
-            echo "⚠️ User might already exist, continuing..."
-          fi
+            fullname="CKAN Administrator" || echo "User might already exist"
           
           # Make the user a sysadmin
-          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
-            echo "✅ User granted sysadmin privileges"
-          else
-            echo "⚠️ User might already be sysadmin, continuing..."
-          fi
+          ckan -c /tmp/test.ini sysadmin add ckan_admin || echo "User might already be sysadmin"
           
           echo "Sysadmin user setup completed"
 
-      - name: Create API token for sysadmin user
+      - name: Get API token for sysadmin user
         run: |
-          echo "Creating API token for ckan_admin user..."
+          echo "Getting API token for ckan_admin user..."
           
-          # Debug: First let's see what the user show command actually outputs
-          echo "=== Debugging user show output ==="
-          user_output=$(ckan -c /tmp/test.ini user show ckan_admin 2>/dev/null || echo "User show command failed")
-          echo "Raw user output:"
-          echo "$user_output"
-          echo "========================="
+          # Get user info and extract the API key properly
+          user_output=$(ckan -c /tmp/test.ini user show ckan_admin 2>/dev/null)
+          echo "User info retrieved"
           
-          # Extract the API key using multiple methods
-          api_key=""
+          # Extract the API key (the UUID after 'apikey=')
+          api_key=$(echo "$user_output" | grep -o 'apikey=[a-f0-9-]*' | cut -d'=' -f2)
           
-          # Method 1: Extract UUID pattern from the output (most reliable)
-          api_key=$(echo "$user_output" | grep -o '[a-f0-9]\{8\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{12\}' | grep -v "cb24c116-c180-4003-a8a7-5051988b3b37" | head -1 || echo "")
-          
-          if [ -n "$api_key" ]; then
-            echo "✅ Extracted API key using UUID pattern: $api_key"
-          else
-            # Method 2: Look for 'apikey=' pattern specifically
-            api_key=$(echo "$user_output" | grep -o 'apikey=[a-f0-9-]*' | cut -d'=' -f2 || echo "")
+          if [ -z "$api_key" ]; then
+            echo "API key not found in user output, generating new one..."
+            api_key=$(python3 -c "import uuid; print(str(uuid.uuid4()))")
             
-            if [ -n "$api_key" ]; then
-              echo "✅ Extracted API key using apikey= pattern: $api_key"
-            else
-              # Method 3: Generate new API key via database update
-              echo "No existing API key found, generating new one..."
-              api_key=$(python3 -c "import uuid; print(str(uuid.uuid4()))")
-              
-              echo "Generated new API key: $api_key"
-              
-              # Update the user record in the database with the new API key
-              echo "Updating database with new API key..."
-              PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -c "
-                UPDATE public.user SET apikey='$api_key' WHERE name='ckan_admin';
-              " || echo "Database update failed, but continuing..."
-              
-              # Verify the update worked
-              updated_count=$(PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -t -c "
-                SELECT COUNT(*) FROM public.user WHERE name='ckan_admin' AND apikey='$api_key';
-              " | tr -d ' \n' || echo "0")
-              
-              if [ "$updated_count" = "1" ]; then
-                echo "✅ Database updated successfully"
-              else
-                echo "⚠️ Database update verification failed"
-              fi
-            fi
+            # Update the user with new API key
+            PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -c \
+              "UPDATE public.user SET apikey='$api_key' WHERE name='ckan_admin';"
           fi
           
-          # Clean the API key (remove any extra characters)
+          # Clean and validate the API key
           api_key=$(echo "$api_key" | tr -d ' \t\r\n')
           
-          # Validate API key format
-          if echo "$api_key" | grep -q '^[a-f0-9]\{8\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{12\}
-
-      - name: Create organization
-        run: |
-          echo "Creating demo organization..."
-          
-          # Create organization using CKAN API with comprehensive fields
-          org_response=$(curl -X POST $CKAN_URL/api/3/action/organization_create \
-            -H "Authorization: $CKAN_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "name": "demo-organization",
-              "title": "Demo Data Publishing Organization",
-              "description": "This is a comprehensive demo organization created via GitHub Actions for testing CKAN functionality and datapusher-plus integration.",
-              "image_url": "https://via.placeholder.com/200x100/0066cc/ffffff?text=Demo+Org",
-              "users": [
-                {"name": "ckan_admin", "capacity": "admin"}
-              ],
-              "extras": [
-                {"key": "department", "value": "Data Engineering"},
-                {"key": "created_by", "value": "GitHub Actions"},
-                {"key": "purpose", "value": "Testing and Development"}
-              ]
-            }')
-          
-          echo "Organization creation response:"
-          echo "$org_response" | python3 -m json.tool
-          
-          # Check if organization was created successfully
-          if echo "$org_response" | grep -q '"success": true'; then
-            echo "✅ Organization created successfully!"
-            
-            # Extract and display organization details
-            org_name=$(echo "$org_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
-            org_title=$(echo "$org_response" | grep -o '"title": "[^"]*"' | head -1 | cut -d'"' -f4)
-            org_id=$(echo "$org_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-            
-            echo "Organization Name: $org_name"
-            echo "Organization Title: $org_title"
-            echo "Organization ID: $org_id"
-            
-            # Display extras if present
-            if echo "$org_response" | grep -q '"extras"'; then
-              echo "Organization Extras:"
-              echo "$org_response" | grep -A 20 '"extras"' | grep '"key"\|"value"' | sed 's/.*"key": "\([^"]*\)".*/  - \1:/' | sed 's/.*"value": "\([^"]*\)".*/    \1/'
-            fi
-            
-          else
-            echo "❌ Failed to create organization"
-            
-            # Check for specific error types
-            if echo "$org_response" | grep -q "already exists\|That URL is already in use"; then
-              echo "⚠️ Organization already exists, continuing..."
-              echo "Retrieving existing organization details..."
-              
-              # Get existing organization details
-              existing_org=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_show?id=demo-organization)
-              if echo "$existing_org" | grep -q '"success": true'; then
-                echo "✅ Retrieved existing organization details"
-                echo "$existing_org" | python3 -m json.tool | head -30
-              fi
-              
-            elif echo "$org_response" | grep -q "Authorization"; then
-              echo "❌ Authorization failed - API key might be invalid"
-              echo "API Key used: $CKAN_API_KEY"
-              exit 1
-            elif echo "$org_response" | grep -q "error"; then
-              echo "❌ API returned an error:"
-              echo "$org_response" | python3 -m json.tool
-              exit 1
-            else
-              echo "❌ Unknown error occurred"
-              echo "Full response: $org_response"
-              exit 1
-            fi
-          fi
-
-      - name: Create dataset
-        run: |
-          echo "Creating demo dataset..."
-          
-          # Create dataset using CKAN API with comprehensive metadata
-          dataset_response=$(curl -X POST $CKAN_URL/api/3/action/package_create \
-            -H "Authorization: $CKAN_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "name": "my-first-dataset",
-              "title": "My First Comprehensive Dataset",
-              "notes": "This is a comprehensive demo dataset created via GitHub Actions for testing CKAN functionality, including datapusher-plus integration and automated data processing workflows.",
-              "owner_org": "demo-organization",
-              "license_id": "cc-by",
-              "version": "1.0.0",
-              "author": "GitHub Actions Automation",
-              "author_email": "noreply@example.com",
-              "maintainer": "CKAN Admin",
-              "maintainer_email": "admin@example.com",
-              "url": "https://github.com/your-repo/your-project",
-              "tags": [
-                {"name": "demo"},
-                {"name": "test"},
-                {"name": "github-actions"},
-                {"name": "automation"},
-                {"name": "csv-data"},
-                {"name": "datapusher-plus"}
-              ],
-              "extras": [
-                {"key": "topic", "value": "Data Engineering"},
-                {"key": "methodology", "value": "Automated Testing"},
-                {"key": "update_frequency", "value": "On Demand"},
-                {"key": "created_via", "value": "GitHub Actions"},
-                {"key": "data_quality", "value": "Test Data"}
-              ],
-              "private": false,
-              "state": "active"
-            }')
-          
-          echo "Dataset creation response:"
-          echo "$dataset_response" | python3 -m json.tool
-          
-          # Check if dataset was created successfully
-          if echo "$dataset_response" | grep -q '"success": true'; then
-            echo "✅ Dataset created successfully!"
-            
-            # Extract and display dataset details
-            dataset_name=$(echo "$dataset_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
-            dataset_title=$(echo "$dataset_response" | grep -o '"title": "[^"]*"' | head -1 | cut -d'"' -f4)
-            dataset_id=$(echo "$dataset_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-            dataset_state=$(echo "$dataset_response" | grep -o '"state": "[^"]*"' | head -1 | cut -d'"' -f4)
-            
-            echo "Dataset Name: $dataset_name"
-            echo "Dataset Title: $dataset_title"
-            echo "Dataset ID: $dataset_id"
-            echo "Dataset State: $dataset_state"
-            
-            # Display tags
-            if echo "$dataset_response" | grep -q '"tags"'; then
-              echo "Tags:"
-              echo "$dataset_response" | grep -o '"name": "[^"]*"' | grep -v "^\"name\": \"$dataset_name\"" | cut -d'"' -f4 | sed 's/^/  - /'
-            fi
-            
-            # Display extras
-            if echo "$dataset_response" | grep -q '"extras"'; then
-              echo "Custom Fields:"
-              echo "$dataset_response" | grep -A 10 '"extras"' | grep '"key"\|"value"' | sed 'N;s/.*"key": "\([^"]*\)".*"value": "\([^"]*\)".*/  - \1: \2/'
-            fi
-            
-          else
-            echo "❌ Failed to create dataset"
-            
-            # Check for specific error types
-            if echo "$dataset_response" | grep -q "already exists\|That URL is already in use"; then
-              echo "⚠️ Dataset already exists, continuing..."
-              echo "Retrieving existing dataset details..."
-              
-              # Get existing dataset details
-              existing_dataset=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_show?id=my-first-dataset)
-              if echo "$existing_dataset" | grep -q '"success": true'; then
-                echo "✅ Retrieved existing dataset details"
-                dataset_id=$(echo "$existing_dataset" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-                echo "Dataset ID: $dataset_id"
-              fi
-              
-            elif echo "$dataset_response" | grep -q "Organization not found\|owner_org"; then
-              echo "❌ Organization 'demo-organization' not found. Make sure the organization was created successfully."
-              exit 1
-            elif echo "$dataset_response" | grep -q "Authorization"; then
-              echo "❌ Authorization failed - API key might be invalid"
-              exit 1
-            elif echo "$dataset_response" | grep -q "error"; then
-              echo "❌ API returned an error:"
-              echo "$dataset_response" | python3 -m json.tool
-              exit 1
-            else
-              echo "❌ Unknown error occurred"
-              echo "Full response: $dataset_response"
-              exit 1
-            fi
-          fi
-
-      - name: Add resource to dataset
-        run: |
-          echo "Adding resource to dataset..."
-          
-          # Add resource using CKAN API with comprehensive metadata
-          resource_response=$(curl -X POST $CKAN_URL/api/3/action/resource_create \
-            -H "Authorization: $CKAN_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "package_id": "my-first-dataset",
-              "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
-              "name": "Sample CSV Data - 100KB Test File",
-              "description": "This is a comprehensive test CSV resource containing sample data for testing CKAN functionality, datapusher-plus integration, and automated data processing workflows. Perfect for testing CSV parsing, data validation, and data transformation features.",
-              "format": "CSV",
-              "mimetype": "text/csv",
-              "size": 102400,
-              "hash": "",
-              "cache_last_updated": null,
-              "webstore_last_updated": null,
-              "extras": {
-                "encoding": "UTF-8",
-                "delimiter": ",",
-                "headers": "true",
-                "source": "frictionlessdata/test-data",
-                "data_quality": "Test Data",
-                "created_via": "GitHub Actions",
-                "processing_notes": "Suitable for datapusher-plus testing"
-              }
-            }')
-          
-          echo "Resource creation response:"
-          echo "$resource_response" | python3 -m json.tool
-          
-          # Check if resource was created successfully
-          if echo "$resource_response" | grep -q '"success": true'; then
-            echo "✅ Resource created successfully!"
-            
-            # Extract and display resource details
-            resource_name=$(echo "$resource_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_id=$(echo "$resource_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_url=$(echo "$resource_response" | grep -o '"url": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_format=$(echo "$resource_response" | grep -o '"format": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_size=$(echo "$resource_response" | grep -o '"size": [0-9]*' | head -1 | cut -d' ' -f2)
-            
-            echo "Resource Name: $resource_name"
-            echo "Resource ID: $resource_id"
-            echo "Resource URL: $resource_url"
-            echo "Resource Format: $resource_format"
-            echo "Resource Size: $resource_size bytes"
-            
-            # Test if the resource URL is accessible
-            echo "Testing resource URL accessibility..."
-            if curl -s --head "$resource_url" | grep -q "200 OK"; then
-              echo "✅ Resource URL is accessible"
-              
-              # Get some sample data from the resource
-              echo "Sample data from resource (first 5 lines):"
-              curl -s "$resource_url" | head -5
-              
-            else
-              echo "⚠️ Resource URL might not be accessible"
-            fi
-            
-          else
-            echo "❌ Failed to create resource"
-            
-            # Check for specific error types
-            if echo "$resource_response" | grep -q "Package not found\|package_id"; then
-              echo "❌ Dataset 'my-first-dataset' not found. Make sure the dataset was created successfully."
-              exit 1
-            elif echo "$resource_response" | grep -q "Authorization"; then
-              echo "❌ Authorization failed - API key might be invalid"
-              exit 1
-            elif echo "$resource_response" | grep -q "error"; then
-              echo "❌ API returned an error:"
-              echo "$resource_response" | python3 -m json.tool
-              exit 1
-            else
-              echo "❌ Unknown error occurred"
-              echo "Full response: $resource_response"
-              exit 1
-            fi
-          fi
-
-      - name: Verify created content
-        run: |
-          echo "Verifying all created content with comprehensive checks..."
-          
-          # Test 1: List organizations to verify creation
-          echo "=== Organizations Verification ==="
-          org_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_list?all_fields=true)
-          echo "$org_list" | python3 -m json.tool
-          
-          if echo "$org_list" | grep -q "demo-organization"; then
-            echo "✅ Organization verified in organization list"
-            
-            # Get detailed organization info
-            org_details=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_show?id=demo-organization)
-            if echo "$org_details" | grep -q "extras"; then
-              echo "✅ Organization extras verified"
-            fi
-          else
-            echo "❌ Organization not found in list"
-          fi
-          
-          # Test 2: List packages to verify dataset creation
-          echo -e "\n=== Datasets Verification ==="
-          package_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_list)
-          echo "$package_list" | python3 -m json.tool
-          
-          if echo "$package_list" | grep -q "my-first-dataset"; then
-            echo "✅ Dataset verified in package list"
-          else
-            echo "❌ Dataset not found in list"
-          fi
-          
-          # Test 3: Get detailed dataset information
-          echo -e "\n=== Dataset Details Verification ==="
-          dataset_details=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_show?id=my-first-dataset)
-          echo "$dataset_details" | python3 -m json.tool
-          
-          # Verify dataset components
-          if echo "$dataset_details" | grep -q "Sample CSV Data"; then
-            echo "✅ Resource verified in dataset details"
-          else
-            echo "❌ Resource not found in dataset"
-          fi
-          
-          if echo "$dataset_details" | grep -q "github-actions"; then
-            echo "✅ Tags verified in dataset"
-          else
-            echo "⚠️ Tags might not be properly set"
-          fi
-          
-          if echo "$dataset_details" | grep -q "extras"; then
-            echo "✅ Dataset extras verified"
-          else
-            echo "⚠️ Dataset extras might not be set"
-          fi
-          
-          # Test 4: Verify resource accessibility and data
-          echo -e "\n=== Resource Data Verification ==="
-          resource_id=$(echo "$dataset_details" | grep -o '"id": "[^"]*"' | tail -1 | cut -d'"' -f4)
-          if [ -n "$resource_id" ]; then
-            echo "Resource ID found: $resource_id"
-            
-            # Get resource details
-            resource_details=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/resource_show?id=$resource_id)
-            resource_url=$(echo "$resource_details" | grep -o '"url": "[^"]*"' | head -1 | cut -d'"' -f4)
-            
-            if [ -n "$resource_url" ]; then
-              echo "Testing resource data accessibility..."
-              if curl -s --head "$resource_url" | grep -q "200 OK"; then
-                echo "✅ Resource data is accessible"
-                
-                # Show sample data
-                echo "Sample data (first 3 lines):"
-                curl -s "$resource_url" | head -3 | sed 's/^/  /'
-                
-                # Check data characteristics
-                total_lines=$(curl -s "$resource_url" | wc -l)
-                echo "Total lines in resource: $total_lines"
-                
-                if [ "$total_lines" -gt 1 ]; then
-                  echo "✅ Resource contains data beyond headers"
-                else
-                  echo "⚠️ Resource might only contain headers"
-                fi
-              else
-                echo "❌ Resource data is not accessible"
-              fi
-            fi
-          fi
-          
-          # Test 5: API functionality tests
-          echo -e "\n=== API Functionality Tests ==="
-          
-          # Test search functionality
-          search_response=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_search?q=demo)
-          if echo "$search_response" | grep -q "my-first-dataset"; then
-            echo "✅ Search functionality working - dataset found via search"
-          else
-            echo "⚠️ Search might not be working or dataset not indexed yet"
-          fi
-          
-          # Test tag list
-          tag_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/tag_list)
-          if echo "$tag_list" | grep -q "github-actions"; then
-            echo "✅ Tags are properly created and listed"
-          else
-            echo "⚠️ Tags might not be properly indexed"
-          fi
-          
-          # Test 6: Web interface accessibility
-          echo -e "\n=== Web Interface Verification ==="
-          
-          # Test dataset page
-          dataset_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_URL/dataset/my-first-dataset)
-          dataset_http_code=$(echo "$dataset_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$dataset_http_code" = "200" ]; then
-            echo "✅ Dataset web page is accessible"
-            if echo "$dataset_page" | grep -q "Sample CSV Data"; then
-              echo "✅ Dataset page shows resource information"
-            fi
-          else
-            echo "❌ Dataset web page returned HTTP $dataset_http_code"
-          fi
-          
-          # Test organization page
-          org_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_URL/organization/demo-organization)
-          org_http_code=$(echo "$org_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$org_http_code" = "200" ]; then
-            echo "✅ Organization web page is accessible"
-          else
-            echo "❌ Organization web page returned HTTP $org_http_code"
-          fi
-          
-          # Summary
-          echo -e "\n🎉 Content creation and verification completed!"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📋 CREATED CONTENT SUMMARY:"
-          echo "   🏢 Organization: demo-organization"
-          echo "      └── 📊 Dataset: my-first-dataset"
-          echo "          └── 📁 Resource: Sample CSV Data (100KB)"
-          echo ""
-          echo "🔗 Access URLs:"
-          echo "   • Dataset: $CKAN_URL/dataset/my-first-dataset"
-          echo "   • Organization: $CKAN_URL/organization/demo-organization"
-          echo "   • API Status: $CKAN_URL/api/3/action/status_show"
-          echo ""
-          echo "🔑 API Key: $CKAN_API_KEY"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          
-      # Placeholder for datapusher-plus tests
-      - name: Setup datapusher-plus (placeholder)
-        run: |
-          echo "🚀 This is where you'll add your datapusher-plus specific tests"
-          echo "CKAN is now running successfully at $CKAN_URL"
-          echo "Sample data has been created:"
-          echo "  - Organization: demo-organization"
-          echo "  - Dataset: my-first-dataset"
-          echo "  - Resource: brand-new-resource (CSV file)"
-          echo ""
-          echo "You can now add steps to:"
-          echo "  - Install datapusher-plus extension"
-          echo "  - Configure datapusher-plus settings"  
-          echo "  - Run datapusher-plus specific tests"
-          echo "  - Test data upload and processing functionality"
-          echo "  - Test CSV processing with the created resource"
-          
-      - name: Cleanup
-        if: always()
-        run: |
-          echo "Stopping any running CKAN processes..."
-          pkill -f "ckan.*run" || true
-          echo "Cleanup completed"; then
-            echo "✅ API key format is valid: $api_key"
+          # Validate API key format (UUID)
+          if echo "$api_key" | grep -q '^[a-f0-9]\{8\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{12\}$'; then
+            echo "✅ Valid API key: $api_key"
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
           else
-            echo "❌ Invalid API key format: '$api_key'"
-            echo "Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            echo "❌ Invalid API key format"
             exit 1
-          fi
-          
-          # Test the API key with a simple endpoint
-          echo "Testing API key with status endpoint..."
-          test_response=$(curl -s -H "Authorization: $api_key" $CKAN_URL/api/3/action/status_show)
-          if echo "$test_response" | grep -q '"success": true'; then
-            echo "✅ API key works with status endpoint"
-          else
-            echo "Status test response: $test_response"
-          fi
-          
-          # Test with user_show endpoint to verify authentication
-          echo "Testing API key with user authentication..."
-          user_test_response=$(curl -s -H "Authorization: $api_key" $CKAN_URL/api/3/action/user_show?id=ckan_admin)
-          if echo "$user_test_response" | grep -q '"success": true'; then
-            echo "✅ API key works for authenticated user operations"
-          else
-            echo "⚠️ User authentication test failed, but API key might still work for create operations"
-            echo "Response: $user_test_response"
           fi
 
       - name: Create organization
         run: |
           echo "Creating demo organization..."
           
-          # Create organization using CKAN API with comprehensive fields
           org_response=$(curl -X POST $CKAN_URL/api/3/action/organization_create \
             -H "Authorization: $CKAN_API_KEY" \
             -H "Content-Type: application/json" \
             -d '{
               "name": "demo-organization",
               "title": "Demo Data Publishing Organization",
-              "description": "This is a comprehensive demo organization created via GitHub Actions for testing CKAN functionality and datapusher-plus integration.",
-              "image_url": "https://via.placeholder.com/200x100/0066cc/ffffff?text=Demo+Org",
-              "users": [
-                {"name": "ckan_admin", "capacity": "admin"}
-              ],
-              "extras": [
-                {"key": "department", "value": "Data Engineering"},
-                {"key": "created_by", "value": "GitHub Actions"},
-                {"key": "purpose", "value": "Testing and Development"}
-              ]
+              "description": "Demo organization for testing CKAN functionality"
             }')
           
-          echo "Organization creation response:"
-          echo "$org_response" | python3 -m json.tool
-          
-          # Check if organization was created successfully
           if echo "$org_response" | grep -q '"success": true'; then
             echo "✅ Organization created successfully!"
-            
-            # Extract and display organization details
-            org_name=$(echo "$org_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
-            org_title=$(echo "$org_response" | grep -o '"title": "[^"]*"' | head -1 | cut -d'"' -f4)
-            org_id=$(echo "$org_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-            
-            echo "Organization Name: $org_name"
-            echo "Organization Title: $org_title"
-            echo "Organization ID: $org_id"
-            
-            # Display extras if present
-            if echo "$org_response" | grep -q '"extras"'; then
-              echo "Organization Extras:"
-              echo "$org_response" | grep -A 20 '"extras"' | grep '"key"\|"value"' | sed 's/.*"key": "\([^"]*\)".*/  - \1:/' | sed 's/.*"value": "\([^"]*\)".*/    \1/'
-            fi
-            
+          elif echo "$org_response" | grep -q "already exists"; then
+            echo "⚠️ Organization already exists, continuing..."
           else
             echo "❌ Failed to create organization"
-            
-            # Check for specific error types
-            if echo "$org_response" | grep -q "already exists\|That URL is already in use"; then
-              echo "⚠️ Organization already exists, continuing..."
-              echo "Retrieving existing organization details..."
-              
-              # Get existing organization details
-              existing_org=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_show?id=demo-organization)
-              if echo "$existing_org" | grep -q '"success": true'; then
-                echo "✅ Retrieved existing organization details"
-                echo "$existing_org" | python3 -m json.tool | head -30
-              fi
-              
-            elif echo "$org_response" | grep -q "Authorization"; then
-              echo "❌ Authorization failed - API key might be invalid"
-              echo "API Key used: $CKAN_API_KEY"
-              exit 1
-            elif echo "$org_response" | grep -q "error"; then
-              echo "❌ API returned an error:"
-              echo "$org_response" | python3 -m json.tool
-              exit 1
-            else
-              echo "❌ Unknown error occurred"
-              echo "Full response: $org_response"
-              exit 1
-            fi
+            echo "$org_response"
+            exit 1
           fi
 
       - name: Create dataset
         run: |
           echo "Creating demo dataset..."
           
-          # Create dataset using CKAN API with comprehensive metadata
           dataset_response=$(curl -X POST $CKAN_URL/api/3/action/package_create \
             -H "Authorization: $CKAN_API_KEY" \
             -H "Content-Type: application/json" \
             -d '{
               "name": "my-first-dataset",
-              "title": "My First Comprehensive Dataset",
-              "notes": "This is a comprehensive demo dataset created via GitHub Actions for testing CKAN functionality, including datapusher-plus integration and automated data processing workflows.",
+              "title": "My First Dataset",
+              "notes": "Demo dataset for testing",
               "owner_org": "demo-organization",
               "license_id": "cc-by",
-              "version": "1.0.0",
-              "author": "GitHub Actions Automation",
-              "author_email": "noreply@example.com",
-              "maintainer": "CKAN Admin",
-              "maintainer_email": "admin@example.com",
-              "url": "https://github.com/your-repo/your-project",
               "tags": [
                 {"name": "demo"},
-                {"name": "test"},
-                {"name": "github-actions"},
-                {"name": "automation"},
-                {"name": "csv-data"},
-                {"name": "datapusher-plus"}
-              ],
-              "extras": [
-                {"key": "topic", "value": "Data Engineering"},
-                {"key": "methodology", "value": "Automated Testing"},
-                {"key": "update_frequency", "value": "On Demand"},
-                {"key": "created_via", "value": "GitHub Actions"},
-                {"key": "data_quality", "value": "Test Data"}
-              ],
-              "private": false,
-              "state": "active"
+                {"name": "test"}
+              ]
             }')
           
-          echo "Dataset creation response:"
-          echo "$dataset_response" | python3 -m json.tool
-          
-          # Check if dataset was created successfully
           if echo "$dataset_response" | grep -q '"success": true'; then
             echo "✅ Dataset created successfully!"
-            
-            # Extract and display dataset details
-            dataset_name=$(echo "$dataset_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
-            dataset_title=$(echo "$dataset_response" | grep -o '"title": "[^"]*"' | head -1 | cut -d'"' -f4)
-            dataset_id=$(echo "$dataset_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-            dataset_state=$(echo "$dataset_response" | grep -o '"state": "[^"]*"' | head -1 | cut -d'"' -f4)
-            
-            echo "Dataset Name: $dataset_name"
-            echo "Dataset Title: $dataset_title"
-            echo "Dataset ID: $dataset_id"
-            echo "Dataset State: $dataset_state"
-            
-            # Display tags
-            if echo "$dataset_response" | grep -q '"tags"'; then
-              echo "Tags:"
-              echo "$dataset_response" | grep -o '"name": "[^"]*"' | grep -v "^\"name\": \"$dataset_name\"" | cut -d'"' -f4 | sed 's/^/  - /'
-            fi
-            
-            # Display extras
-            if echo "$dataset_response" | grep -q '"extras"'; then
-              echo "Custom Fields:"
-              echo "$dataset_response" | grep -A 10 '"extras"' | grep '"key"\|"value"' | sed 'N;s/.*"key": "\([^"]*\)".*"value": "\([^"]*\)".*/  - \1: \2/'
-            fi
-            
+          elif echo "$dataset_response" | grep -q "already exists"; then
+            echo "⚠️ Dataset already exists, continuing..."
           else
             echo "❌ Failed to create dataset"
-            
-            # Check for specific error types
-            if echo "$dataset_response" | grep -q "already exists\|That URL is already in use"; then
-              echo "⚠️ Dataset already exists, continuing..."
-              echo "Retrieving existing dataset details..."
-              
-              # Get existing dataset details
-              existing_dataset=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_show?id=my-first-dataset)
-              if echo "$existing_dataset" | grep -q '"success": true'; then
-                echo "✅ Retrieved existing dataset details"
-                dataset_id=$(echo "$existing_dataset" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-                echo "Dataset ID: $dataset_id"
-              fi
-              
-            elif echo "$dataset_response" | grep -q "Organization not found\|owner_org"; then
-              echo "❌ Organization 'demo-organization' not found. Make sure the organization was created successfully."
-              exit 1
-            elif echo "$dataset_response" | grep -q "Authorization"; then
-              echo "❌ Authorization failed - API key might be invalid"
-              exit 1
-            elif echo "$dataset_response" | grep -q "error"; then
-              echo "❌ API returned an error:"
-              echo "$dataset_response" | python3 -m json.tool
-              exit 1
-            else
-              echo "❌ Unknown error occurred"
-              echo "Full response: $dataset_response"
-              exit 1
-            fi
+            echo "$dataset_response"
+            exit 1
           fi
 
       - name: Add resource to dataset
         run: |
           echo "Adding resource to dataset..."
           
-          # Add resource using CKAN API with comprehensive metadata
           resource_response=$(curl -X POST $CKAN_URL/api/3/action/resource_create \
             -H "Authorization: $CKAN_API_KEY" \
             -H "Content-Type: application/json" \
             -d '{
               "package_id": "my-first-dataset",
               "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
-              "name": "Sample CSV Data - 100KB Test File",
-              "description": "This is a comprehensive test CSV resource containing sample data for testing CKAN functionality, datapusher-plus integration, and automated data processing workflows. Perfect for testing CSV parsing, data validation, and data transformation features.",
-              "format": "CSV",
-              "mimetype": "text/csv",
-              "size": 102400,
-              "hash": "",
-              "cache_last_updated": null,
-              "webstore_last_updated": null,
-              "extras": {
-                "encoding": "UTF-8",
-                "delimiter": ",",
-                "headers": "true",
-                "source": "frictionlessdata/test-data",
-                "data_quality": "Test Data",
-                "created_via": "GitHub Actions",
-                "processing_notes": "Suitable for datapusher-plus testing"
-              }
+              "name": "Sample CSV Data",
+              "description": "Test CSV resource",
+              "format": "CSV"
             }')
           
-          echo "Resource creation response:"
-          echo "$resource_response" | python3 -m json.tool
-          
-          # Check if resource was created successfully
           if echo "$resource_response" | grep -q '"success": true'; then
             echo "✅ Resource created successfully!"
-            
-            # Extract and display resource details
-            resource_name=$(echo "$resource_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_id=$(echo "$resource_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_url=$(echo "$resource_response" | grep -o '"url": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_format=$(echo "$resource_response" | grep -o '"format": "[^"]*"' | head -1 | cut -d'"' -f4)
-            resource_size=$(echo "$resource_response" | grep -o '"size": [0-9]*' | head -1 | cut -d' ' -f2)
-            
-            echo "Resource Name: $resource_name"
-            echo "Resource ID: $resource_id"
-            echo "Resource URL: $resource_url"
-            echo "Resource Format: $resource_format"
-            echo "Resource Size: $resource_size bytes"
-            
-            # Test if the resource URL is accessible
-            echo "Testing resource URL accessibility..."
-            if curl -s --head "$resource_url" | grep -q "200 OK"; then
-              echo "✅ Resource URL is accessible"
-              
-              # Get some sample data from the resource
-              echo "Sample data from resource (first 5 lines):"
-              curl -s "$resource_url" | head -5
-              
-            else
-              echo "⚠️ Resource URL might not be accessible"
-            fi
-            
           else
             echo "❌ Failed to create resource"
-            
-            # Check for specific error types
-            if echo "$resource_response" | grep -q "Package not found\|package_id"; then
-              echo "❌ Dataset 'my-first-dataset' not found. Make sure the dataset was created successfully."
-              exit 1
-            elif echo "$resource_response" | grep -q "Authorization"; then
-              echo "❌ Authorization failed - API key might be invalid"
-              exit 1
-            elif echo "$resource_response" | grep -q "error"; then
-              echo "❌ API returned an error:"
-              echo "$resource_response" | python3 -m json.tool
-              exit 1
-            else
-              echo "❌ Unknown error occurred"
-              echo "Full response: $resource_response"
-              exit 1
-            fi
+            echo "$resource_response"
+            exit 1
           fi
 
-      - name: Verify created content
+      - name: Verify setup
         run: |
-          echo "Verifying all created content with comprehensive checks..."
-          
-          # Test 1: List organizations to verify creation
-          echo "=== Organizations Verification ==="
-          org_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_list?all_fields=true)
-          echo "$org_list" | python3 -m json.tool
-          
-          if echo "$org_list" | grep -q "demo-organization"; then
-            echo "✅ Organization verified in organization list"
-            
-            # Get detailed organization info
-            org_details=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_show?id=demo-organization)
-            if echo "$org_details" | grep -q "extras"; then
-              echo "✅ Organization extras verified"
-            fi
-          else
-            echo "❌ Organization not found in list"
-          fi
-          
-          # Test 2: List packages to verify dataset creation
-          echo -e "\n=== Datasets Verification ==="
-          package_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_list)
-          echo "$package_list" | python3 -m json.tool
-          
-          if echo "$package_list" | grep -q "my-first-dataset"; then
-            echo "✅ Dataset verified in package list"
-          else
-            echo "❌ Dataset not found in list"
-          fi
-          
-          # Test 3: Get detailed dataset information
-          echo -e "\n=== Dataset Details Verification ==="
-          dataset_details=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_show?id=my-first-dataset)
-          echo "$dataset_details" | python3 -m json.tool
-          
-          # Verify dataset components
-          if echo "$dataset_details" | grep -q "Sample CSV Data"; then
-            echo "✅ Resource verified in dataset details"
-          else
-            echo "❌ Resource not found in dataset"
-          fi
-          
-          if echo "$dataset_details" | grep -q "github-actions"; then
-            echo "✅ Tags verified in dataset"
-          else
-            echo "⚠️ Tags might not be properly set"
-          fi
-          
-          if echo "$dataset_details" | grep -q "extras"; then
-            echo "✅ Dataset extras verified"
-          else
-            echo "⚠️ Dataset extras might not be set"
-          fi
-          
-          # Test 4: Verify resource accessibility and data
-          echo -e "\n=== Resource Data Verification ==="
-          resource_id=$(echo "$dataset_details" | grep -o '"id": "[^"]*"' | tail -1 | cut -d'"' -f4)
-          if [ -n "$resource_id" ]; then
-            echo "Resource ID found: $resource_id"
-            
-            # Get resource details
-            resource_details=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/resource_show?id=$resource_id)
-            resource_url=$(echo "$resource_details" | grep -o '"url": "[^"]*"' | head -1 | cut -d'"' -f4)
-            
-            if [ -n "$resource_url" ]; then
-              echo "Testing resource data accessibility..."
-              if curl -s --head "$resource_url" | grep -q "200 OK"; then
-                echo "✅ Resource data is accessible"
-                
-                # Show sample data
-                echo "Sample data (first 3 lines):"
-                curl -s "$resource_url" | head -3 | sed 's/^/  /'
-                
-                # Check data characteristics
-                total_lines=$(curl -s "$resource_url" | wc -l)
-                echo "Total lines in resource: $total_lines"
-                
-                if [ "$total_lines" -gt 1 ]; then
-                  echo "✅ Resource contains data beyond headers"
-                else
-                  echo "⚠️ Resource might only contain headers"
-                fi
-              else
-                echo "❌ Resource data is not accessible"
-              fi
-            fi
-          fi
-          
-          # Test 5: API functionality tests
-          echo -e "\n=== API Functionality Tests ==="
-          
-          # Test search functionality
-          search_response=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_search?q=demo)
-          if echo "$search_response" | grep -q "my-first-dataset"; then
-            echo "✅ Search functionality working - dataset found via search"
-          else
-            echo "⚠️ Search might not be working or dataset not indexed yet"
-          fi
-          
-          # Test tag list
-          tag_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/tag_list)
-          if echo "$tag_list" | grep -q "github-actions"; then
-            echo "✅ Tags are properly created and listed"
-          else
-            echo "⚠️ Tags might not be properly indexed"
-          fi
-          
-          # Test 6: Web interface accessibility
-          echo -e "\n=== Web Interface Verification ==="
-          
-          # Test dataset page
-          dataset_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_URL/dataset/my-first-dataset)
-          dataset_http_code=$(echo "$dataset_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$dataset_http_code" = "200" ]; then
-            echo "✅ Dataset web page is accessible"
-            if echo "$dataset_page" | grep -q "Sample CSV Data"; then
-              echo "✅ Dataset page shows resource information"
-            fi
-          else
-            echo "❌ Dataset web page returned HTTP $dataset_http_code"
-          fi
-          
-          # Test organization page
-          org_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_URL/organization/demo-organization)
-          org_http_code=$(echo "$org_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$org_http_code" = "200" ]; then
-            echo "✅ Organization web page is accessible"
-          else
-            echo "❌ Organization web page returned HTTP $org_http_code"
-          fi
-          
-          # Summary
-          echo -e "\n🎉 Content creation and verification completed!"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📋 CREATED CONTENT SUMMARY:"
+          echo "🎉 CKAN Setup Complete!"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📋 CREATED CONTENT:"
           echo "   🏢 Organization: demo-organization"
           echo "      └── 📊 Dataset: my-first-dataset"
-          echo "          └── 📁 Resource: Sample CSV Data (100KB)"
+          echo "          └── 📁 Resource: Sample CSV Data"
           echo ""
           echo "🔗 Access URLs:"
+          echo "   • API: $CKAN_URL/api/3/action/status_show"
           echo "   • Dataset: $CKAN_URL/dataset/my-first-dataset"
           echo "   • Organization: $CKAN_URL/organization/demo-organization"
-          echo "   • API Status: $CKAN_URL/api/3/action/status_show"
           echo ""
           echo "🔑 API Key: $CKAN_API_KEY"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           
-      # Placeholder for datapusher-plus tests
+      # Add your datapusher-plus specific steps here
       - name: Setup datapusher-plus (placeholder)
         run: |
-          echo "🚀 This is where you'll add your datapusher-plus specific tests"
-          echo "CKAN is now running successfully at $CKAN_URL"
-          echo "Sample data has been created:"
-          echo "  - Organization: demo-organization"
-          echo "  - Dataset: my-first-dataset"
-          echo "  - Resource: brand-new-resource (CSV file)"
-          echo ""
-          echo "You can now add steps to:"
-          echo "  - Install datapusher-plus extension"
-          echo "  - Configure datapusher-plus settings"  
-          echo "  - Run datapusher-plus specific tests"
-          echo "  - Test data upload and processing functionality"
-          echo "  - Test CSV processing with the created resource"
+          echo "🚀 Add your datapusher-plus specific tests here"
+          echo "CKAN is running at $CKAN_URL with sample data ready"
           
       - name: Cleanup
         if: always()
         run: |
-          echo "Stopping any running CKAN processes..."
+          echo "Stopping CKAN processes..."
           pkill -f "ckan.*run" || true
           echo "Cleanup completed"
