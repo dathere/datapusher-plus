@@ -209,13 +209,13 @@ jobs:
           set timeout 30
           spawn ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME email=$SYSADMIN_EMAIL name=$SYSADMIN_NAME
           expect {
-            "Create new user: * \\[Y/n\\]:" {
+            "Create new user:*\\[Y/n\\]:*" {
               send "Y\r"
               expect {
-                "Password:" {
+                "Password:*" {
                   send "$SYSADMIN_PASSWORD\r"
                   expect {
-                    "Confirm password:" {
+                    "Confirm password:*" {
                       send "$SYSADMIN_PASSWORD\r"
                       expect eof
                     }
@@ -228,17 +228,17 @@ jobs:
                 }
               }
             }
-            "Password:" {
+            "Password:*" {
               send "$SYSADMIN_PASSWORD\r"
               expect {
-                "Confirm password:" {
+                "Confirm password:*" {
                   send "$SYSADMIN_PASSWORD\r"
                   expect eof
                 }
                 eof
               }
             }
-            "User * already exists" {
+            "*already exists*" {
               puts "User already exists, promoting to sysadmin..."
               exit 0
             }
@@ -252,18 +252,28 @@ jobs:
           
           chmod +x /tmp/create_sysadmin.exp
           
-          # Run the expect script
+          # Run the expect script with fallback to echo piping
+          echo "Attempting user creation with expect script..."
           if /tmp/create_sysadmin.exp; then
-            echo "✅ Sysadmin user created successfully!"
+            echo "✅ Sysadmin user created successfully with expect!"
           else
-            echo "⚠️  Sysadmin creation failed, trying to promote existing user..."
-            # If user already exists, try to promote them to sysadmin
-            if ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME; then
-              echo "✅ Existing user promoted to sysadmin successfully!"
+            echo "⚠️  Expect script failed, trying alternative method with echo piping..."
+            
+            # Alternative method: use printf to pipe responses
+            printf "Y\n$SYSADMIN_PASSWORD\n$SYSADMIN_PASSWORD\n" | ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME email=$SYSADMIN_EMAIL name=$SYSADMIN_NAME
+            
+            if [ $? -eq 0 ]; then
+              echo "✅ Sysadmin user created successfully with echo piping!"
             else
-              echo "❌ Failed to create or promote sysadmin user"
-              # Don't exit with error, as this might not be critical for testing
-              echo "Continuing with workflow..."
+              echo "⚠️  Echo piping also failed, trying to promote existing user..."
+              # If user already exists, try to promote them to sysadmin
+              if ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME; then
+                echo "✅ Existing user promoted to sysadmin successfully!"
+              else
+                echo "❌ Failed to create or promote sysadmin user"
+                # Don't exit with error, as this might not be critical for testing
+                echo "Continuing with workflow..."
+              fi
             fi
           fi
           
