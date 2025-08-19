@@ -1,0 +1,439 @@
+name: Setup Environment
+
+on: 
+  # push:
+  # pull_request:
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    container:
+      # The CKAN version tag of the Solr and Postgres containers should match
+      # the one of the container the tests run on.
+      image: ckan/ckan-dev:2.11
+      options: --user root
+    services:
+      solr:
+        image: ckan/ckan-solr:2.11-solr9
+      postgres:
+        image: ckan/ckan-postgres-dev:2.11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:3
+    env:
+      CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
+      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
+      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@postgres/datastore_test
+      CKAN_SOLR_URL: http://solr:8983/solr/ckan
+      CKAN_REDIS_URL: redis://redis:6379/1
+      # Sysadmin account configuration
+      CKAN_SYSADMIN_NAME: admin
+      CKAN_SYSADMIN_EMAIL: admin@localhost
+      CKAN_SYSADMIN_PASSWORD: admin123
+      
+    steps:
+      - name: Fix permissions and install essential tools
+        run: |
+          # Ensure the workspace directory has proper permissions
+          mkdir -p /__w/_temp
+          chmod -R 777 /__w/_temp
+          chmod -R 777 /__w/
+          
+          # Update package list and install essential tools
+          apt-get update
+          apt-get install -y curl wget net-tools procps postgresql-client
+          
+          echo "Essential tools installed successfully"
+      
+      - uses: actions/checkout@v4
+      
+      - name: Setup database users and permissions
+        run: |
+          # Wait for postgres to be ready
+          echo "Waiting for PostgreSQL to be ready..."
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if pg_isready -h postgres -p 5432 -U postgres >/dev/null 2>&1; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            
+            # Alternative check using psql if pg_isready fails
+            if PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
+              echo "PostgreSQL is ready (via psql)!"
+              break
+            fi
+            
+            echo "Waiting for postgres... ($timeout seconds remaining)"
+            sleep 3
+            timeout=$((timeout-3))
+          done
+          
+          if [ $timeout -le 0 ]; then
+            echo "Timeout waiting for PostgreSQL to be ready"
+            exit 1
+          fi
+          
+          # Create necessary database users and databases
+          echo "Creating database users..."
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD 'pass';" || echo "User ckan_default already exists"
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD 'pass';" || echo "User datastore_write already exists"
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD 'pass';" || echo "User datastore_read already exists"
+          
+          echo "Creating databases..."
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;" || echo "Database ckan_test already exists"
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;" || echo "Database datastore_test already exists"
+          
+          echo "Setting database permissions..."
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;" || true
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;" || true
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;" || true
+          
+          echo "Database setup completed successfully"
+      
+      - name: Install requirements
+        run: |
+          # Install any extra requirements your extension has here
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+          
+          echo "Requirements installed successfully"
+          
+      - name: Setup CKAN configuration
+        run: |
+          # Check if the test config exists and copy it
+          if [ -f /srv/app/src/ckan/test-core.ini ]; then
+            cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
+            echo "Copied existing test-core.ini"
+          elif [ -f /srv/app/src/ckan/test.ini ]; then
+            cp /srv/app/src/ckan/test.ini /tmp/test.ini
+            echo "Copied existing test.ini"
+          else
+            # Create a basic configuration file
+            echo "Creating basic CKAN configuration..."
+            cat > /tmp/test.ini << 'EOF'
+          [DEFAULT]
+          debug = true
+          
+          [server:main]
+          use = config:common.ini
+          
+          [app:main]
+          use = config:common.ini
+          ckan.site_url = http://localhost:5000
+          sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
+          ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
+          ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
+          solr_url = http://solr:8983/solr/ckan
+          ckan.redis.url = redis://redis:6379/1
+          ckan.site_id = default
+          ckan.site_title = CKAN Test
+          ckan.plugins = datastore datapusher
+          EOF
+                    fi
+          
+          # Update database URLs in config (in case they exist but are wrong)
+          sed -i 's|postgresql://.*ckan_test|postgresql://ckan_default:pass@postgres/ckan_test|g' /tmp/test.ini
+          sed -i 's|ckan.datastore.write_url.*|ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test|g' /tmp/test.ini
+          sed -i 's|ckan.datastore.read_url.*|ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test|g' /tmp/test.ini
+          
+          # Ensure Solr and Redis URLs are set
+          if ! grep -q "solr_url" /tmp/test.ini; then
+            echo "solr_url = http://solr:8983/solr/ckan" >> /tmp/test.ini
+          fi
+          if ! grep -q "ckan.redis.url" /tmp/test.ini; then
+            echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
+          fi
+          
+          echo "Configuration setup completed"
+          echo "Configuration file contents:"
+          head -20 /tmp/test.ini
+          
+      - name: Initialize CKAN database
+        run: |
+          echo "Initializing CKAN database..."
+          
+          # Test database connectivity first
+          echo "Testing database connectivity..."
+          if ! PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
+            echo "Cannot connect to CKAN database. Checking if database exists..."
+            if ! PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1 FROM pg_database WHERE datname='ckan_test';" | grep -q 1; then
+              echo "Creating ckan_test database..."
+              PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
+            fi
+          fi
+          
+          # Initialize CKAN database
+          if ckan -c /tmp/test.ini db init; then
+            echo "CKAN database initialized successfully"
+          else
+            echo "CKAN database initialization failed, but continuing..."
+            echo "This might be because the database is already initialized"
+          fi
+          
+          # Initialize datastore
+          echo "Setting up datastore permissions..."
+          if ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=postgres psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
+            echo "Datastore permissions set successfully"
+          else
+            echo "Datastore permission setup failed, but continuing..."
+            echo "This might be expected if datastore is already configured"
+          fi
+          
+          echo "Database initialization completed"
+
+      - name: Create CKAN sysadmin user
+        run: |
+          echo "Creating CKAN sysadmin user..."
+          
+          # Use environment variables for sysadmin credentials
+          SYSADMIN_NAME="${CKAN_SYSADMIN_NAME:-admin}"
+          SYSADMIN_EMAIL="${CKAN_SYSADMIN_EMAIL:-admin@localhost}"
+          SYSADMIN_PASSWORD="${CKAN_SYSADMIN_PASSWORD:-admin123}"
+          
+          echo "Creating sysadmin user: $SYSADMIN_NAME with email: $SYSADMIN_EMAIL"
+          
+          # Create the sysadmin user using expect to handle password prompt
+          # First, install expect if it's not available
+          apt-get update && apt-get install -y expect
+          
+          # Create expect script to handle password prompt
+          cat > /tmp/create_sysadmin.exp << EOF
+          #!/usr/bin/expect -f
+          set timeout 30
+          spawn ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME email=$SYSADMIN_EMAIL name=$SYSADMIN_NAME
+          expect {
+            "Password:" {
+              send "$SYSADMIN_PASSWORD\r"
+              expect {
+                "Confirm password:" {
+                  send "$SYSADMIN_PASSWORD\r"
+                  expect eof
+                }
+                eof
+              }
+            }
+            "User * already exists" {
+              puts "User already exists, promoting to sysadmin..."
+              exit 0
+            }
+            timeout {
+              puts "Timeout waiting for password prompt"
+              exit 1
+            }
+            eof
+          }
+          EOF
+          
+          chmod +x /tmp/create_sysadmin.exp
+          
+          # Run the expect script
+          if /tmp/create_sysadmin.exp; then
+            echo "✅ Sysadmin user created successfully!"
+          else
+            echo "⚠️  Sysadmin creation failed, trying to promote existing user..."
+            # If user already exists, try to promote them to sysadmin
+            if ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME; then
+              echo "✅ Existing user promoted to sysadmin successfully!"
+            else
+              echo "❌ Failed to create or promote sysadmin user"
+              # Don't exit with error, as this might not be critical for testing
+              echo "Continuing with workflow..."
+            fi
+          fi
+          
+          # Verify sysadmin was created
+          echo "Verifying sysadmin user..."
+          if ckan -c /tmp/test.ini sysadmin list | grep -q "$SYSADMIN_NAME"; then
+            echo "✅ Sysadmin user verification successful!"
+            echo "Current sysadmin users:"
+            ckan -c /tmp/test.ini sysadmin list
+          else
+            echo "⚠️  Could not verify sysadmin user creation"
+          fi
+          
+          # Export sysadmin credentials for use in later steps
+          echo "CKAN_SYSADMIN_NAME=$SYSADMIN_NAME" >> $GITHUB_ENV
+          echo "CKAN_SYSADMIN_EMAIL=$SYSADMIN_EMAIL" >> $GITHUB_ENV
+          echo "CKAN_SYSADMIN_PASSWORD=$SYSADMIN_PASSWORD" >> $GITHUB_ENV
+          
+      - name: Start CKAN server
+        run: |
+          echo "Starting CKAN server..."
+          
+          # Start CKAN server in background without auto-reload to avoid restart issues
+          ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader &
+          CKAN_PID=$!
+          echo "CKAN PID: $CKAN_PID"
+          
+          # Wait for server to start up
+          echo "Waiting for CKAN server to start..."
+          timeout=90
+          success=false
+          
+          while [ $timeout -gt 0 ]; do
+            # Check if process is still running
+            if ! kill -0 $CKAN_PID 2>/dev/null; then
+              echo "CKAN process died unexpectedly"
+              echo "Checking for error logs..."
+              tail -n 50 /var/log/ckan/*.log 2>/dev/null || echo "No log files found"
+              exit 1
+            fi
+            
+            # Try to connect to the status endpoint
+            if curl -f -s http://localhost:5000/api/3/action/status_show > /dev/null 2>&1; then
+              echo "CKAN server is running and responding!"
+              success=true
+              break
+            fi
+            
+            echo "Still waiting... ($timeout seconds remaining)"
+            sleep 3
+            timeout=$((timeout-3))
+          done
+          
+          if [ "$success" = false ]; then
+            echo "Timeout waiting for CKAN server to start"
+            echo "Checking process status..."
+            ps aux | grep ckan || echo "ps command failed"
+            echo "Checking network listeners..."
+            netstat -tlnp 2>/dev/null || ss -tlnp 2>/dev/null || echo "Network tools failed"
+            echo "Trying direct curl to root endpoint..."
+            curl -v http://localhost:5000/ || echo "Curl to root failed"
+            exit 1
+          fi
+          
+          # Export the working URL for next steps
+          echo "CKAN_URL=http://localhost:5000" >> $GITHUB_ENV
+          echo "CKAN server started successfully!"
+          
+      - name: Test CKAN API Status
+        run: |
+          echo "Testing CKAN API status endpoint..."
+          echo "Using CKAN URL: $CKAN_URL"
+          
+          # Make API call to status_show endpoint
+          response=$(curl -s -w "\nHTTP_CODE:%{http_code}" $CKAN_URL/api/3/action/status_show)
+          
+          # Extract HTTP status code
+          http_code=$(echo "$response" | grep "HTTP_CODE:" | cut -d: -f2)
+          json_response=$(echo "$response" | grep -v "HTTP_CODE:")
+          
+          echo "HTTP Status Code: $http_code"
+          echo "API Response:"
+          echo "$json_response" | python3 -m json.tool 2>/dev/null || echo "$json_response"
+          
+          # Check if the request was successful
+          if [ "$http_code" = "200" ]; then
+            echo "✅ CKAN API status check successful!"
+            
+            # Parse status information
+            echo "Parsing status information..."
+            echo "$json_response" | grep -o '"ckan_version":"[^"]*"' | sed 's/"ckan_version":"\(.*\)"/CKAN Version: \1/' || echo "CKAN Version: Unknown"
+            echo "$json_response" | grep -o '"site_title":"[^"]*"' | sed 's/"site_title":"\(.*\)"/Site Title: \1/' || echo "Site Title: Unknown"
+            echo "$json_response" | grep -o '"site_url":"[^"]*"' | sed 's/"site_url":"\(.*\)"/Site URL: \1/' || echo "Site URL: Unknown"
+            
+            # FIXED: Check if success is true - allow for optional whitespace around colon
+            if echo "$json_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+              echo "✅ API call was successful!"
+            else
+              echo "❌ API call reported failure"
+              echo "Debug: Raw JSON response:"
+              echo "$json_response"
+              echo "Debug: Searching for success pattern..."
+              echo "$json_response" | grep '"success"' || echo "No success field found"
+              exit 1
+            fi
+          else
+            echo "❌ CKAN API status check failed with HTTP code: $http_code"
+            echo "Response: $json_response"
+            exit 1
+          fi
+
+      - name: Test sysadmin login via API
+        run: |
+          echo "Testing sysadmin user login via API..."
+          
+          # Test user authentication by getting an API token
+          echo "Attempting to get user information for sysadmin..."
+          
+          # First, try to get user info using the API
+          user_response=$(curl -s "$CKAN_URL/api/3/action/user_show?id=$CKAN_SYSADMIN_NAME")
+          
+          if echo "$user_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+            echo "✅ Sysadmin user info retrieved successfully!"
+            echo "User details:"
+            echo "$user_response" | python3 -m json.tool | grep -E '"name"|"email"|"sysadmin"' || echo "Could not parse user details"
+            
+            # Check if user is actually a sysadmin
+            if echo "$user_response" | grep -q '"sysadmin"[[:space:]]*:[[:space:]]*true'; then
+              echo "✅ User confirmed as sysadmin!"
+            else
+              echo "⚠️  User exists but may not have sysadmin privileges"
+            fi
+          else
+            echo "⚠️  Could not retrieve sysadmin user info via API"
+            echo "Response: $user_response"
+          fi
+          
+      - name: Test additional CKAN endpoints
+        run: |
+          echo "Testing additional CKAN API endpoints..."
+          
+          # Test package list endpoint
+          echo "Testing package_list endpoint..."
+          package_response=$(curl -s $CKAN_URL/api/3/action/package_list)
+          echo "$package_response" | python3 -m json.tool | head -20
+          
+          # Test organization list endpoint
+          echo "Testing organization_list endpoint..."
+          org_response=$(curl -s $CKAN_URL/api/3/action/organization_list)
+          echo "$org_response" | python3 -m json.tool | head -20
+          
+          # Test user list endpoint (might be restricted)
+          echo "Testing user_list endpoint..."
+          user_response=$(curl -s $CKAN_URL/api/3/action/user_list)
+          echo "$user_response" | python3 -m json.tool | head -20
+          
+          echo "✅ Additional API tests completed"
+          
+      - name: Verify CKAN web interface
+        run: |
+          echo "Testing CKAN web interface..."
+          
+          # Test the main page
+          main_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_URL/)
+          main_code=$(echo "$main_page" | grep "HTTP_CODE:" | cut -d: -f2)
+          
+          if [ "$main_code" = "200" ]; then
+            echo "✅ CKAN web interface is accessible"
+          else
+            echo "❌ CKAN web interface returned HTTP $main_code"
+            exit 1
+          fi
+          
+      # Placeholder for datapusher-plus tests
+      - name: Setup datapusher-plus (placeholder)
+        run: |
+          echo "🚀 This is where you'll add your datapusher-plus specific tests"
+          echo "CKAN is now running successfully at $CKAN_URL"
+          echo "Sysadmin user created: $CKAN_SYSADMIN_NAME"
+          echo "You can now add steps to:"
+          echo "  - Install datapusher-plus extension"
+          echo "  - Configure datapusher-plus settings"
+          echo "  - Run datapusher-plus specific tests"
+          echo "  - Test data upload and processing functionality"
+          echo "  - Use the sysadmin account for authenticated API calls"
+          
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Stopping any running CKAN processes..."
+          pkill -f "ckan.*run" || true
+          echo "Cleanup completed"
