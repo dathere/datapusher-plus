@@ -1,4 +1,4 @@
-name: Setup Environment
+name: Test Setup Environment
 
 on: 
   # push:
@@ -31,10 +31,6 @@ jobs:
       CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@postgres/datastore_test
       CKAN_SOLR_URL: http://solr:8983/solr/ckan
       CKAN_REDIS_URL: redis://redis:6379/1
-      # Sysadmin account configuration
-      CKAN_SYSADMIN_NAME: admin
-      CKAN_SYSADMIN_EMAIL: admin@localhost
-      CKAN_SYSADMIN_PASSWORD: admin123
       
     steps:
       - name: Fix permissions and install essential tools
@@ -187,110 +183,6 @@ jobs:
           fi
           
           echo "Database initialization completed"
-
-      - name: Create CKAN sysadmin user
-        run: |
-          echo "Creating CKAN sysadmin user..."
-          
-          # Use environment variables for sysadmin credentials
-          SYSADMIN_NAME="${CKAN_SYSADMIN_NAME:-admin}"
-          SYSADMIN_EMAIL="${CKAN_SYSADMIN_EMAIL:-admin@localhost}"
-          SYSADMIN_PASSWORD="${CKAN_SYSADMIN_PASSWORD:-admin123}"
-          
-          echo "Creating sysadmin user: $SYSADMIN_NAME with email: $SYSADMIN_EMAIL"
-          
-          # Create the sysadmin user using expect to handle password prompt
-          # First, install expect if it's not available
-          apt-get update && apt-get install -y expect
-          
-          # Create expect script to handle user creation and password prompts
-          cat > /tmp/create_sysadmin.exp << EOF
-          #!/usr/bin/expect -f
-          set timeout 30
-          spawn ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME email=$SYSADMIN_EMAIL name=$SYSADMIN_NAME
-          expect {
-            "Create new user:*\\[Y/n\\]:*" {
-              send "Y\r"
-              expect {
-                "Password:*" {
-                  send "$SYSADMIN_PASSWORD\r"
-                  expect {
-                    "Confirm password:*" {
-                      send "$SYSADMIN_PASSWORD\r"
-                      expect eof
-                    }
-                    eof
-                  }
-                }
-                timeout {
-                  puts "Timeout waiting for password prompt after user creation confirmation"
-                  exit 1
-                }
-              }
-            }
-            "Password:*" {
-              send "$SYSADMIN_PASSWORD\r"
-              expect {
-                "Confirm password:*" {
-                  send "$SYSADMIN_PASSWORD\r"
-                  expect eof
-                }
-                eof
-              }
-            }
-            "*already exists*" {
-              puts "User already exists, promoting to sysadmin..."
-              exit 0
-            }
-            timeout {
-              puts "Timeout waiting for initial prompt"
-              exit 1
-            }
-            eof
-          }
-          EOF
-          
-          chmod +x /tmp/create_sysadmin.exp
-          
-          # Run the expect script with fallback to echo piping
-          echo "Attempting user creation with expect script..."
-          if /tmp/create_sysadmin.exp; then
-            echo "✅ Sysadmin user created successfully with expect!"
-          else
-            echo "⚠️  Expect script failed, trying alternative method with echo piping..."
-            
-            # Alternative method: use printf to pipe responses
-            printf "Y\n$SYSADMIN_PASSWORD\n$SYSADMIN_PASSWORD\n" | ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME email=$SYSADMIN_EMAIL name=$SYSADMIN_NAME
-            
-            if [ $? -eq 0 ]; then
-              echo "✅ Sysadmin user created successfully with echo piping!"
-            else
-              echo "⚠️  Echo piping also failed, trying to promote existing user..."
-              # If user already exists, try to promote them to sysadmin
-              if ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME; then
-                echo "✅ Existing user promoted to sysadmin successfully!"
-              else
-                echo "❌ Failed to create or promote sysadmin user"
-                # Don't exit with error, as this might not be critical for testing
-                echo "Continuing with workflow..."
-              fi
-            fi
-          fi
-          
-          # Verify sysadmin was created
-          echo "Verifying sysadmin user..."
-          if ckan -c /tmp/test.ini sysadmin list | grep -q "$SYSADMIN_NAME"; then
-            echo "✅ Sysadmin user verification successful!"
-            echo "Current sysadmin users:"
-            ckan -c /tmp/test.ini sysadmin list
-          else
-            echo "⚠️  Could not verify sysadmin user creation"
-          fi
-          
-          # Export sysadmin credentials for use in later steps
-          echo "CKAN_SYSADMIN_NAME=$SYSADMIN_NAME" >> $GITHUB_ENV
-          echo "CKAN_SYSADMIN_EMAIL=$SYSADMIN_EMAIL" >> $GITHUB_ENV
-          echo "CKAN_SYSADMIN_PASSWORD=$SYSADMIN_PASSWORD" >> $GITHUB_ENV
           
       - name: Start CKAN server
         run: |
@@ -384,32 +276,6 @@ jobs:
             echo "Response: $json_response"
             exit 1
           fi
-
-      - name: Test sysadmin login via API
-        run: |
-          echo "Testing sysadmin user login via API..."
-          
-          # Test user authentication by getting an API token
-          echo "Attempting to get user information for sysadmin..."
-          
-          # First, try to get user info using the API
-          user_response=$(curl -s "$CKAN_URL/api/3/action/user_show?id=$CKAN_SYSADMIN_NAME")
-          
-          if echo "$user_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-            echo "✅ Sysadmin user info retrieved successfully!"
-            echo "User details:"
-            echo "$user_response" | python3 -m json.tool | grep -E '"name"|"email"|"sysadmin"' || echo "Could not parse user details"
-            
-            # Check if user is actually a sysadmin
-            if echo "$user_response" | grep -q '"sysadmin"[[:space:]]*:[[:space:]]*true'; then
-              echo "✅ User confirmed as sysadmin!"
-            else
-              echo "⚠️  User exists but may not have sysadmin privileges"
-            fi
-          else
-            echo "⚠️  Could not retrieve sysadmin user info via API"
-            echo "Response: $user_response"
-          fi
           
       - name: Test additional CKAN endpoints
         run: |
@@ -446,19 +312,227 @@ jobs:
             echo "❌ CKAN web interface returned HTTP $main_code"
             exit 1
           fi
+
+      # NEW STEPS FOR CREATING ORGANIZATIONS, DATASETS AND RESOURCES
+      - name: Create CKAN sysadmin user
+        run: |
+          echo "Creating CKAN sysadmin user..."
+          
+          # Create sysadmin user using CKAN CLI
+          if ckan -c /tmp/test.ini user add ckan_admin \
+            email=admin@example.com \
+            password=test1234 \
+            fullname="CKAN Administrator"; then
+            echo "✅ Sysadmin user created successfully"
+          else
+            echo "⚠️ User might already exist, continuing..."
+          fi
+          
+          # Make the user a sysadmin
+          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
+            echo "✅ User granted sysadmin privileges"
+          else
+            echo "⚠️ User might already be sysadmin, continuing..."
+          fi
+          
+          echo "Sysadmin user setup completed"
+
+      - name: Get API key for sysadmin user
+        run: |
+          echo "Retrieving API key for ckan_admin user..."
+          
+          # Get user details including API key using CKAN CLI
+          api_key=$(ckan -c /tmp/test.ini user show ckan_admin | grep "apikey:" | cut -d' ' -f2)
+          
+          if [ -z "$api_key" ]; then
+            echo "❌ Failed to retrieve API key"
+            exit 1
+          fi
+          
+          echo "✅ API key retrieved: $api_key"
+          echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+          
+          # Verify API key works by testing with user_show endpoint
+          test_response=$(curl -s -H "Authorization: $api_key" $CKAN_URL/api/3/action/user_show?id=ckan_admin)
+          if echo "$test_response" | grep -q '"success": true'; then
+            echo "✅ API key is working correctly"
+          else
+            echo "❌ API key test failed"
+            echo "$test_response" | python3 -m json.tool
+            exit 1
+          fi
+
+      - name: Create organization
+        run: |
+          echo "Creating demo organization..."
+          
+          # Create organization using CKAN API
+          org_response=$(curl -X POST $CKAN_URL/api/3/action/organization_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "demo-organization",
+              "title": "Demo Organization", 
+              "description": "This is my awesome organization created via GitHub Actions"
+            }')
+          
+          echo "Organization creation response:"
+          echo "$org_response" | python3 -m json.tool
+          
+          # Check if organization was created successfully
+          if echo "$org_response" | grep -q '"success": true'; then
+            echo "✅ Organization created successfully!"
+            
+            # Extract and display organization details
+            org_name=$(echo "$org_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
+            org_title=$(echo "$org_response" | grep -o '"title": "[^"]*"' | head -1 | cut -d'"' -f4)
+            echo "Organization Name: $org_name"
+            echo "Organization Title: $org_title"
+          else
+            echo "❌ Failed to create organization"
+            if echo "$org_response" | grep -q "already exists"; then
+              echo "⚠️ Organization already exists, continuing..."
+            else
+              exit 1
+            fi
+          fi
+
+      - name: Create dataset
+        run: |
+          echo "Creating demo dataset..."
+          
+          # Create dataset using CKAN API
+          dataset_response=$(curl -X POST $CKAN_URL/api/3/action/package_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "my-first-dataset",
+              "title": "My First Dataset",
+              "description": "This is my first dataset created via GitHub Actions!",
+              "owner_org": "demo-organization",
+              "license_id": "cc-by",
+              "tags": [
+                {"name": "demo"},
+                {"name": "test"},
+                {"name": "github-actions"}
+              ]
+            }')
+          
+          echo "Dataset creation response:"
+          echo "$dataset_response" | python3 -m json.tool
+          
+          # Check if dataset was created successfully
+          if echo "$dataset_response" | grep -q '"success": true'; then
+            echo "✅ Dataset created successfully!"
+            
+            # Extract and display dataset details
+            dataset_name=$(echo "$dataset_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
+            dataset_title=$(echo "$dataset_response" | grep -o '"title": "[^"]*"' | head -1 | cut -d'"' -f4)
+            dataset_id=$(echo "$dataset_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
+            echo "Dataset Name: $dataset_name"
+            echo "Dataset Title: $dataset_title"
+            echo "Dataset ID: $dataset_id"
+          else
+            echo "❌ Failed to create dataset"
+            if echo "$dataset_response" | grep -q "already exists"; then
+              echo "⚠️ Dataset already exists, continuing..."
+            else
+              exit 1
+            fi
+          fi
+
+      - name: Add resource to dataset
+        run: |
+          echo "Adding resource to dataset..."
+          
+          # Add resource using CKAN API
+          resource_response=$(curl -X POST $CKAN_URL/api/3/action/resource_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "package_id": "my-first-dataset",
+              "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
+              "description": "This is the best resource ever created via GitHub Actions!",
+              "name": "brand-new-resource",
+              "format": "CSV"
+            }')
+          
+          echo "Resource creation response:"
+          echo "$resource_response" | python3 -m json.tool
+          
+          # Check if resource was created successfully
+          if echo "$resource_response" | grep -q '"success": true'; then
+            echo "✅ Resource created successfully!"
+            
+            # Extract and display resource details
+            resource_name=$(echo "$resource_response" | grep -o '"name": "[^"]*"' | head -1 | cut -d'"' -f4)
+            resource_id=$(echo "$resource_response" | grep -o '"id": "[^"]*"' | head -1 | cut -d'"' -f4)
+            resource_url=$(echo "$resource_response" | grep -o '"url": "[^"]*"' | head -1 | cut -d'"' -f4)
+            echo "Resource Name: $resource_name"
+            echo "Resource ID: $resource_id"
+            echo "Resource URL: $resource_url"
+          else
+            echo "❌ Failed to create resource"
+            exit 1
+          fi
+
+      - name: Verify created content
+        run: |
+          echo "Verifying all created content..."
+          
+          # List organizations to verify creation
+          echo "=== Organizations ==="
+          org_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_list)
+          echo "$org_list" | python3 -m json.tool
+          
+          # List packages to verify dataset creation
+          echo -e "\n=== Datasets ==="
+          package_list=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_list)
+          echo "$package_list" | python3 -m json.tool
+          
+          # Get detailed information about our dataset
+          echo -e "\n=== Dataset Details ==="
+          dataset_details=$(curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_show?id=my-first-dataset)
+          echo "$dataset_details" | python3 -m json.tool
+          
+          # Check if our content exists
+          if echo "$org_list" | grep -q "demo-organization"; then
+            echo "✅ Organization verified in organization list"
+          else
+            echo "❌ Organization not found in list"
+          fi
+          
+          if echo "$package_list" | grep -q "my-first-dataset"; then
+            echo "✅ Dataset verified in package list"
+          else
+            echo "❌ Dataset not found in list"
+          fi
+          
+          if echo "$dataset_details" | grep -q "brand-new-resource"; then
+            echo "✅ Resource verified in dataset details"
+          else
+            echo "❌ Resource not found in dataset"
+          fi
+          
+          echo -e "\n🎉 Content creation and verification completed!"
+          echo "You can access your dataset at: $CKAN_URL/dataset/my-first-dataset"
           
       # Placeholder for datapusher-plus tests
       - name: Setup datapusher-plus (placeholder)
         run: |
           echo "🚀 This is where you'll add your datapusher-plus specific tests"
           echo "CKAN is now running successfully at $CKAN_URL"
-          echo "Sysadmin user created: $CKAN_SYSADMIN_NAME"
+          echo "Sample data has been created:"
+          echo "  - Organization: demo-organization"
+          echo "  - Dataset: my-first-dataset"
+          echo "  - Resource: brand-new-resource (CSV file)"
+          echo ""
           echo "You can now add steps to:"
           echo "  - Install datapusher-plus extension"
-          echo "  - Configure datapusher-plus settings"
+          echo "  - Configure datapusher-plus settings"  
           echo "  - Run datapusher-plus specific tests"
           echo "  - Test data upload and processing functionality"
-          echo "  - Use the sysadmin account for authenticated API calls"
+          echo "  - Test CSV processing with the created resource"
           
       - name: Cleanup
         if: always()
