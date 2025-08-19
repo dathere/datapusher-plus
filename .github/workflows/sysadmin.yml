@@ -157,34 +157,42 @@ jobs:
 
       - name: Get API token for sysadmin user
         run: |
-          echo "Getting API token for ckan_admin user..."
+          echo "Creating API token for ckan_admin user..."
           
-          # Get user info and extract the API key properly
-          user_output=$(ckan -c /tmp/test.ini user show ckan_admin 2>/dev/null)
-          echo "User info retrieved"
-          
-          # Extract the API key (the UUID after 'apikey=')
-          api_key=$(echo "$user_output" | grep -o 'apikey=[a-f0-9-]*' | cut -d'=' -f2)
-          
-          if [ -z "$api_key" ]; then
-            echo "API key not found in user output, generating new one..."
-            api_key=$(python3 -c "import uuid; print(str(uuid.uuid4()))")
-            
-            # Update the user with new API key
-            PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -c \
-              "UPDATE public.user SET apikey='$api_key' WHERE name='ckan_admin';"
+          # Ensure the CLI supports api-token
+          if ! ckan -c /tmp/test.ini --help 2>&1 | grep -q "api-token"; then
+            echo "❌ This CKAN version does not support api-token commands (requires CKAN 2.9+)"
+            exit 1
           fi
           
-          # Clean and validate the API key
-          api_key=$(echo "$api_key" | tr -d ' \t\r\n')
+          # Create a new API token
+          echo "Attempting to create new API token via CLI..."
+          api_key=$(ckan -c /tmp/test.ini api-token create ckan_admin github-actions-token 2>/dev/null | tail -1 | tr -d '\r\n')
           
-          # Validate API key format (UUID)
-          if echo "$api_key" | grep -q '^[a-f0-9]\{8\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{4\}-[a-f0-9]\{12\}$'; then
-            echo "✅ Valid API key: $api_key"
-            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
-          else
-            echo "❌ Invalid API key format"
+          if [ -z "$api_key" ]; then
+            echo "❌ Failed to create API token"
             exit 1
+          fi
+          
+          echo "✅ API key obtained: $api_key"
+          echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+          
+          # Verify API key works with status endpoint
+          echo "Testing API token with status endpoint..."
+          test_response=$(curl -s -H "Authorization: $api_key" $CKAN_URL/api/3/action/status_show)
+          if echo "$test_response" | grep -q '"success": true'; then
+            echo "✅ API token works with status endpoint"
+          else
+            echo "⚠️ Status test failed, response: $test_response"
+          fi
+          
+          # Verify with user_show
+          echo "Testing API token with user_show endpoint..."
+          user_test_response=$(curl -s -H "Authorization: $api_key" $CKAN_URL/api/3/action/user_show?id=ckan_admin)
+          if echo "$user_test_response" | grep -q '"success": true'; then
+            echo "✅ API token is working correctly with user operations"
+          else
+            echo "⚠️ User test failed, response: $user_test_response"
           fi
 
       - name: Create organization
