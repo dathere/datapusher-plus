@@ -203,12 +203,31 @@ jobs:
           # First, install expect if it's not available
           apt-get update && apt-get install -y expect
           
-          # Create expect script to handle password prompt
+          # Create expect script to handle user creation and password prompts
           cat > /tmp/create_sysadmin.exp << EOF
           #!/usr/bin/expect -f
           set timeout 30
           spawn ckan -c /tmp/test.ini sysadmin add $SYSADMIN_NAME email=$SYSADMIN_EMAIL name=$SYSADMIN_NAME
           expect {
+            "Create new user: * \\[Y/n\\]:" {
+              send "Y\r"
+              expect {
+                "Password:" {
+                  send "$SYSADMIN_PASSWORD\r"
+                  expect {
+                    "Confirm password:" {
+                      send "$SYSADMIN_PASSWORD\r"
+                      expect eof
+                    }
+                    eof
+                  }
+                }
+                timeout {
+                  puts "Timeout waiting for password prompt after user creation confirmation"
+                  exit 1
+                }
+              }
+            }
             "Password:" {
               send "$SYSADMIN_PASSWORD\r"
               expect {
@@ -224,7 +243,7 @@ jobs:
               exit 0
             }
             timeout {
-              puts "Timeout waiting for password prompt"
+              puts "Timeout waiting for initial prompt"
               exit 1
             }
             eof
