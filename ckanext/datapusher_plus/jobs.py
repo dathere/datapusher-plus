@@ -1248,19 +1248,19 @@ def _push_to_datastore(
         if "dpp_suggestions" not in package:
 
             logger.warning(
-                'Warning: "dpp_suggestions" field required to process Suggestion Formulae is not found in this package . Adding "dpp_suggestions" to package'
+                'Warning: "dpp_suggestions" field required to process Suggestion Formulae is not found in this package. Adding "dpp_suggestions" to package'
             )
 
             try:
                 package["dpp_suggestions"] = {}
                 dsu.patch_package(package)
-                logger.error(
+                logger.warning(
                     '"dpp_suggestions" field added to package'
                 )
                 
             except Exception as e:
                 logger.error(
-                    'Error adding "dpp_suggestions" field {}'.format( e )
+                    f'Error adding "dpp_suggestions" field {e}'
                 )
                 return
     else:
