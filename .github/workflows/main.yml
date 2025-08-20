@@ -311,14 +311,34 @@ jobs:
           
           echo "User creation completed"
 
-      - name: Get API token for sysadmin
+      - name: Verify sysadmin status and get API token
         run: |
-          echo "Retrieving API token for ckan_admin..."
+          echo "Verifying sysadmin status and retrieving API token for ckan_admin..."
           
-          # Get user details including API token
+          # Wait a moment for sysadmin changes to take effect
+          sleep 2
+          
+          # Verify user details including sysadmin status
           user_data=$(ckanapi action user_show id=ckan_admin -c /tmp/test.ini)
-          echo "User data retrieved:"
+          echo "User data after sysadmin grant:"
           echo "$user_data" | python3 -m json.tool
+          
+          # Check if user is now sysadmin
+          is_sysadmin=$(echo "$user_data" | python3 -c "
+          import json, sys
+          try:
+              data = json.load(sys.stdin)
+              result = data.get('result', {})
+              print(str(result.get('sysadmin', False)).lower())
+          except:
+              print('false')
+          ")
+          
+          if [ "$is_sysadmin" = "true" ]; then
+            echo "✅ User is confirmed as sysadmin"
+          else
+            echo "⚠️ User sysadmin status not yet reflected, but should be active"
+          fi
           
           # Extract API key from user data
           api_key=$(echo "$user_data" | python3 -c "
@@ -335,11 +355,39 @@ jobs:
               print('')
           ")
           
+          # If no API key found in user_show, try api_token_list
+          if [ -z "$api_key" ] || [ "$api_key" = "None" ] || [ "$api_key" = "null" ]; then
+            echo "No API key in user_show, trying api_token_list..."
+            
+            token_list=$(ckanapi action api_token_list user_id=ckan_admin -c /tmp/test.ini)
+            echo "API token list response:"
+            echo "$token_list" | python3 -m json.tool
+            
+            # Extract the first token from the list
+            api_key=$(echo "$token_list" | python3 -c "
+            import json, sys
+            try:
+                data = json.load(sys.stdin)
+                result = data.get('result', [])
+                if result and len(result) > 0:
+                    token = result[0].get('token')
+                    if token:
+                        print(token)
+                    else:
+                        print('')
+                else:
+                    print('')
+            except:
+                print('')
+            ")
+          fi
+          
           if [ -n "$api_key" ] && [ "$api_key" != "None" ] && [ "$api_key" != "null" ]; then
-            echo "API key obtained: $api_key"
+            echo "✅ API key obtained: $api_key"
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
           else
-            echo "Failed to retrieve API token, using local config instead"
+            echo "⚠️ Failed to retrieve API token, using local config instead"
+            echo "Note: Local ckanapi commands will still work with sysadmin privileges"
             echo "CKAN_API_KEY=" >> $GITHUB_ENV
           fi
 
@@ -500,11 +548,36 @@ jobs:
           users = data.get('result', [])
           print(f'Total users: {len(users)}')
           for user in users:
-              print(f'- {user.get(\"fullname\", \"Unknown\")} ({user.get(\"name\", \"unnamed\")})')
-              print(f'  Email: {user.get(\"email\", \"No email\")}')
-              if user.get('sysadmin'):
-                  print('  Role: Sysadmin')
+              name = user.get('name', 'unnamed')
+              fullname = user.get('fullname', 'Unknown')
+              email = user.get('email', 'No email')
+              is_sysadmin = user.get('sysadmin', False)
+              print(f'- {fullname} ({name})')
+              print(f'  Email: {email}')
+              if is_sysadmin:
+                  print('  Role: Sysadmin ✓')
+              else:
+                  print('  Role: Regular User')
           "
+          
+          # Double-check sysadmin status specifically
+          echo -e "\n=== Sysadmin Verification ==="
+          admin_data=$(ckanapi action user_show id=ckan_admin -c /tmp/test.ini)
+          admin_status=$(echo "$admin_data" | python3 -c "
+          import json, sys
+          try:
+              data = json.load(sys.stdin)
+              result = data.get('result', {})
+              sysadmin = result.get('sysadmin', False)
+              name = result.get('name', 'unknown')
+              print(f'User {name} sysadmin status: {sysadmin}')
+              if sysadmin:
+                  print('✓ Sysadmin privileges confirmed')
+              else:
+                  print('⚠ Sysadmin status not reflected in API (but CLI command succeeded)')
+          except Exception as e:
+              print(f'Error checking sysadmin status: {e}')
+          ")
           
           # Verify datasets
           echo -e "\n=== Datasets ==="
