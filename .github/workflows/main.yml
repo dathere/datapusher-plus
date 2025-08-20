@@ -340,31 +340,31 @@ jobs:
             echo "⚠️ User sysadmin status not yet reflected, but should be active"
           fi
           
-          # Extract API key from user data
-          api_key=$(echo "$user_data" | python3 -c "
+          # Extract API token (not API key) from user data
+          api_token=$(echo "$user_data" | python3 -c "
           import json, sys
           try:
               data = json.load(sys.stdin)
               result = data.get('result', {})
-              api_key = result.get('apikey') or result.get('api_token')
-              if api_key and api_key != 'None':
-                  print(api_key)
+              token = result.get('token')
+              if token and token != 'None':
+                  print(token)
               else:
                   print('')
           except:
               print('')
           ")
           
-          # If no API key found in user_show, try api_token_list
-          if [ -z "$api_key" ] || [ "$api_key" = "None" ] || [ "$api_key" = "null" ]; then
-            echo "No API key in user_show, trying api_token_list..."
+          # If no token found in user_show, try api_token_list
+          if [ -z "$api_token" ] || [ "$api_token" = "None" ] || [ "$api_token" = "null" ]; then
+            echo "No API token in user_show, trying api_token_list..."
             
             token_list=$(ckanapi action api_token_list user_id=ckan_admin -c /tmp/test.ini)
             echo "API token list response:"
             echo "$token_list" | python3 -m json.tool
             
             # Extract the first token from the list
-            api_key=$(echo "$token_list" | python3 -c "
+            api_token=$(echo "$token_list" | python3 -c "
             import json, sys
             try:
                 data = json.load(sys.stdin)
@@ -382,13 +382,13 @@ jobs:
             ")
           fi
           
-          if [ -n "$api_key" ] && [ "$api_key" != "None" ] && [ "$api_key" != "null" ]; then
-            echo "✅ API key obtained: $api_key"
-            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+          if [ -n "$api_token" ] && [ "$api_token" != "None" ] && [ "$api_token" != "null" ]; then
+            echo "API token obtained: $api_token"
+            echo "CKAN_API_TOKEN=$api_token" >> $GITHUB_ENV
           else
-            echo "⚠️ Failed to retrieve API token, using local config instead"
+            echo "Failed to retrieve API token, using local config instead"
             echo "Note: Local ckanapi commands will still work with sysadmin privileges"
-            echo "CKAN_API_KEY=" >> $GITHUB_ENV
+            echo "CKAN_API_TOKEN=" >> $GITHUB_ENV
           fi
 
       - name: Create organization with ckanapi
