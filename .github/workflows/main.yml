@@ -247,30 +247,29 @@ jobs:
             exit 1
           fi
 
-      - name: Create sysadmin user with CKAN CLI
+      - name: Create sysadmin user with ckanapi
         run: |
-          echo "Creating sysadmin user with CKAN CLI..."
+          echo "Creating sysadmin user with ckanapi..."
           
-          # Create sysadmin user directly using CKAN CLI
-          # Note: We need to handle password input non-interactively
-          echo "test1234" | ckan -c /tmp/test.ini sysadmin add ckan_admin \
-            email=admin@example.com \
+          # Create sysadmin user using ckanapi (local has sysadmin privileges by default)
+          if ckanapi action user_create \
             name=ckan_admin \
-            fullname="CKAN Administrator"
-          
-          if [ $? -eq 0 ]; then
-            echo "Sysadmin user created successfully with CKAN CLI"
+            email=admin@example.com \
+            password=test1234 \
+            fullname="CKAN Administrator" \
+            about="System administrator created via ckanapi and GitHub Actions" \
+            with_apitoken:true \
+            -c /tmp/test.ini; then
+            echo "Sysadmin user created successfully"
           else
-            echo "Failed to create sysadmin user, trying alternative approach..."
-            
-            # Fallback: Create user first, then grant sysadmin
-            if ckan -c /tmp/test.ini user add ckan_admin \
-              email=admin@example.com \
-              password=test1234 \
-              fullname="CKAN Administrator"; then
-              echo "User created, now granting sysadmin privileges..."
-              ckan -c /tmp/test.ini sysadmin add ckan_admin
-            fi
+            echo "User might already exist, continuing..."
+          fi
+          
+          # Make the user a sysadmin using CKAN CLI (ckanapi doesn't have sysadmin action)
+          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
+            echo "User granted sysadmin privileges"
+          else
+            echo "User might already be sysadmin, continuing..."
           fi
           
           echo "Sysadmin user setup completed"
@@ -312,16 +311,19 @@ jobs:
           
           echo "User creation completed"
 
-      - name: Get API token for sysadmin user
+      - name: Verify sysadmin status and get API token
         run: |
-          echo "Retrieving API token for ckan_admin..."
+          echo "Verifying sysadmin status and retrieving API token for ckan_admin..."
           
-          # Get user details
+          # Wait a moment for sysadmin changes to take effect
+          sleep 2
+          
+          # Verify user details including sysadmin status
           user_data=$(ckanapi action user_show id=ckan_admin -c /tmp/test.ini)
-          echo "User data retrieved:"
+          echo "User data after sysadmin grant:"
           echo "$user_data" | python3 -m json.tool
           
-          # Check if user is sysadmin
+          # Check if user is now sysadmin
           is_sysadmin=$(echo "$user_data" | python3 -c "
           import json, sys
           try:
@@ -333,12 +335,12 @@ jobs:
           ")
           
           if [ "$is_sysadmin" = "true" ]; then
-            echo "User is confirmed as sysadmin"
+            echo "✅ User is confirmed as sysadmin"
           else
-            echo "Warning: User sysadmin status not reflected in API"
+            echo "⚠️ User sysadmin status not yet reflected, but should be active"
           fi
           
-          # Try to get API token from user data first
+          # Extract API token (not API key) from user data
           api_token=$(echo "$user_data" | python3 -c "
           import json, sys
           try:
@@ -353,7 +355,7 @@ jobs:
               print('')
           ")
           
-          # If no token in user_show, try api_token_list
+          # If no token found in user_show, try api_token_list
           if [ -z "$api_token" ] || [ "$api_token" = "None" ] || [ "$api_token" = "null" ]; then
             echo "No API token in user_show, trying api_token_list..."
             
@@ -361,6 +363,7 @@ jobs:
             echo "API token list response:"
             echo "$token_list" | python3 -m json.tool
             
+            # Extract the first token from the list
             api_token=$(echo "$token_list" | python3 -c "
             import json, sys
             try:
@@ -372,34 +375,6 @@ jobs:
                         print(token)
                     else:
                         print('')
-                else:
-                    print('')
-            except:
-                print('')
-            ")
-          fi
-          
-          # If still no token, create one using ckanapi
-          if [ -z "$api_token" ] || [ "$api_token" = "None" ] || [ "$api_token" = "null" ]; then
-            echo "Creating new API token..."
-            
-            # Create a new API token
-            token_response=$(ckanapi action api_token_create \
-              user=ckan_admin \
-              name="github-actions-token" \
-              -c /tmp/test.ini)
-            
-            echo "Token creation response:"
-            echo "$token_response" | python3 -m json.tool
-            
-            api_token=$(echo "$token_response" | python3 -c "
-            import json, sys
-            try:
-                data = json.load(sys.stdin)
-                result = data.get('result', {})
-                token = result.get('token')
-                if token:
-                    print(token)
                 else:
                     print('')
             except:
