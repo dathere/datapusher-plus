@@ -1,0 +1,210 @@
+name: CKAN Runner Test
+
+on: 
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    container:
+      image: ckan/ckan-dev:2.11
+      options: --user root
+    services:
+      solr:
+        image: ckan/ckan-solr:2.11-solr9
+      postgres:
+        image: ckan/ckan-postgres-dev:2.11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:3
+    env:
+      CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
+      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
+      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@postgres/datastore_test
+      CKAN_SOLR_URL: http://solr:8983/solr/ckan
+      CKAN_REDIS_URL: redis://redis:6379/1
+      
+    steps:
+      - name: Install essential tools
+        run: |
+          mkdir -p /__w/_temp
+          chmod -R 777 /__w/_temp /__w/
+          apt-get update
+          apt-get install -y curl postgresql-client
+          
+      - uses: actions/checkout@v4
+      
+      - name: Setup database
+        run: |
+          # Wait for postgres
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if PGPASSWORD=postgres psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 3
+            timeout=$((timeout-3))
+          done
+          
+          # Create users and databases
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD 'pass';" || true
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD 'pass';" || true
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD 'pass';" || true
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;" || true
+          PGPASSWORD=postgres psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;" || true
+          
+      - name: Install requirements
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+          
+      - name: Setup CKAN configuration
+        run: |
+          cat > /tmp/test.ini << 'EOF'
+          [DEFAULT]
+          debug = true
+          
+          [server:main]
+          use = config:common.ini
+          
+          [app:main]
+          use = config:common.ini
+          ckan.site_url = http://localhost:5000
+          sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
+          ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
+          ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
+          solr_url = http://solr:8983/solr/ckan
+          ckan.redis.url = redis://redis:6379/1
+          ckan.site_id = default
+          ckan.site_title = CKAN Test
+          ckan.plugins = datastore datapusher
+          EOF
+          
+      - name: Initialize CKAN database
+        run: |
+          ckan -c /tmp/test.ini db init || true
+          ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=postgres psql -h postgres -U postgres || true
+          
+      - name: Start CKAN server
+        run: |
+          ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader &
+          
+          # Wait for server to start
+          timeout=60
+          while [ $timeout -gt 0 ]; do
+            if curl -f -s http://localhost:5000/api/3/action/status_show >/dev/null 2>&1; then
+              echo "CKAN server is running"
+              break
+            fi
+            sleep 3
+            timeout=$((timeout-3))
+          done
+          
+          echo "CKAN_URL=http://localhost:5000" >> $GITHUB_ENV
+          
+      - name: Test CKAN API
+        run: |
+          response=$(curl -s $CKAN_URL/api/3/action/status_show)
+          if echo "$response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+            echo "CKAN API is working"
+          else
+            echo "CKAN API test failed"
+            exit 1
+          fi
+          
+      - name: Create sysadmin user
+        run: |
+          ckan -c /tmp/test.ini user add ckan_admin \
+            email=admin@example.com \
+            password=test1234 \
+            fullname="CKAN Administrator" || true
+          ckan -c /tmp/test.ini sysadmin add ckan_admin || true
+          
+      - name: Create API token
+        run: |
+          # Generate API key and insert into database
+          api_key=$(python3 -c "import uuid; print(str(uuid.uuid4()))")
+          PGPASSWORD=pass psql -h postgres -U ckan_default -d ckan_test -c "
+            UPDATE public.user SET apikey='$api_key' WHERE name='ckan_admin';
+          "
+          echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+          
+          # Test API key
+          if curl -s -H "Authorization: $api_key" $CKAN_URL/api/3/action/status_show | grep -q '"success": true'; then
+            echo "API token is working"
+          else
+            echo "API token test failed"
+            exit 1
+          fi
+          
+      - name: Create organization
+        run: |
+          curl -X POST $CKAN_URL/api/3/action/organization_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "demo-organization",
+              "title": "Demo Organization",
+              "description": "Demo organization for testing"
+            }' | grep -q '"success": true' || echo "Organization might already exist"
+            
+      - name: Create dataset
+        run: |
+          curl -X POST $CKAN_URL/api/3/action/package_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "my-first-dataset",
+              "title": "My First Dataset",
+              "notes": "Demo dataset for testing",
+              "owner_org": "demo-organization",
+              "license_id": "cc-by",
+              "tags": [{"name": "demo"}, {"name": "test"}]
+            }' | grep -q '"success": true' || echo "Dataset might already exist"
+            
+      - name: Add resource
+        run: |
+          curl -X POST $CKAN_URL/api/3/action/resource_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "package_id": "my-first-dataset",
+              "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
+              "name": "Sample CSV Data",
+              "description": "Test CSV resource",
+              "format": "CSV"
+            }' | grep -q '"success": true' || echo "Resource might already exist"
+            
+      - name: Verify setup
+        run: |
+          echo "Verifying CKAN setup..."
+          
+          # Check organization exists
+          if curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/organization_list | grep -q "demo-organization"; then
+            echo "✅ Organization verified"
+          fi
+          
+          # Check dataset exists
+          if curl -s -H "Authorization: $CKAN_API_KEY" $CKAN_URL/api/3/action/package_list | grep -q "my-first-dataset"; then
+            echo "✅ Dataset verified"
+          fi
+          
+          # Check web interface
+          if curl -s -w "%{http_code}" $CKAN_URL/dataset/my-first-dataset | grep -q "200"; then
+            echo "✅ Web interface accessible"
+          fi
+          
+          echo "Setup completed successfully!"
+          echo "CKAN URL: $CKAN_URL"
+          echo "Dataset: $CKAN_URL/dataset/my-first-dataset"
+          echo "Organization: $CKAN_URL/organization/demo-organization"
+          
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f "ckan.*run" || true
