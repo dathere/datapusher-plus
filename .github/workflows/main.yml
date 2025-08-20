@@ -274,43 +274,6 @@ jobs:
           
           echo "Sysadmin user setup completed"
 
-      - name: Create additional test users with ckanapi
-        run: |
-          echo "Creating additional test users with ckanapi..."
-          
-          # Create regular user
-          if ckanapi action user_create \
-            name=test_user \
-            email=test@example.com \
-            password=test1234 \
-            fullname="Test User" \
-            about="Regular test user for testing purposes" \
-            -c /tmp/test.ini; then
-            echo "Regular test user created successfully"
-          else
-            echo "Regular user might already exist, continuing..."
-          fi
-          
-          # Create editor user
-          if ckanapi action user_create \
-            name=editor_user \
-            email=editor@example.com \
-            password=test1234 \
-            fullname="Editor User" \
-            about="Editor user with dataset creation privileges" \
-            with_apitoken:true \
-            -c /tmp/test.ini; then
-            echo "Editor user created successfully"
-          else
-            echo "Editor user might already exist, continuing..."
-          fi
-          
-          # Verify users were created
-          echo "Verifying created users..."
-          ckanapi action user_list -c /tmp/test.ini | python3 -m json.tool
-          
-          echo "User creation completed"
-
       - name: Verify sysadmin status and get API token
         run: |
           echo "Verifying sysadmin status and retrieving API token for ckan_admin..."
