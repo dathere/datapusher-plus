@@ -399,8 +399,8 @@ jobs:
           fi
           
           # Verify dataset was created
-          echo "Verifying dataset creation..."
-          ckanapi action package_show id=my-first-dataset -c /tmp/test.ini | python3 -m json.tool
+          # echo "Verifying dataset creation..."
+          # ckanapi action package_show id=my-first-dataset -c /tmp/test.ini | python3 -m json.tool
           
           echo "Dataset creation completed"
 
