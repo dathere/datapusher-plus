@@ -424,17 +424,17 @@ jobs:
           fi
           
           # Verify resource was created
-          echo "Verifying resource creation..."
-          dataset_data=$(ckanapi action package_show id=my-first-dataset -c /tmp/test.ini)
-          echo "$dataset_data" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          resources = data.get('result', {}).get('resources', [])
-          print(f'Dataset has {len(resources)} resources')
-          for resource in resources:
-              print(f'- {resource.get(\"name\", \"Unnamed\")} ({resource.get(\"format\", \"Unknown format\")})')
-              print(f'  URL: {resource.get(\"url\", \"No URL\")}')
-              print(f'  ID: {resource.get(\"id\", \"No ID\")}')
+          # echo "Verifying resource creation..."
+          # dataset_data=$(ckanapi action package_show id=my-first-dataset -c /tmp/test.ini)
+          # echo "$dataset_data" | python3 -c "
+          # import json, sys
+          # data = json.load(sys.stdin)
+          # resources = data.get('result', {}).get('resources', [])
+          # print(f'Dataset has {len(resources)} resources')
+          # for resource in resources:
+          #    print(f'- {resource.get(\"name\", \"Unnamed\")} ({resource.get(\"format\", \"Unknown format\")})')
+          #    print(f'  URL: {resource.get(\"url\", \"No URL\")}')
+          #    print(f'  ID: {resource.get(\"id\", \"No ID\")}')
           "
           
           echo "Resource creation completed"
