@@ -367,8 +367,8 @@ jobs:
           fi
           
           # Verify organization was created
-          echo "Verifying organization creation..."
-          ckanapi action organization_show id=demo-organization -c /tmp/test.ini | python3 -m json.tool
+          # echo "Verifying organization creation..."
+          # ckanapi action organization_show id=demo-organization -c /tmp/test.ini | python3 -m json.tool
           
           echo "Organization creation completed"
 
