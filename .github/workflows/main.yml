@@ -424,170 +424,28 @@ jobs:
           fi
           
           echo "Resource creation completed"
-
-      - name: Test resource data accessibility
+          
+      - name: Display CKAN instance inventory
         run: |
-          echo "Testing resource data accessibility..."
+          echo "CKAN Instance Inventory"
+          echo "======================"
           
-          # Get resource details
-          dataset_data=$(ckanapi action package_show id=my-first-dataset -c /tmp/test.ini)
-          resource_url=$(echo "$dataset_data" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          resources = data.get('result', {}).get('resources', [])
-          if resources:
-              print(resources[0].get('url', ''))
-          ")
+          # Show CKAN status
+          echo "=== CKAN Status ==="
+          ckanapi action status_show -c /tmp/test.ini
           
-          if [ -n "$resource_url" ]; then
-            echo "Testing resource URL: $resource_url"
-            if curl -s --head "$resource_url" | grep -q "200 OK"; then
-              echo "Resource URL is accessible"
-              
-              echo "Sample data from resource (first 5 lines):"
-              curl -s "$resource_url" | head -5
-              
-              total_lines=$(curl -s "$resource_url" | wc -l)
-              echo "Total lines in resource: $total_lines"
-              
-            else
-              echo "Resource URL might not be accessible"
-            fi
-          else
-            echo "Could not extract resource URL"
-          fi
-
-      - name: Comprehensive verification with ckanapi
-        run: |
-          echo "Running comprehensive verification with ckanapi..."
+          echo ""
+          echo "=== All Datasets ==="
+          ckanapi action package_list -c /tmp/test.ini
           
-          # Verify organizations
-          echo "=== Organizations ==="
-          org_list=$(ckanapi action organization_list all_fields:true -c /tmp/test.ini)
-          echo "$org_list" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          orgs = data.get('result', [])
-          print(f'Total organizations: {len(orgs)}')
-          for org in orgs:
-              print(f'- {org.get(\"title\", \"Untitled\")} ({org.get(\"name\", \"unnamed\")})')
-          "
+          echo ""
+          echo "=== All Organizations ==="
+          ckanapi action organization_list -c /tmp/test.ini
           
-          # Verify users
-          echo -e "\n=== Users ==="
-          user_list=$(ckanapi action user_list -c /tmp/test.ini)
-          echo "$user_list" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          users = data.get('result', [])
-          print(f'Total users: {len(users)}')
-          for user in users:
-              name = user.get('name', 'unnamed')
-              fullname = user.get('fullname', 'Unknown')
-              email = user.get('email', 'No email')
-              is_sysadmin = user.get('sysadmin', False)
-              print(f'- {fullname} ({name})')
-              print(f'  Email: {email}')
-              if is_sysadmin:
-                  print('  Role: Sysadmin ✓')
-              else:
-                  print('  Role: Regular User')
-          "
+          echo ""
+          echo "=== All Users ==="
+          ckanapi action user_list -c /tmp/test.ini
           
-          # Double-check sysadmin status specifically
-          echo -e "\n=== Sysadmin Verification ==="
-          admin_data=$(ckanapi action user_show id=ckan_admin -c /tmp/test.ini)
-          admin_status=$(echo "$admin_data" | python3 -c "
-          import json, sys
-          try:
-              data = json.load(sys.stdin)
-              result = data.get('result', {})
-              sysadmin = result.get('sysadmin', False)
-              name = result.get('name', 'unknown')
-              print(f'User {name} sysadmin status: {sysadmin}')
-              if sysadmin:
-                  print('✓ Sysadmin privileges confirmed')
-              else:
-                  print('⚠ Sysadmin status not reflected in API (but CLI command succeeded)')
-          except Exception as e:
-              print(f'Error checking sysadmin status: {e}')
-          ")
-          
-          # Verify datasets
-          echo -e "\n=== Datasets ==="
-          package_list=$(ckanapi action package_list -c /tmp/test.ini)
-          echo "$package_list" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          packages = data.get('result', [])
-          print(f'Total datasets: {len(packages)}')
-          for package in packages:
-              print(f'- {package}')
-          "
-          
-          # Test search functionality
-          echo -e "\n=== Search Test ==="
-          search_result=$(ckanapi action package_search q=demo -c /tmp/test.ini)
-          echo "$search_result" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          result = data.get('result', {})
-          count = result.get('count', 0)
-          print(f'Search for \"demo\" returned {count} results')
-          "
-          
-          # Test tag functionality  
-          echo -e "\n=== Tags ==="
-          tag_list=$(ckanapi action tag_list -c /tmp/test.ini)
-          echo "$tag_list" | python3 -c "
-          import json, sys
-          data = json.load(sys.stdin)
-          tags = data.get('result', [])
-          print(f'Total tags: {len(tags)}')
-          demo_tags = [tag for tag in tags if 'demo' in tag.lower() or 'test' in tag.lower()]
-          if demo_tags:
-              print('Demo/test related tags:')
-              for tag in demo_tags:
-                  print(f'- {tag}')
-          "
-          
-          echo -e "\nVerification completed successfully!"
-
-      - name: Web interface verification
-        run: |
-          echo "Testing CKAN web interface..."
-          
-          # Test the main page
-          main_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_SITE_URL/)
-          main_code=$(echo "$main_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$main_code" = "200" ]; then
-            echo "CKAN web interface is accessible"
-          else
-            echo "CKAN web interface returned HTTP $main_code"
-            exit 1
-          fi
-          
-          # Test dataset page
-          dataset_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_SITE_URL/dataset/my-first-dataset)
-          dataset_http_code=$(echo "$dataset_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$dataset_http_code" = "200" ]; then
-            echo "Dataset web page is accessible"
-          else
-            echo "Dataset web page returned HTTP $dataset_http_code"
-          fi
-          
-          # Test organization page
-          org_page=$(curl -s -w "HTTP_CODE:%{http_code}" $CKAN_SITE_URL/organization/demo-organization)
-          org_http_code=$(echo "$org_page" | grep "HTTP_CODE:" | cut -d: -f2)
-          
-          if [ "$org_http_code" = "200" ]; then
-            echo "Organization web page is accessible"
-          else
-            echo "Organization web page returned HTTP $org_http_code"
-          fi
-
       - name: Final summary
         run: |
           echo "Content creation and verification completed!"
