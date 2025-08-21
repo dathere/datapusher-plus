@@ -274,66 +274,30 @@ jobs:
           
           echo "Sysadmin user setup completed"
 
-      - name: Create additional test users with ckanapi
+      - name: Promote ckan_admin to sysadmin
         run: |
-          echo "Creating additional test users with ckanapi..."
+          echo "Promoting ckan_admin to sysadmin..."
           
-          # Create regular user
-          if ckanapi action user_create \
-            name=test_user \
-            email=test@example.com \
-            password=test1234 \
-            fullname="Test User" \
-            about="Regular test user for testing purposes" \
-            -c /tmp/test.ini; then
-            echo "Regular test user created successfully"
+          # Promote user to sysadmin using CKAN CLI with correct config path
+          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
+            echo "User ckan_admin promoted to sysadmin successfully"
           else
-            echo "Regular user might already exist, continuing..."
+            echo "User might already be sysadmin or promotion failed"
           fi
           
-          # Create editor user
-          if ckanapi action user_create \
-            name=editor_user \
-            email=editor@example.com \
-            password=test1234 \
-            fullname="Editor User" \
-            about="Editor user with dataset creation privileges" \
-            with_apitoken:true \
-            -c /tmp/test.ini; then
-            echo "Editor user created successfully"
-          else
-            echo "Editor user might already exist, continuing..."
-          fi
-          
-          # Verify users were created
-          echo "Verifying created users..."
-          ckanapi action user_list -c /tmp/test.ini | python3 -m json.tool
-          
-          echo "User creation completed"
-
-      - name: Verify sysadmin status and get API token
-        run: |
-          echo "Verifying sysadmin status and retrieving API token for ckan_admin..."
-          
-          # Wait a moment for sysadmin changes to take effect
+          # Wait a moment for changes to take effect
           sleep 2
           
-          # Verify user details including sysadmin status
-          echo "Getting user data..."
+          # Verify sysadmin status and get API key
+          echo "Retrieving user details to verify sysadmin status and API key..."
           user_data=$(ckanapi action user_show id=ckan_admin -c /tmp/test.ini)
           
-          # Debug: Check if the output is valid JSON before parsing
-          echo "Raw user data output:"
-          echo "$user_data"
-          echo "--- End of raw output ---"
-          
-          # Try to parse and pretty-print only if it's valid JSON
-          echo "Attempting to parse JSON..."
+          # Check if output is valid JSON
           if echo "$user_data" | python3 -c "import json, sys; json.load(sys.stdin)" 2>/dev/null; then
-            echo "User data after sysadmin grant (formatted):"
+            echo "User details (formatted):"
             echo "$user_data" | python3 -m json.tool
             
-            # Check if user is now sysadmin
+            # Extract sysadmin status
             is_sysadmin=$(echo "$user_data" | python3 -c "
             import json, sys
             try:
@@ -344,77 +308,36 @@ jobs:
                 print('false')
             ")
             
-            if [ "$is_sysadmin" = "true" ]; then
-              echo "User is confirmed as sysadmin"
-            else
-              echo "User sysadmin status not yet reflected, but should be active"
-            fi
-            
-            # Extract API token (not API key) from user data
-            api_token=$(echo "$user_data" | python3 -c "
+            # Extract API key (not token)
+            api_key=$(echo "$user_data" | python3 -c "
             import json, sys
             try:
                 data = json.load(sys.stdin)
                 result = data.get('result', {})
-                token = result.get('token')
-                if token and token != 'None':
-                    print(token)
+                apikey = result.get('apikey')
+                if apikey and apikey != 'None':
+                    print(apikey)
                 else:
                     print('')
             except:
                 print('')
             ")
-          else
-            echo "Invalid JSON output from user_show, skipping JSON parsing"
-            echo "This might indicate an error in the ckanapi command"
-            api_token=""
-            is_sysadmin="false"
-          fi
-          
-          # If no token found in user_show, try api_token_list
-          if [ -z "$api_token" ] || [ "$api_token" = "None" ] || [ "$api_token" = "null" ]; then
-            echo "No API token in user_show, trying api_token_list..."
             
-            token_list_raw=$(ckanapi action api_token_list user_id=ckan_admin -c /tmp/test.ini)
-            echo "Raw token list output:"
-            echo "$token_list_raw"
-            
-            # Check if token list output is valid JSON
-            if echo "$token_list_raw" | python3 -c "import json, sys; json.load(sys.stdin)" 2>/dev/null; then
-              echo "API token list response (formatted):"
-              echo "$token_list_raw" | python3 -m json.tool
-              
-              # Extract the first token from the list
-              api_token=$(echo "$token_list_raw" | python3 -c "
-              import json, sys
-              try:
-                  data = json.load(sys.stdin)
-                  result = data.get('result', [])
-                  if result and len(result) > 0:
-                      token = result[0].get('token')
-                      if token:
-                          print(token)
-                      else:
-                          print('')
-                  else:
-                      print('')
-              except:
-                  print('')
-              ")
+            echo "Sysadmin status: $is_sysadmin"
+            if [ -n "$api_key" ] && [ "$api_key" != "None" ] && [ "$api_key" != "null" ]; then
+              echo "API Key: $api_key"
+              echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
             else
-              echo "Invalid JSON output from api_token_list"
-              api_token=""
+              echo "No API key found in user data"
             fi
+            
+          else
+            echo "Invalid JSON output from user_show command"
+            echo "Raw output was:"
+            echo "$user_data"
           fi
           
-          if [ -n "$api_token" ] && [ "$api_token" != "None" ] && [ "$api_token" != "null" ]; then
-            echo "API token obtained: $api_token"
-            echo "CKAN_API_TOKEN=$api_token" >> $GITHUB_ENV
-          else
-            echo "Failed to retrieve API token, using local config instead"
-            echo "Note: Local ckanapi commands will still work with sysadmin privileges"
-            echo "CKAN_API_TOKEN=" >> $GITHUB_ENV
-          fi
+          echo "Sysadmin promotion process completed"
 
       - name: Create organization with ckanapi
         run: |
