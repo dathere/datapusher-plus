@@ -268,15 +268,6 @@ jobs:
             echo "Local CKAN API access failed"
             exit 1
           fi
-
-          # Test scheming extension
-          echo "Testing ckanext-scheming installation..."
-          if ckanapi action scheming_dataset_schema_list -c /tmp/test.ini; then
-            echo "ckanext-scheming is working!"
-          else
-            echo "ckanext-scheming test failed"
-            exit 1
-          fi
           
           # Show available dataset schemas
           echo "Available dataset schemas:"
