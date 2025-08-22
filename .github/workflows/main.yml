@@ -110,15 +110,8 @@ jobs:
           
       - name: Setup CKAN configuration
         run: |
-          if [ -f /srv/app/src/ckan/test-core.ini ]; then
-            cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
-            echo "Copied existing test-core.ini"
-          elif [ -f /srv/app/src/ckan/test.ini ]; then
-            cp /srv/app/src/ckan/test.ini /tmp/test.ini
-            echo "Copied existing test.ini"
-          else
-            echo "Creating basic CKAN configuration..."
-            cat > /tmp/test.ini << 'EOF'
+          echo "Creating CKAN configuration with scheming support..."
+          cat > /tmp/test.ini << 'EOF'
           [DEFAULT]
           debug = true
           
@@ -135,43 +128,32 @@ jobs:
           ckan.redis.url = redis://redis:6379/1
           ckan.site_id = default
           ckan.site_title = CKAN Test
-          ckan.plugins = datastore datapusher scheming_datasets scheming_groups scheming_organizations
+          ckan.plugins = datastore scheming_datasets scheming_groups scheming_organizations
+          scheming.dataset_schemas = ckanext.scheming:ckan_dataset.yaml
+          scheming.presets = ckanext.scheming:presets.json
+          scheming.dataset_fallback = false
           EOF
-          fi
           
-          sed -i 's|postgresql://.*ckan_test|postgresql://ckan_default:pass@postgres/ckan_test|g' /tmp/test.ini
-          sed -i 's|ckan.datastore.write_url.*|ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test|g' /tmp/test.ini
-          sed -i 's|ckan.datastore.read_url.*|ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test|g' /tmp/test.ini
-          
-          if ! grep -q "solr_url" /tmp/test.ini; then
-            echo "solr_url = http://solr:8983/solr/ckan" >> /tmp/test.ini
-          fi
-          if ! grep -q "ckan.redis.url" /tmp/test.ini; then
-            echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
-          fi
-          
-          # Configure ckanext-scheming plugins (update existing plugins line or add new one)
-          if grep -q "ckan.plugins" /tmp/test.ini; then
-            sed -i 's/ckan.plugins = datastore datapusher/ckan.plugins = datastore datapusher scheming_datasets scheming_groups scheming_organizations/' /tmp/test.ini
-            sed -i 's/ckan.plugins = datastore/ckan.plugins = datastore scheming_datasets scheming_groups scheming_organizations/' /tmp/test.ini
-          else
-            echo "ckan.plugins = datastore scheming_datasets scheming_groups scheming_organizations" >> /tmp/test.ini
-          fi
-          
-          # Add scheming configuration
-          if ! grep -q "scheming.dataset_schemas" /tmp/test.ini; then
-            echo "scheming.dataset_schemas = ckanext.scheming:ckan_dataset.yaml" >> /tmp/test.ini
-          fi
-          if ! grep -q "scheming.presets" /tmp/test.ini; then
-            echo "scheming.presets = ckanext.scheming:presets.json" >> /tmp/test.ini
-          fi
-          if ! grep -q "scheming.dataset_fallback" /tmp/test.ini; then
-            echo "scheming.dataset_fallback = false" >> /tmp/test.ini
-          fi
-          
-          echo "Configuration setup completed"
-          echo "Configuration file contents:"
+          echo "Configuration created successfully"
+          echo "First 30 lines of configuration:"
           head -30 /tmp/test.ini
+
+      - name: Debug configuration
+        run: |
+          echo "=== Current configuration file ==="
+          cat /tmp/test.ini
+          echo ""
+          echo "=== Checking for scheming installation ==="
+          pip list | grep scheming || echo "scheming not found in pip list"
+          echo ""
+          echo "=== Checking scheming files ==="
+          find /usr/local/lib/python3.10/site-packages/ -name "*scheming*" || echo "no scheming files found"
+          echo ""
+          echo "=== Checking src directory ==="
+          ls -la /srv/app/src/ || echo "src directory not found"
+          echo ""
+          echo "=== Python path ==="
+          python3 -c "import sys; print('\n'.join(sys.path))"
           
       - name: Initialize CKAN database
         run: |
@@ -268,10 +250,21 @@ jobs:
             echo "Local CKAN API access failed"
             exit 1
           fi
+
+          # Test scheming extension
+          echo "Testing ckanext-scheming installation..."
+          if ckanapi action scheming_dataset_schema_list -c /tmp/test.ini; then
+            echo "ckanext-scheming is working!"
+          else
+            echo "ckanext-scheming test failed - checking loaded plugins..."
+            echo "Current plugins from status:"
+            ckanapi action status_show -c /tmp/test.ini | grep -A 10 extensions || echo "No extensions found in status"
+            exit 1
+          fi
           
           # Show available dataset schemas
-          # echo "Available dataset schemas:"
-          # ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
+          echo "Available dataset schemas:"
+          ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
 
       - name: Create sysadmin user with ckanapi
         run: |
