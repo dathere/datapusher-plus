@@ -102,10 +102,11 @@ jobs:
           
           # Install ckanapi
           pip install ckanapi
+          
           # Install ckanext-scheming
           pip install -e "git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming"
           
-          echo "Requirements and ckanapi installed successfully"
+          echo "Requirements, ckanapi, and ckanext-scheming installed successfully"
           
       - name: Setup CKAN configuration
         run: |
@@ -134,7 +135,7 @@ jobs:
           ckan.redis.url = redis://redis:6379/1
           ckan.site_id = default
           ckan.site_title = CKAN Test
-          ckan.plugins = datastore datapusher
+          ckan.plugins = datastore datapusher scheming_datasets scheming_groups scheming_organizations
           EOF
           fi
           
@@ -148,9 +149,16 @@ jobs:
           if ! grep -q "ckan.redis.url" /tmp/test.ini; then
             echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
           fi
-          # Configure ckanext-scheming
-          sed -i 's/ckan.plugins = datastore datapusher/ckan.plugins = datastore datapusher scheming_datasets scheming_groups scheming_organizations/' /tmp/test.ini
           
+          # Configure ckanext-scheming plugins (update existing plugins line or add new one)
+          if grep -q "ckan.plugins" /tmp/test.ini; then
+            sed -i 's/ckan.plugins = datastore datapusher/ckan.plugins = datastore datapusher scheming_datasets scheming_groups scheming_organizations/' /tmp/test.ini
+            sed -i 's/ckan.plugins = datastore/ckan.plugins = datastore scheming_datasets scheming_groups scheming_organizations/' /tmp/test.ini
+          else
+            echo "ckan.plugins = datastore scheming_datasets scheming_groups scheming_organizations" >> /tmp/test.ini
+          fi
+          
+          # Add scheming configuration
           if ! grep -q "scheming.dataset_schemas" /tmp/test.ini; then
             echo "scheming.dataset_schemas = ckanext.scheming:ckan_dataset.yaml" >> /tmp/test.ini
           fi
@@ -163,7 +171,7 @@ jobs:
           
           echo "Configuration setup completed"
           echo "Configuration file contents:"
-          head -20 /tmp/test.ini
+          head -30 /tmp/test.ini
           
       - name: Initialize CKAN database
         run: |
@@ -260,6 +268,7 @@ jobs:
             echo "Local CKAN API access failed"
             exit 1
           fi
+
           # Test scheming extension
           echo "Testing ckanext-scheming installation..."
           if ckanapi action scheming_dataset_schema_list -c /tmp/test.ini; then
@@ -268,6 +277,10 @@ jobs:
             echo "ckanext-scheming test failed"
             exit 1
           fi
+          
+          # Show available dataset schemas
+          echo "Available dataset schemas:"
+          ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
 
       - name: Create sysadmin user with ckanapi
         run: |
@@ -457,6 +470,14 @@ jobs:
           ckanapi action status_show -c /tmp/test.ini
           
           echo ""
+          echo "=== Available Dataset Schemas ==="
+          ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
+          
+          echo ""
+          echo "=== Default Dataset Schema ==="
+          ckanapi action scheming_dataset_schema_show type=dataset -c /tmp/test.ini | head -20
+          
+          echo ""
           echo "=== All Datasets ==="
           ckanapi action package_list -c /tmp/test.ini
           
@@ -482,12 +503,16 @@ jobs:
           echo "  - test_user (regular user)"  
           echo "  - editor_user (editor)"
           echo ""
+          echo "INSTALLED EXTENSIONS:"
+          echo "  - ckanext-scheming (dataset/group/org schema management)"
+          echo ""
           echo "Access URLs:"
           echo "  - Dataset: $CKAN_SITE_URL/dataset/my-first-dataset"
           echo "  - Organization: $CKAN_SITE_URL/organization/demo-organization"
           echo "  - API Status: $CKAN_SITE_URL/api/3/action/status_show"
+          echo "  - Dataset Schemas: $CKAN_SITE_URL/api/3/action/scheming_dataset_schema_list"
           echo ""
-          echo "All operations completed using ckanapi!"
+          echo "All operations completed using ckanapi and ckanext-scheming!"
           echo "=============================================="
           
       - name: Setup datapusher-plus (placeholder)
@@ -497,8 +522,12 @@ jobs:
           echo "Sample data has been created and verified using ckanapi:"
           echo "  - Multiple users with different privileges"
           echo "  - Organization: demo-organization"
-          echo "  - Dataset: my-first-dataset"
-          echo "  - Resource: Sample CSV Data (CSV file)"
+          echo "  - Dataset: my-first-dataset (with scheming support)"
+          echo "  - Resource: Sample CSV Data (CSV file ready for datapusher-plus)"
+          echo ""
+          echo "Extensions installed and ready:"
+          echo "  - ckanext-scheming: Dataset/resource schema management ✓"
+          echo "  - datastore: Structured data storage ✓"
           echo ""
           echo "You can now add steps to:"
           echo "  - Install datapusher-plus extension"
@@ -506,6 +535,7 @@ jobs:
           echo "  - Run datapusher-plus specific tests"
           echo "  - Test data upload and processing functionality"
           echo "  - Test CSV processing with the created resource"
+          echo "  - Test schema validation with datapusher-plus"
           
       - name: Cleanup
         if: always()
