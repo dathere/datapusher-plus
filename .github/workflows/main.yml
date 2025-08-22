@@ -270,8 +270,8 @@ jobs:
           fi
           
           # Show available dataset schemas
-          echo "Available dataset schemas:"
-          ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
+          # echo "Available dataset schemas:"
+          # ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
 
       - name: Create sysadmin user with ckanapi
         run: |
