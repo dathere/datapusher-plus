@@ -102,6 +102,8 @@ jobs:
           
           # Install ckanapi
           pip install ckanapi
+          # Install ckanext-scheming
+          pip install -e "git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming"
           
           echo "Requirements and ckanapi installed successfully"
           
@@ -145,6 +147,18 @@ jobs:
           fi
           if ! grep -q "ckan.redis.url" /tmp/test.ini; then
             echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
+          fi
+          # Configure ckanext-scheming
+          sed -i 's/ckan.plugins = datastore datapusher/ckan.plugins = datastore datapusher scheming_datasets scheming_groups scheming_organizations/' /tmp/test.ini
+          
+          if ! grep -q "scheming.dataset_schemas" /tmp/test.ini; then
+            echo "scheming.dataset_schemas = ckanext.scheming:ckan_dataset.yaml" >> /tmp/test.ini
+          fi
+          if ! grep -q "scheming.presets" /tmp/test.ini; then
+            echo "scheming.presets = ckanext.scheming:presets.json" >> /tmp/test.ini
+          fi
+          if ! grep -q "scheming.dataset_fallback" /tmp/test.ini; then
+            echo "scheming.dataset_fallback = false" >> /tmp/test.ini
           fi
           
           echo "Configuration setup completed"
@@ -244,6 +258,14 @@ jobs:
             echo "Local CKAN API access working!"
           else
             echo "Local CKAN API access failed"
+            exit 1
+          fi
+          # Test scheming extension
+          echo "Testing ckanext-scheming installation..."
+          if ckanapi action scheming_dataset_schema_list -c /tmp/test.ini; then
+            echo "ckanext-scheming is working!"
+          else
+            echo "ckanext-scheming test failed"
             exit 1
           fi
 
