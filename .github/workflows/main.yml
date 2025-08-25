@@ -117,21 +117,21 @@ jobs:
           else
             echo "Creating minimal /tmp/test.ini that uses common.ini..."
             cat > /tmp/test.ini <<'EOF'
-[DEFAULT]
-debug = true
-[server:main]
-use = config:common.ini
-[app:main]
-use = config:common.ini
-ckan.site_url = http://localhost:5000
-sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
-ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
-ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
-solr_url = http://solr:8983/solr/ckan
-ckan.redis.url = redis://redis:6379/1
-ckan.site_id = default
-ckan.site_title = CKAN Test
-EOF
+          [DEFAULT]
+          debug = true
+          [server:main]
+          use = config:common.ini
+          [app:main]
+          use = config:common.ini
+          ckan.site_url = http://localhost:5000
+          sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
+          ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
+          ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
+          solr_url = http://solr:8983/solr/ckan
+          ckan.redis.url = redis://redis:6379/1
+          ckan.site_id = default
+          ckan.site_title = CKAN Test
+          EOF
             echo "Created /tmp/test.ini"
           fi
           # Ensure the DB/solr/redis URLs are set correctly (defensive)
@@ -262,26 +262,26 @@ EOF
             # pretty print and parse
             echo "$user_data" | python3 -m json.tool || true
             api_key=$(echo "$user_data" | python3 - <<'PY'
-import json,sys
-try:
-    data=json.load(sys.stdin)
-    r=data.get('result',{})
-    ak=r.get('apikey') or ''
-    print(ak)
-except Exception:
-    print('')
-PY
-)
-            is_sysadmin=$(echo "$user_data" | python3 - <<'PY'
-import json,sys
-try:
-    data=json.load(sys.stdin)
-    r=data.get('result',{})
-    print(str(bool(r.get('sysadmin', False))).lower())
-except Exception:
-    print('false')
-PY
-)
+            import json,sys
+            try:
+                data=json.load(sys.stdin)
+                r=data.get('result',{})
+                ak=r.get('apikey') or ''
+                print(ak)
+            except Exception:
+                print('')
+            PY
+            )
+                        is_sysadmin=$(echo "$user_data" | python3 - <<'PY'
+            import json,sys
+            try:
+                data=json.load(sys.stdin)
+                r=data.get('result',{})
+                print(str(bool(r.get('sysadmin', False))).lower())
+            except Exception:
+                print('false')
+            PY
+            )
             echo "sysadmin: $is_sysadmin"
             if [ -n "$api_key" ]; then
               echo "API key found. Exporting to GITHUB_ENV"
