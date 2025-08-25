@@ -135,8 +135,8 @@ jobs:
           fi
           /usr/local/bin/qsvdp --version >/dev/null 2>&1 || /usr/local/bin/qsv --version >/dev/null 2>&1 || echo "qsv not installed or not runnable (this is okay for plugin presence test)."
 
-
-
+      
+      
       - name: Setup CKAN configuration (/tmp/test.ini)
         run: |
           set -eu
@@ -147,9 +147,21 @@ jobs:
           elif [ -f /srv/app/src/ckan/test.ini ]; then
             cp /srv/app/src/ckan/test.ini /tmp/test.ini
             echo "Copied /srv/app/src/ckan/test.ini -> /tmp/test.ini"
-          else
-            echo "Creating minimal /tmp/test.ini that uses common.ini..."
-            cat > /tmp/test.ini <<'EOF'
+          fi
+
+          # Ensure the DB/solr/redis URLs are set correctly (defensive)
+          sed -i "s|sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /tmp/test.ini || true
+          sed -i "s|ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /tmp/test.ini || true
+          sed -i "s|ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /tmp/test.ini || true
+          if ! grep -q "^solr_url" /tmp/test.ini; then
+            echo "solr_url = ${CKAN_SOLR_URL}" >> /tmp/test.ini
+          fi
+          if ! grep -q "^ckan.redis.url" /tmp/test.ini; then
+            echo "ckan.redis.url = ${CKAN_REDIS_URL}" >> /tmp/test.ini
+          fi
+          
+          # --- Ensure the entire minimal block is present (append missing section headers + missing key=value lines)
+          cat > /tmp/minimal_test_block.ini <<'MIN'
           [DEFAULT]
           debug = true
           [server:main]
@@ -165,13 +177,12 @@ jobs:
           ckan.site_id = default
           ckan.site_title = CKAN Test
           ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
-          scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml"   
+          scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
           scheming.presets = ckanext.scheming:presets.json ckanext.dcat.schemas:presets.yaml
           scheming.dataset_fallback = false
           ckanext.datapusher_plus.use_proxy = false
           ckanext.datapusher_plus.download_proxy = 
           ckanext.datapusher_plus.ssl_verify = false
-          # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
           ckanext.datapusher_plus.upload_log_level = INFO
           ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
           ckanext.datapusher_plus.pii_screening = false
@@ -209,38 +220,60 @@ jobs:
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
-                    
-          EOF
-            echo "Created /tmp/test.ini"
-          fi
-          # Ensure the DB/solr/redis URLs are set correctly (defensive)
-          sed -i "s|sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /tmp/test.ini || true
-          sed -i "s|ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /tmp/test.ini || true
-          sed -i "s|ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /tmp/test.ini || true
-          if ! grep -q "^solr_url" /tmp/test.ini; then
-            echo "solr_url = ${CKAN_SOLR_URL}" >> /tmp/test.ini
-          fi
-          if ! grep -q "^ckan.redis.url" /tmp/test.ini; then
-            echo "ckan.redis.url = ${CKAN_REDIS_URL}" >> /tmp/test.ini
-          fi
+          MIN
+          
+          # Ensure the basic section headers exist (if missing, append them)
+          for hdr in "[DEFAULT]" "[server:main]" "[app:main]"; do
+            if ! grep -Fq "$hdr" /tmp/test.ini; then
+              echo "$hdr" >> /tmp/test.ini
+              echo "Appended missing section header: $hdr"
+            fi
+          done
+          
+          # For each key=value line in the minimal block (ignore blank lines and sections),
+          # append the line to /tmp/test.ini if the key doesn't already exist.
+          while IFS= read -r line; do
+            # skip blank lines or section headers
+            case "$line" in
+              ""|\[*\]) continue ;;
+            esac
+            # get key left of the first '=' trimmed
+            key=$(printf '%s' "$line" | awk -F= '{name=$1; gsub(/^[ \t]+|[ \t]+$/,"",name); print name}')
+            if [ -z "$key" ]; then
+              continue
+            fi
+            # check if key exists in /tmp/test.ini (compare exact key name before '=' ignoring leading/trailing spaces)
+            if awk -F= -v k="$key" '{
+                  n=$1; gsub(/^[ \t]+|[ \t]+$/,"",n);
+                  if(n==k){ exit 0 }
+                } END { exit 1 }' /tmp/test.ini; then
+              # key exists; do nothing (preserve user's value)
+              :
+            else
+              echo "Appending missing key: $key"
+              echo "$line" >> /tmp/test.ini
+            fi
+          done < /tmp/minimal_test_block.ini  
+          rm -f /tmp/minimal_test_block.ini || true
+      
           # Append datapusher plugin(s) to ckan.plugins if present; otherwise add a plugins line
           REQUIRED_PLUGINS="datastore datapusher_plus scheming_datasets"
           if grep -q "^ckan.plugins" /tmp/test.ini; then
             echo "Appending required plugins to existing ckan.plugins line"
-            # Append any missing plugin names to the line
             current=$(grep "^ckan.plugins" /tmp/test.ini | head -n1 | cut -d'=' -f2-)
             for p in $REQUIRED_PLUGINS; do
               echo "$current" | grep -qw "$p" || current="$current $p"
             done
-            # replace the first ckan.plugins line with the new content
             awk -v new="ckan.plugins = $current" 'BEGIN{done=0} {if(!done && $1=="ckan.plugins") {print new; done=1} else print $0}' /tmp/test.ini > /tmp/test.ini.new && mv /tmp/test.ini.new /tmp/test.ini
           else
             echo "ckan.plugins = $REQUIRED_PLUGINS" >> /tmp/test.ini
             echo "Added ckan.plugins line with required plugins."
           fi
+      
           echo "---- /tmp/test.ini (head) ----"
-          head -n 60 /tmp/test.ini || true
+          head -n 120 /tmp/test.ini || true
           echo "---- end ----"
+
       - name: Initialize CKAN database
         run: |
           
