@@ -103,10 +103,7 @@ jobs:
           # Install ckanapi
           pip install ckanapi
           
-          # Install ckanext-scheming
-          pip install -e "git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming"
-          
-          echo "Requirements, ckanapi, and ckanext-scheming installed successfully"
+          echo "Requirements and ckanapi installed successfully"
           
       - name: Setup CKAN configuration
         run: |
@@ -117,70 +114,32 @@ jobs:
             cp /srv/app/src/ckan/test.ini /tmp/test.ini
             echo "Copied existing test.ini"
           else
-            echo "Creating standalone CKAN configuration..."
+            echo "Creating basic CKAN configuration..."
             cat > /tmp/test.ini << 'EOF'
           [DEFAULT]
           debug = true
-      
+          
           [server:main]
-          use = egg:ckan
-          host = 0.0.0.0
-          port = 5000
-      
+          use = config:common.ini
+          
           [app:main]
-          use = egg:ckan
+          use = config:common.ini
           ckan.site_url = http://localhost:5000
-          ckan.site_id = default
-          ckan.site_title = CKAN Test
-      
-          # Database connections
           sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
           ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
           ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
-      
-          # Search
           solr_url = http://solr:8983/solr/ckan
-      
-          # Cache and sessions
           ckan.redis.url = redis://redis:6379/1
-      
-          # Plugins
+          ckan.site_id = default
+          ckan.site_title = CKAN Test
           ckan.plugins = datastore datapusher
-      
-          # Security
-          beaker.session.key = ckan
-          beaker.session.secret = your-secret-key
-      
-          # Storage
-          ckan.storage_path = /srv/app/data
-      
-          # Locale
-          ckan.locale_default = en
-          ckan.locale_order = en
-      
-          # Authorization
-          ckan.auth.anon_create_dataset = false
-          ckan.auth.create_unowned_dataset = false
-          ckan.auth.create_dataset_if_not_in_organization = false
-          ckan.auth.user_create_organizations = false
-          ckan.auth.user_create_groups = false
-          ckan.auth.user_delete_groups = false
-          ckan.auth.user_delete_organizations = false
-      
-          # Email settings (for testing)
-          smtp.server = localhost
-          smtp.starttls = False
-          email_to = admin@example.com
-          error_email_from = error@example.com
           EOF
           fi
           
-          # Ensure database URLs are correctly set (keep existing sed commands for safety)
           sed -i 's|postgresql://.*ckan_test|postgresql://ckan_default:pass@postgres/ckan_test|g' /tmp/test.ini
           sed -i 's|ckan.datastore.write_url.*|ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test|g' /tmp/test.ini
           sed -i 's|ckan.datastore.read_url.*|ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test|g' /tmp/test.ini
           
-          # Ensure required settings exist
           if ! grep -q "solr_url" /tmp/test.ini; then
             echo "solr_url = http://solr:8983/solr/ckan" >> /tmp/test.ini
           fi
@@ -190,24 +149,7 @@ jobs:
           
           echo "Configuration setup completed"
           echo "Configuration file contents:"
-          head -30 /tmp/test.ini
-          
-      - name: Debug configuration
-        run: |
-          echo "=== Current configuration file ==="
-          cat /tmp/test.ini
-          echo ""
-          echo "=== Checking for scheming installation ==="
-          pip list | grep scheming || echo "scheming not found in pip list"
-          echo ""
-          echo "=== Checking scheming files ==="
-          find /usr/local/lib/python3.10/site-packages/ -name "*scheming*" || echo "no scheming files found"
-          echo ""
-          echo "=== Checking src directory ==="
-          ls -la /srv/app/src/ || echo "src directory not found"
-          echo ""
-          echo "=== Python path ==="
-          python3 -c "import sys; print('\n'.join(sys.path))"
+          head -20 /tmp/test.ini
           
       - name: Initialize CKAN database
         run: |
@@ -304,22 +246,6 @@ jobs:
             echo "Local CKAN API access failed"
             exit 1
           fi
-
-          # Test scheming extension
-          echo "Testing ckanext-scheming installation..."
-          if ckanapi action scheming_dataset_schema_list -c /tmp/test.ini; then
-            echo "ckanext-scheming is working!"
-          else
-            echo "ckanext-scheming test failed - checking loaded plugins..."
-            echo "Current plugins from status:"
-            ckanapi action status_show -c /tmp/test.ini | grep -A 10 extensions || echo "No extensions found in status"
-            exit 1
-          fi
-          
-          # Show available dataset schemas
-          echo "Available dataset schemas:"
-          ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
-
       - name: Create sysadmin user with ckanapi
         run: |
           echo "Creating sysadmin user with ckanapi..."
@@ -346,7 +272,6 @@ jobs:
           fi
           
           echo "Sysadmin user setup completed"
-
       - name: Promote ckan_admin to sysadmin
         run: |
           echo "Promoting ckan_admin to sysadmin..."
@@ -411,7 +336,6 @@ jobs:
           fi
           
           echo "Sysadmin promotion process completed"
-
       - name: Create organization with ckanapi
         run: |
           echo "Creating demo organization with ckanapi..."
@@ -444,7 +368,6 @@ jobs:
           # ckanapi action organization_show id=demo-organization -c /tmp/test.ini | python3 -m json.tool
           
           echo "Organization creation completed"
-
       - name: Create dataset with ckanapi
         run: |
           echo "Creating demo dataset with ckanapi..."
@@ -476,7 +399,6 @@ jobs:
           # ckanapi action package_show id=my-first-dataset -c /tmp/test.ini | python3 -m json.tool
           
           echo "Dataset creation completed"
-
       - name: Add resource to dataset with ckanapi
         run: |
           echo "Adding resource to dataset with ckanapi..."
@@ -508,14 +430,6 @@ jobs:
           ckanapi action status_show -c /tmp/test.ini
           
           echo ""
-          echo "=== Available Dataset Schemas ==="
-          ckanapi action scheming_dataset_schema_list -c /tmp/test.ini
-          
-          echo ""
-          echo "=== Default Dataset Schema ==="
-          ckanapi action scheming_dataset_schema_show type=dataset -c /tmp/test.ini | head -20
-          
-          echo ""
           echo "=== All Datasets ==="
           ckanapi action package_list -c /tmp/test.ini
           
@@ -527,6 +441,17 @@ jobs:
           echo "=== All Users ==="
           ckanapi action user_list -c /tmp/test.ini
           
+      - name: Display test.ini configuration file
+        run: |
+          echo "CKAN Configuration File Contents"
+          echo "================================"
+          echo "File: /tmp/test.ini"
+          echo "================================"
+          cat /tmp/test.ini
+          echo "================================"
+          echo "End of configuration file"
+          echo ""          
+      
       - name: Final summary
         run: |
           echo "Content creation and verification completed!"
@@ -541,16 +466,12 @@ jobs:
           echo "  - test_user (regular user)"  
           echo "  - editor_user (editor)"
           echo ""
-          echo "INSTALLED EXTENSIONS:"
-          echo "  - ckanext-scheming (dataset/group/org schema management)"
-          echo ""
           echo "Access URLs:"
           echo "  - Dataset: $CKAN_SITE_URL/dataset/my-first-dataset"
           echo "  - Organization: $CKAN_SITE_URL/organization/demo-organization"
           echo "  - API Status: $CKAN_SITE_URL/api/3/action/status_show"
-          echo "  - Dataset Schemas: $CKAN_SITE_URL/api/3/action/scheming_dataset_schema_list"
           echo ""
-          echo "All operations completed using ckanapi and ckanext-scheming!"
+          echo "All operations completed using ckanapi!"
           echo "=============================================="
           
       - name: Setup datapusher-plus (placeholder)
@@ -560,12 +481,8 @@ jobs:
           echo "Sample data has been created and verified using ckanapi:"
           echo "  - Multiple users with different privileges"
           echo "  - Organization: demo-organization"
-          echo "  - Dataset: my-first-dataset (with scheming support)"
-          echo "  - Resource: Sample CSV Data (CSV file ready for datapusher-plus)"
-          echo ""
-          echo "Extensions installed and ready:"
-          echo "  - ckanext-scheming: Dataset/resource schema management ✓"
-          echo "  - datastore: Structured data storage ✓"
+          echo "  - Dataset: my-first-dataset"
+          echo "  - Resource: Sample CSV Data (CSV file)"
           echo ""
           echo "You can now add steps to:"
           echo "  - Install datapusher-plus extension"
@@ -573,7 +490,6 @@ jobs:
           echo "  - Run datapusher-plus specific tests"
           echo "  - Test data upload and processing functionality"
           echo "  - Test CSV processing with the created resource"
-          echo "  - Test schema validation with datapusher-plus"
           
       - name: Cleanup
         if: always()
