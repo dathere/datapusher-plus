@@ -136,28 +136,20 @@ jobs:
           /usr/local/bin/qsvdp --version >/dev/null 2>&1 || /usr/local/bin/qsv --version >/dev/null 2>&1 || echo "qsv not installed or not runnable (this is okay for plugin presence test)."
 
       
-      - name: Setup CKAN configuration (/tmp/test.ini)
+      - name: Setup CKAN configuration (/srv/app/src/ckan/test-core.ini)
         run: |
           set -eu
 
-          # Prefer existing test-core.ini or test.ini from repo if available
-          if [ -f /srv/app/src/ckan/test-core.ini ]; then
-            cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
-            echo "Copied /srv/app/src/ckan/test-core.ini -> /tmp/test.ini"
-          elif [ -f /srv/app/src/ckan/test.ini ]; then
-            cp /srv/app/src/ckan/test.ini /tmp/test.ini
-            echo "Copied /srv/app/src/ckan/test.ini -> /tmp/test.ini"
-          fi
 
           # Defensive URL substitutions (keep these)
-          sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}|g" /tmp/test.ini || true
-          sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL:-***postgres/datastore_test}|g" /tmp/test.ini || true
-          sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL:-***postgres/datastore_test}|g" /tmp/test.ini || true
-          if ! grep -q "^solr_url" /tmp/test.ini; then
-            echo "solr_url = ${CKAN_SOLR_URL:-http://solr:8983/solr/ckan}" >> /tmp/test.ini
+          sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}|g" /srv/app/src/ckan/test-core.ini || true
+          sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL:-***postgres/datastore_test}|g" /srv/app/src/ckan/test-core.ini || true
+          sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL:-***postgres/datastore_test}|g" /srv/app/src/ckan/test-core.ini || true
+          if ! grep -q "^solr_url" /srv/app/src/ckan/test-core.ini; then
+            echo "solr_url = ${CKAN_SOLR_URL:-http://solr:8983/solr/ckan}" >> /srv/app/src/ckan/test-core.ini
           fi
-          if ! grep -q "^ckan.redis.url" /tmp/test.ini; then
-            echo "ckan.redis.url = ${CKAN_REDIS_URL:-redis://redis:6379/1}" >> /tmp/test.ini
+          if ! grep -q "^ckan.redis.url" /srv/app/src/ckan/test-core.ini; then
+            echo "ckan.redis.url = ${CKAN_REDIS_URL:-redis://redis:6379/1}" >> /srv/app/src/ckan/test-core.ini
           fi
 
           # Desired values (use env vars when present, otherwise fall back)
@@ -237,8 +229,8 @@ jobs:
           ckanext.datapusher_plus.auto_unzip_one_file = true
           EOF
 
-          if [ -f /tmp/test.ini ]; then
-            echo "Patching selective keys in /tmp/test.ini (only the keys you listed)..."
+          if [ -f /srv/app/src/ckan/test-core.ini ]; then
+            echo "Patching selective keys in /srv/app/src/ckan/test-core.ini (only the keys you listed)..."
 
             # Ensure single debug = true under [DEFAULT]: remove existing debug lines in DEFAULT then add one
             awk 'BEGIN{in=0}
@@ -252,7 +244,7 @@ jobs:
                   print
                 }
               }
-              END { if(in) print "debug = true" }' /tmp/test.ini > /tmp/test.ini.tmp && mv /tmp/test.ini.tmp /tmp/test.ini
+              END { if(in) print "debug = true" }' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.tmp && mv /srv/app/src/ckan/test-core.ini.tmp /srv/app/src/ckan/test-core.ini
 
             # Process REPLACE_FILE: replace if present, otherwise write to missing file
             while IFS= read -r entry || [ -n "$entry" ]; do
@@ -260,8 +252,8 @@ jobs:
               value="$(printf '%s' "$entry" | cut -d'|' -f2-)"
               # escape backslashes and ampersands for sed replacement
               esc_value="$(printf '%s' "$value" | sed -e 's/[\/&]/\\&/g')"
-              if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /tmp/test.ini; then
-                sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /tmp/test.ini || true
+              if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /srv/app/src/ckan/test-core.ini; then
+                sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /srv/app/src/ckan/test-core.ini || true
               else
                 printf '%s\n' "${key} = ${value}" >> "$MISSING_ADD_FILE"
               fi
@@ -272,7 +264,7 @@ jobs:
               # comment lines - check if exact comment exists
               case "$ln" in
                 \#*)
-                  if ! grep -Fq "$ln" /tmp/test.ini; then
+                  if ! grep -Fq "$ln" /srv/app/src/ckan/test-core.ini; then
                     printf '%s\n' "$ln" >> "$MISSING_ADD_FILE"
                   fi
                   ;;
@@ -280,8 +272,8 @@ jobs:
                   key="$(printf '%s' "$ln" | cut -d'=' -f1 | sed 's/[[:space:]]*$//')"
                   value="$(printf '%s' "$ln" | cut -d'=' -f2- | sed 's/^[[:space:]]*//')"
                   esc_value="$(printf '%s' "$value" | sed -e 's/[\/&]/\\&/g')"
-                  if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /tmp/test.ini; then
-                    sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /tmp/test.ini || true
+                  if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /srv/app/src/ckan/test-core.ini; then
+                    sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /srv/app/src/ckan/test-core.ini || true
                   else
                     printf '%s\n' "${key} = ${value}" >> "$MISSING_ADD_FILE"
                   fi
@@ -309,34 +301,34 @@ jobs:
                     print "[app:main]"
                     for(i=1;i<=na;i++) print add[i]
                   }
-                }' /tmp/test.ini > /tmp/test.ini.new && mv /tmp/test.ini.new /tmp/test.ini
+                }' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.new && mv /srv/app/src/ckan/test-core.ini.new /srv/app/src/ckan/test-core.ini
             fi
 
             # Final defensive catch: ensure sqlalchemy and datastore URLs reflect env (again)
-            sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /tmp/test.ini || true
-            sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /tmp/test.ini || true
-            sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /tmp/test.ini || true
+            sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /srv/app/src/ckan/test-core.ini || true
+            sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /srv/app/src/ckan/test-core.ini || true
+            sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /srv/app/src/ckan/test-core.ini || true
 
           else
-            echo "/tmp/test.ini not found — no selective patching performed."
+            echo "/srv/app/src/ckan/test-core.ini not found — no selective patching performed."
           fi
 
           # Append datapusher plugin(s) to ckan.plugins if present; otherwise add a plugins line
           REQUIRED_PLUGINS="datastore datapusher_plus scheming_datasets"
-          if grep -q "^ckan.plugins" /tmp/test.ini; then
+          if grep -q "^ckan.plugins" /srv/app/src/ckan/test-core.ini; then
             echo "Appending required plugins to existing ckan.plugins line"
-            current=$(grep "^ckan.plugins" /tmp/test.ini | head -n1 | cut -d'=' -f2-)
+            current=$(grep "^ckan.plugins" /srv/app/src/ckan/test-core.ini | head -n1 | cut -d'=' -f2-)
             for p in $REQUIRED_PLUGINS; do
               echo "$current" | grep -qw "$p" || current="$current $p"
             done
-            awk -v new="ckan.plugins = $current" 'BEGIN{done=0} {if(!done && $1=="ckan.plugins") {print new; done=1} else print $0}' /tmp/test.ini > /tmp/test.ini.new && mv /tmp/test.ini.new /tmp/test.ini
+            awk -v new="ckan.plugins = $current" 'BEGIN{done=0} {if(!done && $1=="ckan.plugins") {print new; done=1} else print $0}' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.new && mv /srv/app/src/ckan/test-core.ini.new /srv/app/src/ckan/test-core.ini
           else
-            echo "ckan.plugins = $REQUIRED_PLUGINS" >> /tmp/test.ini
+            echo "ckan.plugins = $REQUIRED_PLUGINS" >> /srv/app/src/ckan/test-core.ini
             echo "Added ckan.plugins line with required plugins."
           fi
 
-          echo "---- /tmp/test.ini (cat) ----"
-          cat /tmp/test.ini || true
+          echo "---- /srv/app/src/ckan/test-core.ini (cat) ----"
+          cat /srv/app/src/ckan/test-core.ini || true
           echo "---- end ----"
 
 
@@ -350,13 +342,13 @@ jobs:
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE IF NOT EXISTS ckan_test OWNER ckan_default;" || true
           fi
           echo "Running ckan db init (may be idempotent)..."
-          if ckan -c /tmp/test.ini db init; then
+          if ckan -c /srv/app/src/ckan/test-core.ini db init; then
             echo "CKAN DB initialized."
           else
             echo "ckan db init returned non-zero; continuing (may already be initialized)."
           fi
           echo "Setting datastore permissions..."
-          if ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
+          if ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
             echo "Datastore permissions set."
           else
             echo "Datastore permission step returned non-zero; continuing."
@@ -366,7 +358,7 @@ jobs:
           set -eu
           echo "Starting CKAN server in background..."
           # Use nohup to keep it running in background
-          nohup ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader > /tmp/ckan_stdout.log 2>&1 &
+          nohup ckan -c /srv/app/src/ckan/test-core.ini run --host 0.0.0.0 --port 5000 --disable-reloader > /tmp/ckan_stdout.log 2>&1 &
           CKAN_PID=$!
           echo "CKAN PID=$CKAN_PID"
           # wait for port / API
@@ -405,7 +397,7 @@ jobs:
           fi
           echo ""
           echo "Testing local status_show using config file"
-          if ckanapi action status_show --config /tmp/test.ini; then
+          if ckanapi action status_show --config /srv/app/src/ckan/test-core.ini; then
             echo "Local status_show OK"
           else
             echo "Local status_show failed"
@@ -413,13 +405,13 @@ jobs:
             exit 1
           fi
           echo "Check 'extensions' or 'plugins' in status_show output:"
-          ckanapi action status_show --config /tmp/test.ini | python3 -m json.tool || true
+          ckanapi action status_show --config /srv/app/src/ckan/test-core.ini | python3 -m json.tool || true
       - name: Create sysadmin user with ckanapi (safe)
         run: |
           set -eu
           echo "Creating sysadmin user (ckan_admin) if not exist..."
           # create user (idempotent - if exists it will return error; ignore)
-          ckanapi action user_create --config /tmp/test.ini \
+          ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
             name=ckan_admin \
             email=admin@example.com \
             password=test1234 \
@@ -427,13 +419,13 @@ jobs:
             about="Created by GitHub Actions test" \
             with_apitoken=true || echo "user_create returned non-zero (user may already exist)"
           echo "Ensure ckan_admin is sysadmin via CLI"
-          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
+          if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
             echo "ckan_admin promoted to sysadmin"
           else
             echo "sysadmin add returned non-zero (user may already be sysadmin)"
           fi
           echo "Retrieve user details and API key (if returned)..."
-          user_data=$(ckanapi action user_show --config /tmp/test.ini id=ckan_admin 2>/dev/null || true)
+          user_data=$(ckanapi action user_show --config /srv/app/src/ckan/test-core.ini id=ckan_admin 2>/dev/null || true)
           if [ -z "$user_data" ]; then
             echo "No user data returned by user_show"
           else
@@ -472,12 +464,12 @@ jobs:
         run: |
           set -eu
           echo "Creating organization demo-organization (idempotent)..."
-          ckanapi action organization_create --config /tmp/test.ini \
+          ckanapi action organization_create --config /srv/app/src/ckan/test-core.ini \
             name=demo-organization \
             title="Demo Data Publishing Organization" \
             description="Demo org created by GitHub Actions for datapusher-plus testing." || echo "organization_create returned non-zero (may already exist)"
           echo "Add ckan_admin as admin to the organization"
-          ckanapi action organization_member_create --config /tmp/test.ini \
+          ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
             id=demo-organization username=ckan_admin role=admin || echo "organization_member_create returned non-zero (may already be member)"
       - name: Create dataset with ckanapi
         run: |
@@ -485,7 +477,7 @@ jobs:
           echo "Creating dataset my-first-dataset (idempotent)..."
           # Use tags as a single JSON string
           TAGS='[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]'
-          ckanapi action package_create --config /tmp/test.ini \
+          ckanapi action package_create --config /srv/app/src/ckan/test-core.ini \
             name=my-first-dataset \
             title="My First Comprehensive Dataset" \
             notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
@@ -504,27 +496,27 @@ jobs:
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
-          ckanapi action resource_create --config /tmp/test.ini \
+          ckanapi action resource_create --config /srv/app/src/ckan/test-core.ini \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
             description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
-            mimetype="text/csv" || { echo "resource_create failed"; ckanapi action package_show --config /tmp/test.ini id=my-first-dataset || true; exit 1; }
+            mimetype="text/csv" || { echo "resource_create failed"; ckanapi action package_show --config /srv/app/src/ckan/test-core.ini id=my-first-dataset || true; exit 1; }
       - name: Display CKAN instance inventory
         run: |
           set -eu
           echo "=== CKAN Status (local) ==="
-          ckanapi action status_show --config /tmp/test.ini | python3 -m json.tool || true
+          ckanapi action status_show --config /srv/app/src/ckan/test-core.ini | python3 -m json.tool || true
           echo ""
           echo "=== All Datasets ==="
-          ckanapi action package_list --config /tmp/test.ini || true
+          ckanapi action package_list --config /srv/app/src/ckan/test-core.ini || true
           echo ""
           echo "=== All Organizations ==="
-          ckanapi action organization_list --config /tmp/test.ini || true
+          ckanapi action organization_list --config /srv/app/src/ckan/test-core.ini || true
           echo ""
           echo "=== All Users ==="
-          ckanapi action user_list --config /tmp/test.ini || true
+          ckanapi action user_list --config /srv/app/src/ckan/test-core.ini || true
       - name: Final summary
         run: |
           echo "Content creation and verification completed!"
