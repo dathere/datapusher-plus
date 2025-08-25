@@ -489,9 +489,7 @@ jobs:
         run: |
           set -eu
           echo "Creating dataset my-first-dataset (idempotent)..."
-          # Use tags as a single JSON string
-          TAGS='[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]'
-          ckanapi action package_create --config /srv/app/src/ckan/test-core.ini \
+          if ckanapi action package_create \
             name=my-first-dataset \
             title="My First Comprehensive Dataset" \
             notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
@@ -503,20 +501,32 @@ jobs:
             maintainer="CKAN Admin" \
             maintainer_email=admin@example.com \
             url=https://github.com/your-repo/your-project \
-            private=false \
+            private:false \
             state=active \
-            tags="$TAGS" || echo "package_create returned non-zero (dataset may already exist)"
+            'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Dataset created successfully!"
+          else
+            echo "Dataset might already exist, continuing..."
+          fi
       - name: Add resource to dataset with ckanapi
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
-          ckanapi action resource_create --config /srv/app/src/ckan/test-core.ini \
+          if ckanapi action resource_create \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
             description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
-            mimetype="text/csv" || { echo "resource_create failed"; ckanapi action package_show --config /srv/app/src/ckan/test-core.ini id=my-first-dataset || true; exit 1; }
+            mimetype="text/csv" \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Resource created successfully!"
+          else
+            echo "Resource creation failed"
+            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
+            exit 1
+          fi
       - name: Display CKAN instance inventory
         run: |
           set -eu
