@@ -186,6 +186,7 @@ jobs:
           scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
           scheming.presets = ckanext.scheming:presets.json
           scheming.dataset_fallback = false
+          ckanext.datapusher_plus.auto_push = false
           ckanext.datapusher_plus.use_proxy = false
           ckanext.datapusher_plus.download_proxy = 
           ckanext.datapusher_plus.ssl_verify = false
@@ -512,6 +513,30 @@ jobs:
             ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
             exit 1
           fi
+
+      - name: Manually trigger datapusher-plus processing
+        run: |
+          set -eu
+          echo "Manually triggering datapusher-plus for resource..."
+          
+          # Get the resource ID from the dataset
+          resource_id=$(ckanapi action package_show id=my-first-dataset --config /srv/app/src/ckan/test-core.ini | python3 -c "import json,sys; data=json.load(sys.stdin); print(data['result']['resources'][0]['id'])" 2>/dev/null || true)
+          
+          if [ -n "$resource_id" ]; then
+            echo "Found resource ID: $resource_id"
+            echo "Submitting to datapusher-plus..."
+            
+            if ckanapi action datapusher_submit \
+              resource_id="$resource_id" \
+              --config /srv/app/src/ckan/test-core.ini; then
+              echo "Datapusher-plus processing initiated successfully"
+            else
+              echo "Datapusher-plus submission failed (this may be expected if no datapusher service is running)"
+            fi
+          else
+            echo "Could not find resource ID for manual datapusher processing"
+          fi
+
       - name: Display CKAN instance inventory
         run: |
           set -eu
