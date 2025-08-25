@@ -566,7 +566,7 @@ jobs:
         run: |
           set -eu
           echo "=== CKAN Status (local) ==="
-          ckanapi action status_show --config /srv/app/src/ckan/test-core.ini | python3 -m json.tool || true
+          ckanapi action status_show --config /srv/app/src/ckan/test-core.ini 2>/dev/null | python3 -m json.tool || true
           echo ""
           echo "=== All Datasets ==="
           ckanapi action package_list --config /srv/app/src/ckan/test-core.ini || true
