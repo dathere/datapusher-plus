@@ -449,6 +449,28 @@ jobs:
           else
             echo "No API key found for ckan_admin - datapusher-plus may not work automatically"
           fi
+
+      - name: Create API token for datapusher-plus and add to config
+        run: |
+          set -eu
+          echo "Creating API token for datapusher-plus service account..."
+          
+          # Create API token for ckan_admin user specifically for datapusher-plus
+          dp_token=$(ckan -c /srv/app/src/ckan/test-core.ini user token add ckan_admin dpplus | tail -n 1 | tr -d '\t')
+          
+          if [ -n "$dp_token" ]; then
+            echo "Created datapusher-plus API token: $dp_token"
+            
+            # Add the token to the CKAN configuration file
+            ckan config-tool /srv/app/src/ckan/test-core.ini "ckanext.datapusher_plus.api_token=$dp_token"
+            
+            # Also set in environment for potential use in other steps
+            echo "DATAPUSHER_PLUS_API_TOKEN=$dp_token" >> $GITHUB_ENV
+            
+            echo "API token added to CKAN configuration successfully"
+          else
+            echo "Failed to create API token for datapusher-plus"
+          fi  
           
       - name: List existing users with ckanapi
         run: |
