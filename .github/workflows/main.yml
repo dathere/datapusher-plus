@@ -139,6 +139,7 @@ jobs:
       - name: Setup CKAN configuration (/tmp/test.ini)
         run: |
           set -eu
+
           # Prefer existing test-core.ini or test.ini from repo if available
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
@@ -149,9 +150,9 @@ jobs:
           fi
 
           # Defensive URL substitutions (keep these)
-          sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL:-postgresql://ckan_default:pass@postgres/ckan_test}|g" /tmp/test.ini || true
-          sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL:-postgresql://datastore_write:pass@postgres/datastore_test}|g" /tmp/test.ini || true
-          sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL:-postgresql://datastore_read:pass@postgres/datastore_test}|g" /tmp/test.ini || true
+          sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}|g" /tmp/test.ini || true
+          sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL:-***postgres/datastore_test}|g" /tmp/test.ini || true
+          sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL:-***postgres/datastore_test}|g" /tmp/test.ini || true
           if ! grep -q "^solr_url" /tmp/test.ini; then
             echo "solr_url = ${CKAN_SOLR_URL:-http://solr:8983/solr/ckan}" >> /tmp/test.ini
           fi
@@ -159,76 +160,83 @@ jobs:
             echo "ckan.redis.url = ${CKAN_REDIS_URL:-redis://redis:6379/1}" >> /tmp/test.ini
           fi
 
-          # Desired values (use env vars when present, otherwise fall back to your example values)
+          # Desired values (use env vars when present, otherwise fall back)
           CKAN_SITE_URL="${CKAN_SITE_URL:-http://localhost:5000}"
-          CKAN_SQLALCHEMY_URL="${CKAN_SQLALCHEMY_URL:-postgresql://ckan_default:pass@postgres/ckan_test}"
-          CKAN_DATASTORE_WRITE_URL="${CKAN_DATASTORE_WRITE_URL:-postgresql://datastore_write:pass@postgres/datastore_test}"
-          CKAN_DATASTORE_READ_URL="${CKAN_DATASTORE_READ_URL:-postgresql://datastore_read:pass@postgres/datastore_test}"
+          CKAN_SQLALCHEMY_URL="${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}"
+          CKAN_DATASTORE_WRITE_URL="${CKAN_DATASTORE_WRITE_URL:-***postgres/datastore_test}"
+          CKAN_DATASTORE_READ_URL="${CKAN_DATASTORE_READ_URL:-***postgres/datastore_test}"
           CKAN_SOLR_URL="${CKAN_SOLR_URL:-http://solr:8983/solr/ckan}"
           CKAN_REDIS_URL="${CKAN_REDIS_URL:-redis://redis:6379/1}"
 
-          # explicit other config values (exactly as you provided)
-          ADD_LINES=()
-          ADD_LINES+=("ckan.site_id = default")
-          ADD_LINES+=("ckan.site_title = CKAN Test")
-          ADD_LINES+=("ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp")
-          ADD_LINES+=("scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml")
-          ADD_LINES+=("scheming.presets = ckanext.scheming:presets.json ckanext.dcat.schemas:presets.yaml")
-          ADD_LINES+=("scheming.dataset_fallback = false")
-          ADD_LINES+=("ckanext.datapusher_plus.use_proxy = false")
-          ADD_LINES+=("ckanext.datapusher_plus.download_proxy = ")
-          ADD_LINES+=("ckanext.datapusher_plus.ssl_verify = false")
-          ADD_LINES+=("# supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas")
-          ADD_LINES+=("ckanext.datapusher_plus.upload_log_level = INFO")
-          ADD_LINES+=("ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip")
-          ADD_LINES+=("ckanext.datapusher_plus.pii_screening = false")
-          ADD_LINES+=("ckanext.datapusher_plus.pii_found_abort = false")
-          ADD_LINES+=("ckanext.datapusher_plus.pii_regex_resource_id_or_alias =")
-          ADD_LINES+=("ckanext.datapusher_plus.pii_show_candidates = false")
-          ADD_LINES+=("ckanext.datapusher_plus.pii_quick_screen = false")
-          ADD_LINES+=("ckanext.datapusher_plus.preview_rows = 100")
-          ADD_LINES+=("ckanext.datapusher_plus.download_timeout = 300")
-          ADD_LINES+=("ckanext.datapusher_plus.max_content_length = 1256000000000")
-          ADD_LINES+=("ckanext.datapusher_plus.chunk_size = 16384")
-          ADD_LINES+=("ckanext.datapusher_plus.default_excel_sheet = 0")
-          ADD_LINES+=("ckanext.datapusher_plus.sort_and_dupe_check = true")
-          ADD_LINES+=("ckanext.datapusher_plus.dedup = false")
-          ADD_LINES+=("ckanext.datapusher_plus.unsafe_prefix = unsafe_")
-          ADD_LINES+=("ckanext.datapusher_plus.reserved_colnames = _id")
-          ADD_LINES+=("ckanext.datapusher_plus.prefer_dmy = false")
-          ADD_LINES+=("ckanext.datapusher_plus.ignore_file_hash = true")
-          ADD_LINES+=("ckanext.datapusher_plus.auto_index_threshold = 3")
-          ADD_LINES+=("ckanext.datapusher_plus.auto_index_dates = true")
-          ADD_LINES+=("ckanext.datapusher_plus.auto_unique_index = true")
-          ADD_LINES+=("ckanext.datapusher_plus.summary_stats_options =")
-          ADD_LINES+=("ckanext.datapusher_plus.add_summary_stats_resource = false")
-          ADD_LINES+=("ckanext.datapusher_plus.summary_stats_with_preview = false")
-          ADD_LINES+=("ckanext.datapusher_plus.qsv_stats_string_max_length = 32767")
-          ADD_LINES+=("ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created")
-          ADD_LINES+=("ckanext.datapusher_plus.qsv_freq_limit = 10")
-          ADD_LINES+=("ckanext.datapusher_plus.auto_alias = true")
-          ADD_LINES+=("ckanext.datapusher_plus.auto_alias_unique = false")
-          ADD_LINES+=("ckanext.datapusher_plus.copy_readbuffer_size = 1048576")
-          ADD_LINES+=('ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}')
-          ADD_LINES+=("ckanext.datapusher_plus.auto_spatial_simplication = true")
-          ADD_LINES+=("ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1")
-          ADD_LINES+=("ckanext.datapusher_plus.latitude_fields = latitude,lat")
-          ADD_LINES+=("ckanext.datapusher_plus.longitude_fields = longitude,long,lon")
-          ADD_LINES+=("ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache")
-          ADD_LINES+=("ckanext.datapusher_plus.auto_unzip_one_file = true")
+          # create temp files to hold lists (POSIX sh-safe)
+          REPLACE_FILE="$(mktemp)"
+          ADD_FILE="$(mktemp)"
+          MISSING_ADD_FILE="$(mktemp)"
+          : > "$REPLACE_FILE"
+          : > "$ADD_FILE"
+          : > "$MISSING_ADD_FILE"
 
-          # Keys we want to replace or add with explicit env-based values
-          # entries of form "KEY|VALUE"
-          REPLACE_ENTRIES=(
-            "ckan.site_url|${CKAN_SITE_URL}"
-            "sqlalchemy.url|${CKAN_SQLALCHEMY_URL}"
-            "ckan.datastore.write_url|${CKAN_DATASTORE_WRITE_URL}"
-            "ckan.datastore.read_url|${CKAN_DATASTORE_READ_URL}"
-            "solr_url|${CKAN_SOLR_URL}"
-            "ckan.redis.url|${CKAN_REDIS_URL}"
-          )
+          # REPLACE_ENTRIES (key|value) - write expanded lines to REPLACE_FILE
+          printf '%s\n' \
+            "ckan.site_url|${CKAN_SITE_URL}" \
+            "sqlalchemy.url|${CKAN_SQLALCHEMY_URL}" \
+            "ckan.datastore.write_url|${CKAN_DATASTORE_WRITE_URL}" \
+            "ckan.datastore.read_url|${CKAN_DATASTORE_READ_URL}" \
+            "solr_url|${CKAN_SOLR_URL}" \
+            "ckan.redis.url|${CKAN_REDIS_URL}" \
+            > "$REPLACE_FILE"
 
-          # If /tmp/test.ini exists, patch only the keys listed above and ensure DEFAULT debug
+          # ADD_LINES content (one entry per line). Comments start with '#'
+          cat > "$ADD_FILE" <<'EOF'
+          ckan.site_id = default
+          ckan.site_title = CKAN Test
+          ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
+          scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
+          scheming.presets = ckanext.scheming:presets.json ckanext.dcat.schemas:presets.yaml
+          scheming.dataset_fallback = false
+          ckanext.datapusher_plus.use_proxy = false
+          ckanext.datapusher_plus.download_proxy = 
+          ckanext.datapusher_plus.ssl_verify = false
+          # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
+          ckanext.datapusher_plus.upload_log_level = INFO
+          ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+          ckanext.datapusher_plus.pii_screening = false
+          ckanext.datapusher_plus.pii_found_abort = false
+          ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
+          ckanext.datapusher_plus.pii_show_candidates = false
+          ckanext.datapusher_plus.pii_quick_screen = false
+          ckanext.datapusher_plus.preview_rows = 100
+          ckanext.datapusher_plus.download_timeout = 300
+          ckanext.datapusher_plus.max_content_length = 1256000000000
+          ckanext.datapusher_plus.chunk_size = 16384
+          ckanext.datapusher_plus.default_excel_sheet = 0
+          ckanext.datapusher_plus.sort_and_dupe_check = true
+          ckanext.datapusher_plus.dedup = false
+          ckanext.datapusher_plus.unsafe_prefix = unsafe_
+          ckanext.datapusher_plus.reserved_colnames = _id
+          ckanext.datapusher_plus.prefer_dmy = false
+          ckanext.datapusher_plus.ignore_file_hash = true
+          ckanext.datapusher_plus.auto_index_threshold = 3
+          ckanext.datapusher_plus.auto_index_dates = true
+          ckanext.datapusher_plus.auto_unique_index = true
+          ckanext.datapusher_plus.summary_stats_options =
+          ckanext.datapusher_plus.add_summary_stats_resource = false
+          ckanext.datapusher_plus.summary_stats_with_preview = false
+          ckanext.datapusher_plus.qsv_stats_string_max_length = 32767
+          ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created
+          ckanext.datapusher_plus.qsv_freq_limit = 10
+          ckanext.datapusher_plus.auto_alias = true
+          ckanext.datapusher_plus.auto_alias_unique = false
+          ckanext.datapusher_plus.copy_readbuffer_size = 1048576
+          ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
+          ckanext.datapusher_plus.auto_spatial_simplication = true
+          ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+          ckanext.datapusher_plus.latitude_fields = latitude,lat
+          ckanext.datapusher_plus.longitude_fields = longitude,long,lon
+          ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+          ckanext.datapusher_plus.auto_unzip_one_file = true
+          EOF
+
           if [ -f /tmp/test.ini ]; then
             echo "Patching selective keys in /tmp/test.ini (only the keys you listed)..."
 
@@ -238,7 +246,6 @@ jobs:
               /^\[.*\]/{ if(in){ print "debug = true"; in=0 } }
               {
                 if(in){
-                  # skip existing debug lines
                   if($1 == "debug") next
                   print
                 } else {
@@ -247,61 +254,60 @@ jobs:
               }
               END { if(in) print "debug = true" }' /tmp/test.ini > /tmp/test.ini.tmp && mv /tmp/test.ini.tmp /tmp/test.ini
 
-            # Process REPLACE_ENTRIES: if key exists replace in-place, otherwise mark for insertion into [app:main]
-            MISSING_ADD=""
-            for entry in "${REPLACE_ENTRIES[@]}"; do
-              key="${entry%%|*}"
-              value="${entry#*|}"
-              # remove leading/trailing spaces in key
-              key="$(echo "$key" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+            # Process REPLACE_FILE: replace if present, otherwise write to missing file
+            while IFS= read -r entry || [ -n "$entry" ]; do
+              key="$(printf '%s' "$entry" | cut -d'|' -f1)"
+              value="$(printf '%s' "$entry" | cut -d'|' -f2-)"
               # escape backslashes and ampersands for sed replacement
-              esc_value=$(printf '%s' "$value" | sed -e 's/[\\&]/\\&/g')
-              if grep -q -E "^[[:space:]]*${key}[[:space:]]*=" /tmp/test.ini; then
-                sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${esc_value}|g" /tmp/test.ini || true
+              esc_value="$(printf '%s' "$value" | sed -e 's/[\/&]/\\&/g')"
+              if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /tmp/test.ini; then
+                sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /tmp/test.ini || true
               else
-                MISSING_ADD="${MISSING_ADD}${key} = ${value}\n"
+                printf '%s\n' "${key} = ${value}" >> "$MISSING_ADD_FILE"
               fi
-            done
+            done < "$REPLACE_FILE"
 
-            # Process the long ADD_LINES set: replace if present, otherwise collect to append
-            for ln in "${ADD_LINES[@]}"; do
-              # skip comment lines (we'll handle comments only by appending if missing)
-              if echo "$ln" | grep -q '^#'; then
-                # If the exact comment already exists, skip; otherwise append to missing
-                if ! grep -Fq "$ln" /tmp/test.ini; then
-                  MISSING_ADD="${MISSING_ADD}${ln}\n"
-                fi
-                continue
-              fi
-              key="$(echo "$ln" | cut -d'=' -f1 | sed 's/[[:space:]]*$//')"
-              value="$(echo "$ln" | cut -d'=' -f2- | sed 's/^[[:space:]]*//')"
-              esc_value=$(printf '%s' "$value" | sed -e 's/[\\&]/\\&/g')
-              if grep -q -E "^[[:space:]]*${key}[[:space:]]*=" /tmp/test.ini; then
-                sed -i -E "s|^[[:space:]]*${key}[[:space:]]*=.*|${key} = ${esc_value}|g" /tmp/test.ini || true
-              else
-                MISSING_ADD="${MISSING_ADD}${key} = ${value}\n"
-              fi
-            done
+            # Process ADD_FILE: replace if present, otherwise collect to missing file
+            while IFS= read -r ln || [ -n "$ln" ]; do
+              # comment lines - check if exact comment exists
+              case "$ln" in
+                \#*)
+                  if ! grep -Fq "$ln" /tmp/test.ini; then
+                    printf '%s\n' "$ln" >> "$MISSING_ADD_FILE"
+                  fi
+                  ;;
+                *)
+                  key="$(printf '%s' "$ln" | cut -d'=' -f1 | sed 's/[[:space:]]*$//')"
+                  value="$(printf '%s' "$ln" | cut -d'=' -f2- | sed 's/^[[:space:]]*//')"
+                  esc_value="$(printf '%s' "$value" | sed -e 's/[\/&]/\\&/g')"
+                  if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /tmp/test.ini; then
+                    sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /tmp/test.ini || true
+                  else
+                    printf '%s\n' "${key} = ${value}" >> "$MISSING_ADD_FILE"
+                  fi
+                  ;;
+              esac
+            done < "$ADD_FILE"
 
-            # Also ensure site_url and other env-backed keys are present even if not existent above
-            # (they may have been handled already by REPLACE_ENTRIES)
-            # If there are missing lines, insert them after the first [app:main] header (or append [app:main] + lines at end)
-            if [ -n "$MISSING_ADD" ]; then
-              # Use awk to insert the missing block after the first [app:main] header, or append the section if header missing
-              awk -v add="$MISSING_ADD" '
-                BEGIN{ inserted=0 }
+            # If there are missing lines, insert them after the first [app:main] header, or append the section
+            if [ -s "$MISSING_ADD_FILE" ]; then
+              awk -v addfile="$MISSING_ADD_FILE" '
+                BEGIN{
+                  inserted=0
+                  while ((getline line < addfile) > 0) { add[++na]=line }
+                  close(addfile)
+                }
                 {
                   print
-                  if(!inserted && $0=="[app:main]"){
-                    # print the block (preserve newlines in add)
-                    printf "%s", add
+                  if(!inserted && $0=="[app:main]") {
+                    for(i=1;i<=na;i++) print add[i]
                     inserted=1
                   }
                 }
                 END{
                   if(!inserted){
                     print "[app:main]"
-                    printf "%s", add
+                    for(i=1;i<=na;i++) print add[i]
                   }
                 }' /tmp/test.ini > /tmp/test.ini.new && mv /tmp/test.ini.new /tmp/test.ini
             fi
@@ -319,12 +325,10 @@ jobs:
           REQUIRED_PLUGINS="datastore datapusher_plus scheming_datasets"
           if grep -q "^ckan.plugins" /tmp/test.ini; then
             echo "Appending required plugins to existing ckan.plugins line"
-            # Append any missing plugin names to the line
             current=$(grep "^ckan.plugins" /tmp/test.ini | head -n1 | cut -d'=' -f2-)
             for p in $REQUIRED_PLUGINS; do
               echo "$current" | grep -qw "$p" || current="$current $p"
             done
-            # replace the first ckan.plugins line with the new content
             awk -v new="ckan.plugins = $current" 'BEGIN{done=0} {if(!done && $1=="ckan.plugins") {print new; done=1} else print $0}' /tmp/test.ini > /tmp/test.ini.new && mv /tmp/test.ini.new /tmp/test.ini
           else
             echo "ckan.plugins = $REQUIRED_PLUGINS" >> /tmp/test.ini
