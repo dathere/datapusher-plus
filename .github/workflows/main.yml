@@ -461,7 +461,19 @@ jobs:
             fi
           fi
 
-          
+      - name: List existing users with ckanapi
+        run: |
+          set -eu
+          echo "=== Listing all existing users ==="
+          if ckanapi action user_list --config /srv/app/src/ckan/test-core.ini; then
+            echo "User list retrieved successfully"
+          else
+            echo "Failed to retrieve user list"
+            exit 1
+          fi
+          echo ""
+          echo "=== User list with details ==="
+          ckanapi action user_list --config /srv/app/src/ckan/test-core.ini | python3 -m json.tool || true
       - name: Create organization with ckanapi
         run: |
           set -eu
