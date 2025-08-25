@@ -410,54 +410,44 @@ jobs:
         run: |
           set -eu
           echo "Creating sysadmin user (ckan_admin) if not exist..."
-          # create user (idempotent - if exists it will return error; ignore)
+          
+          # Create user (without with_apitoken parameter)
           ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
             name=ckan_admin \
             email=admin@example.com \
             password=test1234 \
             fullname="CKAN Administrator" \
-            about="Created by GitHub Actions test" \
-            with_apitoken=true || echo "user_create returned non-zero (user may already exist)"
-          echo "Ensure ckan_admin is sysadmin via CLI"
+            about="Created by GitHub Actions test" || echo "user_create returned non-zero (user may already exist)"
+          
+          # Make user sysadmin
           if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
             echo "ckan_admin promoted to sysadmin"
           else
             echo "sysadmin add returned non-zero (user may already be sysadmin)"
           fi
-          echo "Retrieve user details and API key (if returned)..."
-          user_data=$(ckanapi action user_show --config /srv/app/src/ckan/test-core.ini id=ckan_admin 2>/dev/null || true)
-          if [ -z "$user_data" ]; then
-            echo "No user data returned by user_show"
+          
+          # Create API token explicitly
+          echo "Creating API token for ckan_admin..."
+          if api_token_result=$(ckanapi action api_token_create \
+            user=ckan_admin \
+            name="datapusher-plus-token" \
+            --config /srv/app/src/ckan/test-core.ini 2>/dev/null); then
+            
+            api_token=$(echo "$api_token_result" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['token'])")
+            echo "API token created successfully"
+            echo "CKAN_API_KEY=$api_token" >> $GITHUB_ENV
           else
-            # pretty print and parse
-            echo "$user_data" | python3 -m json.tool || true
-            api_key=$(echo "$user_data" | python3 - <<'PY'
-          import json,sys
-          try:
-              data=json.load(sys.stdin)
-              r=data.get('result',{})
-              ak=r.get('apikey') or ''
-              print(ak)
-          except Exception:
-              print('')
-          PY
-          )
-                is_sysadmin=$(echo "$user_data" | python3 - <<'PY'
-          import json,sys
-          try:
-              data=json.load(sys.stdin)
-              r=data.get('result',{})
-              print(str(bool(r.get('sysadmin', False))).lower())
-          except Exception:
-              print('false')
-          PY
-          )
-            echo "sysadmin: $is_sysadmin"
-            if [ -n "$api_key" ]; then
-              echo "API key found. Exporting to GITHUB_ENV"
-              echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
-            else
-              echo "No API key found in user_show result (it may not be returned)."
+            echo "API token creation failed, trying alternative method..."
+            # Fallback: try to extract from user_show if apikey field exists
+            user_data=$(ckanapi action user_show --config /srv/app/src/ckan/test-core.ini id=ckan_admin 2>/dev/null || true)
+            if [ -n "$user_data" ]; then
+              api_key=$(echo "$user_data" | python3 -c "import json,sys; data=json.load(sys.stdin); print(data.get('result',{}).get('apikey',''))" 2>/dev/null || true)
+              if [ -n "$api_key" ]; then
+                echo "Found existing API key"
+                echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+              else
+                echo "No API key available - datapusher-plus may not work automatically"
+              fi
             fi
           fi
 
