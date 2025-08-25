@@ -101,9 +101,24 @@ jobs:
           fi
           # Ensure ckanapi and datapusher-plus are available
           pip install --upgrade ckanapi || true
+          apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev uchardet || true
           # Install datapusher-plus package (the pip package name is typically datapusher-plus)
-          pip install --upgrade datapusher-plus || true
+          pip install -e 'git+https://github.com/dathere/datapusher-plus.git#egg=datapusher-plus' || true
+          pip install -r 'https://raw.githubusercontent.com/dathere/datapusher-plus/requirements.txt'  || true
+          pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming' || true
           echo "Installed ckanapi and datapusher-plus (best-effort)"
+
+      - name : Install QSV
+        run: |
+          wget -O - https://dathere.github.io/qsv-deb-releases/qsv-deb.gpg | gpg --dearmor -o /usr/share/keyrings/qsv-archive-keyring.gpg
+          # Add the repository to sources list
+          echo "deb [signed-by=/usr/share/keyrings/qsv-archive-keyring.gpg] https://dathere.github.io/qsv-deb-releases ./" | tee /etc/apt/sources.list.d/qsv.list
+          
+          # Install QSV
+          apt-get update && apt-get install qsv 
+          apt-get clean && rm -rf /var/lib/apt/lists/*
+
+
       - name: Setup CKAN configuration (/tmp/test.ini)
         run: |
           set -eu
@@ -131,6 +146,52 @@ jobs:
           ckan.redis.url = redis://redis:6379/1
           ckan.site_id = default
           ckan.site_title = CKAN Test
+          ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsv
+          scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml"   
+          scheming.presets = ckanext.scheming:presets.json ckanext.dcat.schemas:presets.yaml
+          scheming.dataset_fallback = false
+          ckanext.datapusher_plus.use_proxy = false
+          ckanext.datapusher_plus.download_proxy = 
+          ckanext.datapusher_plus.ssl_verify = false
+          # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
+          ckanext.datapusher_plus.upload_log_level = INFO
+          ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+          ckanext.datapusher_plus.pii_screening = false
+          ckanext.datapusher_plus.pii_found_abort = false
+          ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
+          ckanext.datapusher_plus.pii_show_candidates = false
+          ckanext.datapusher_plus.pii_quick_screen = false
+          ckanext.datapusher_plus.preview_rows = 100
+          ckanext.datapusher_plus.download_timeout = 300
+          ckanext.datapusher_plus.max_content_length = 1256000000000
+          ckanext.datapusher_plus.chunk_size = 16384
+          ckanext.datapusher_plus.default_excel_sheet = 0
+          ckanext.datapusher_plus.sort_and_dupe_check = true
+          ckanext.datapusher_plus.dedup = false
+          ckanext.datapusher_plus.unsafe_prefix = unsafe_
+          ckanext.datapusher_plus.reserved_colnames = _id
+          ckanext.datapusher_plus.prefer_dmy = false
+          ckanext.datapusher_plus.ignore_file_hash = true
+          ckanext.datapusher_plus.auto_index_threshold = 3
+          ckanext.datapusher_plus.auto_index_dates = true
+          ckanext.datapusher_plus.auto_unique_index = true
+          ckanext.datapusher_plus.summary_stats_options =
+          ckanext.datapusher_plus.add_summary_stats_resource = false
+          ckanext.datapusher_plus.summary_stats_with_preview = false
+          ckanext.datapusher_plus.qsv_stats_string_max_length = 32767
+          ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created
+          ckanext.datapusher_plus.qsv_freq_limit = 10
+          ckanext.datapusher_plus.auto_alias = true
+          ckanext.datapusher_plus.auto_alias_unique = false
+          ckanext.datapusher_plus.copy_readbuffer_size = 1048576
+          ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
+          ckanext.datapusher_plus.auto_spatial_simplication = true
+          ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+          ckanext.datapusher_plus.latitude_fields = latitude,lat
+          ckanext.datapusher_plus.longitude_fields = longitude,long,lon
+          ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+          ckanext.datapusher_plus.auto_unzip_one_file = true
+                    
           EOF
             echo "Created /tmp/test.ini"
           fi
@@ -145,7 +206,7 @@ jobs:
             echo "ckan.redis.url = ${CKAN_REDIS_URL}" >> /tmp/test.ini
           fi
           # Append datapusher plugin(s) to ckan.plugins if present; otherwise add a plugins line
-          REQUIRED_PLUGINS="datastore datapusher datapusher_plus"
+          REQUIRED_PLUGINS="datastore datapusher_plus scheming_datasets"
           if grep -q "^ckan.plugins" /tmp/test.ini; then
             echo "Appending required plugins to existing ckan.plugins line"
             # Append any missing plugin names to the line
