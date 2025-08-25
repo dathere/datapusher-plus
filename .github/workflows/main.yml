@@ -1,19 +1,14 @@
 name: CKAN Runner with ckanapi
-
-on: 
-  # push:
-  # pull_request:
-  workflow_dispatch:  # Allows manual trigger from GitHub UI
-
+on:
+  workflow_dispatch:
+# Workflow-level defaults
 env:
-  # Configuration variables
   CKAN_VERSION: "2.11"
   POSTGRES_PASSWORD: postgres
   CKAN_DB_PASSWORD: pass
   CKAN_SITE_URL: http://localhost:5000
   CKAN_SITE_ID: default
   CKAN_SITE_TITLE: "CKAN Test Instance"
-
 jobs:
   setup:
     runs-on: ubuntu-latest
@@ -23,6 +18,7 @@ jobs:
     services:
       solr:
         image: ckan/ckan-solr:2.11-solr9
+        ports: ["8983:8983"]
       postgres:
         image: ckan/ckan-postgres-dev:2.11
         env:
@@ -32,351 +28,289 @@ jobs:
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
       redis:
         image: redis:3
+        ports: ["6379:6379"]
+    # Job-specific environment (these will be available inside the container)
     env:
       CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
       CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
       CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@postgres/datastore_test
       CKAN_SOLR_URL: http://solr:8983/solr/ckan
       CKAN_REDIS_URL: redis://redis:6379/1
-      
+      CKAN_SITE_URL: http://localhost:5000
     steps:
       - name: Fix permissions and install essential tools
         run: |
           mkdir -p /__w/_temp
-          chmod -R 777 /__w/_temp
-          chmod -R 777 /__w/
-          
-          apt-get update
-          apt-get install -y curl wget net-tools procps postgresql-client
-          
+          chmod -R 777 /__w/_temp || true
+          chmod -R 777 /__w/ || true
+          apt-get update -y
+          apt-get install -y curl wget net-tools procps postgresql-client jq || true
           echo "Essential tools installed successfully"
-      
       - uses: actions/checkout@v4
-      
-      - name: Setup database users and permissions
+      - name: Wait for PostgreSQL to be ready
         run: |
           echo "Waiting for PostgreSQL to be ready..."
-          timeout=60
+          timeout=90
           while [ $timeout -gt 0 ]; do
-            if pg_isready -h postgres -p 5432 -U postgres >/dev/null 2>&1; then
+            if PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
               echo "PostgreSQL is ready!"
               break
             fi
-            
-            if PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
-              echo "PostgreSQL is ready (via psql)!"
-              break
-            fi
-            
-            echo "Waiting for postgres... ($timeout seconds remaining)"
+            echo "Postgres not ready yet ($timeout s left)..."
             sleep 3
             timeout=$((timeout-3))
           done
-          
           if [ $timeout -le 0 ]; then
-            echo "Timeout waiting for PostgreSQL to be ready"
+            echo "Timeout waiting for PostgreSQL"
             exit 1
           fi
-          
-          echo "Creating database users..."
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';" || echo "User ckan_default already exists"
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD '$CKAN_DB_PASSWORD';" || echo "User datastore_write already exists"
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD '$CKAN_DB_PASSWORD';" || echo "User datastore_read already exists"
-          
-          echo "Creating databases..."
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;" || echo "Database ckan_test already exists"
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;" || echo "Database datastore_test already exists"
-          
-          echo "Setting database permissions..."
+      - name: Setup database users and permissions
+        run: |
+          set -euo pipefail
+          echo "Creating database users (if not exist)..."
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='ckan_default'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='datastore_write'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD '$CKAN_DB_PASSWORD';"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='datastore_read'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD '$CKAN_DB_PASSWORD';"
+          echo "Creating databases (if not exist)..."
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='ckan_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='datastore_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;"
+          echo "Granting permissions (best-effort)..."
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;" || true
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;" || true
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;" || true
-          
-          echo "Database setup completed successfully"
-      
-      - name: Install requirements and ckanapi
+          echo "Database setup completed"
+      - name: Install requirements, ckanapi and datapusher-plus
         run: |
-          pip install -r requirements.txt
-          pip install -r requirements-dev.txt
-          pip install -e .
-          
-          # Install ckanapi
-          pip install ckanapi
-          
-          echo "Requirements and ckanapi installed successfully"
-          
-      - name: Setup CKAN configuration
+          set -euo pipefail
+          # Use pip from the container (image usually has Python/pip)
+          python3 -m pip install --upgrade pip setuptools wheel || true
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt || true
+          fi
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt || true
+          fi
+          # install current repo editable if present
+          if [ -f setup.py ] || [ -f pyproject.toml ]; then
+            pip install -e . || true
+          fi
+          # Ensure ckanapi and datapusher-plus are available
+          pip install --upgrade ckanapi || true
+          # Install datapusher-plus package (the pip package name is typically datapusher-plus)
+          pip install --upgrade datapusher-plus || true
+          echo "Installed ckanapi and datapusher-plus (best-effort)"
+      - name: Setup CKAN configuration (/tmp/test.ini)
         run: |
+          set -euo pipefail
+          # Prefer existing test-core.ini or test.ini from repo if available
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
-            echo "Copied existing test-core.ini"
+            echo "Copied /srv/app/src/ckan/test-core.ini -> /tmp/test.ini"
           elif [ -f /srv/app/src/ckan/test.ini ]; then
             cp /srv/app/src/ckan/test.ini /tmp/test.ini
-            echo "Copied existing test.ini"
+            echo "Copied /srv/app/src/ckan/test.ini -> /tmp/test.ini"
           else
-            echo "Creating basic CKAN configuration..."
-            cat > /tmp/test.ini << 'EOF'
-          [DEFAULT]
-          debug = true
-          
-          [server:main]
-          use = config:common.ini
-          
-          [app:main]
-          use = config:common.ini
-          ckan.site_url = http://localhost:5000
-          sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
-          ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
-          ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
-          solr_url = http://solr:8983/solr/ckan
-          ckan.redis.url = redis://redis:6379/1
-          ckan.site_id = default
-          ckan.site_title = CKAN Test
-          ckan.plugins = datastore datapusher
-          EOF
+            echo "Creating minimal /tmp/test.ini that uses common.ini..."
+            cat > /tmp/test.ini <<'EOF'
+[DEFAULT]
+debug = true
+[server:main]
+use = config:common.ini
+[app:main]
+use = config:common.ini
+ckan.site_url = http://localhost:5000
+sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
+ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
+ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
+solr_url = http://solr:8983/solr/ckan
+ckan.redis.url = redis://redis:6379/1
+ckan.site_id = default
+ckan.site_title = CKAN Test
+EOF
+            echo "Created /tmp/test.ini"
           fi
-          
-          sed -i 's|postgresql://.*ckan_test|postgresql://ckan_default:pass@postgres/ckan_test|g' /tmp/test.ini
-          sed -i 's|ckan.datastore.write_url.*|ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test|g' /tmp/test.ini
-          sed -i 's|ckan.datastore.read_url.*|ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test|g' /tmp/test.ini
-          
-          if ! grep -q "solr_url" /tmp/test.ini; then
-            echo "solr_url = http://solr:8983/solr/ckan" >> /tmp/test.ini
+          # Ensure the DB/solr/redis URLs are set correctly (defensive)
+          sed -i "s|sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /tmp/test.ini || true
+          sed -i "s|ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /tmp/test.ini || true
+          sed -i "s|ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /tmp/test.ini || true
+          if ! grep -q "^solr_url" /tmp/test.ini; then
+            echo "solr_url = ${CKAN_SOLR_URL}" >> /tmp/test.ini
           fi
-          if ! grep -q "ckan.redis.url" /tmp/test.ini; then
-            echo "ckan.redis.url = redis://redis:6379/1" >> /tmp/test.ini
+          if ! grep -q "^ckan.redis.url" /tmp/test.ini; then
+            echo "ckan.redis.url = ${CKAN_REDIS_URL}" >> /tmp/test.ini
           fi
-          
-          echo "Configuration setup completed"
-          echo "Configuration file contents:"
-          head -20 /tmp/test.ini
-          
+          # Append datapusher plugin(s) to ckan.plugins if present; otherwise add a plugins line
+          REQUIRED_PLUGINS="datastore datapusher datapusher_plus"
+          if grep -q "^ckan.plugins" /tmp/test.ini; then
+            echo "Appending required plugins to existing ckan.plugins line"
+            # Append any missing plugin names to the line
+            current=$(grep "^ckan.plugins" /tmp/test.ini | head -n1 | cut -d'=' -f2-)
+            for p in $REQUIRED_PLUGINS; do
+              echo "$current" | grep -qw "$p" || current="$current $p"
+            done
+            # replace the first ckan.plugins line with the new content
+            awk -v new="ckan.plugins = $current" 'BEGIN{done=0} {if(!done && $1=="ckan.plugins") {print new; done=1} else print $0}' /tmp/test.ini > /tmp/test.ini.new && mv /tmp/test.ini.new /tmp/test.ini
+          else
+            echo "ckan.plugins = $REQUIRED_PLUGINS" >> /tmp/test.ini
+            echo "Added ckan.plugins line with required plugins."
+          fi
+          echo "---- /tmp/test.ini (head) ----"
+          head -n 60 /tmp/test.ini || true
+          echo "---- end ----"
       - name: Initialize CKAN database
         run: |
-          echo "Initializing CKAN database..."
-          
-          echo "Testing database connectivity..."
+          set -euo pipefail
+          echo "Testing connectivity with CKAN DB user..."
           if ! PGPASSWORD=$CKAN_DB_PASSWORD psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
-            echo "Cannot connect to CKAN database. Checking if database exists..."
-            if ! PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1 FROM pg_database WHERE datname='ckan_test';" | grep -q 1; then
-              echo "Creating ckan_test database..."
-              PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
-            fi
+            echo "Cannot connect as ckan_default. Attempting to create database owner and db..."
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER IF NOT EXISTS ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';" || true
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE IF NOT EXISTS ckan_test OWNER ckan_default;" || true
           fi
-          
+          echo "Running ckan db init (may be idempotent)..."
           if ckan -c /tmp/test.ini db init; then
-            echo "CKAN database initialized successfully"
+            echo "CKAN DB initialized."
           else
-            echo "CKAN database initialization failed, but continuing..."
-            echo "This might be because the database is already initialized"
+            echo "ckan db init returned non-zero; continuing (may already be initialized)."
           fi
-          
-          echo "Setting up datastore permissions..."
+          echo "Setting datastore permissions..."
           if ckan -c /tmp/test.ini datastore set-permissions | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
-            echo "Datastore permissions set successfully"
+            echo "Datastore permissions set."
           else
-            echo "Datastore permission setup failed, but continuing..."
-            echo "This might be expected if datastore is already configured"
+            echo "Datastore permission step returned non-zero; continuing."
           fi
-          
-          echo "Database initialization completed"
-          
       - name: Start CKAN server
         run: |
-          echo "Starting CKAN server..."
-          
-          ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader &
+          set -euo pipefail
+          echo "Starting CKAN server in background..."
+          # Use nohup to keep it running in background
+          nohup ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader > /tmp/ckan_stdout.log 2>&1 &
           CKAN_PID=$!
-          echo "CKAN PID: $CKAN_PID"
-          
-          echo "Waiting for CKAN server to start..."
-          timeout=90
-          success=false
-          
+          echo "CKAN PID=$CKAN_PID"
+          # wait for port / API
+          timeout=120
           while [ $timeout -gt 0 ]; do
-            if ! kill -0 $CKAN_PID 2>/dev/null; then
-              echo "CKAN process died unexpectedly"
-              echo "Checking for error logs..."
-              tail -n 50 /var/log/ckan/*.log 2>/dev/null || echo "No log files found"
+            if ! kill -0 "$CKAN_PID" >/dev/null 2>&1; then
+              echo "CKAN process died. Showing last lines of log:"
+              tail -n 200 /tmp/ckan_stdout.log || true
               exit 1
             fi
-            
-            if curl -f -s $CKAN_SITE_URL/api/3/action/status_show > /dev/null 2>&1; then
-              echo "CKAN server is running and responding!"
-              success=true
+            if curl -fsS "${CKAN_SITE_URL}/api/3/action/status_show" >/dev/null 2>&1; then
+              echo "CKAN API responding"
               break
             fi
-            
-            echo "Still waiting... ($timeout seconds remaining)"
+            echo "Waiting for CKAN API... ($timeout s left)"
             sleep 3
             timeout=$((timeout-3))
           done
-          
-          if [ "$success" = false ]; then
-            echo "Timeout waiting for CKAN server to start"
-            echo "Checking process status..."
-            ps aux | grep ckan || echo "ps command failed"
-            echo "Checking network listeners..."
-            netstat -tlnp 2>/dev/null || ss -tlnp 2>/dev/null || echo "Network tools failed"
-            echo "Trying direct curl to root endpoint..."
-            curl -v $CKAN_SITE_URL/ || echo "Curl to root failed"
+          if [ $timeout -le 0 ]; then
+            echo "Timeout waiting for CKAN to start. Dumping logs..."
+            tail -n 200 /tmp/ckan_stdout.log || true
+            ss -tlnp || netstat -tlnp || true
             exit 1
           fi
-          
-          echo "CKAN_URL=$CKAN_SITE_URL" >> $GITHUB_ENV
-          echo "CKAN server started successfully!"
-          
-      - name: Test CKAN API Status with ckanapi
+          echo "CKAN started successfully"
+      - name: Test CKAN API Status with ckanapi and confirm plugins
         run: |
-          echo "Testing CKAN API status with ckanapi..."
-          
-          # Test using ckanapi CLI
-          if ckanapi action status_show -r $CKAN_SITE_URL; then
-            echo "CKAN API status check successful with ckanapi!"
+          set -euo pipefail
+          echo "Testing remote status_show using ckanapi (--remote)"
+          if ckanapi action status_show -r "${CKAN_SITE_URL}"; then
+            echo "Remote status_show OK"
           else
-            echo "CKAN API status check failed"
+            echo "Remote status_show failed"
+            cat /tmp/ckan_stdout.log || true
             exit 1
           fi
-          
-          # Test using local config
-          echo "Testing with local config file..."
-          if ckanapi action status_show -c /tmp/test.ini; then
-            echo "Local CKAN API access working!"
+          echo ""
+          echo "Testing local status_show using config file"
+          if ckanapi action status_show --config /tmp/test.ini; then
+            echo "Local status_show OK"
           else
-            echo "Local CKAN API access failed"
+            echo "Local status_show failed"
+            cat /tmp/ckan_stdout.log || true
             exit 1
           fi
-      - name: Create sysadmin user with ckanapi
+          echo "Check 'extensions' or 'plugins' in status_show output:"
+          ckanapi action status_show --config /tmp/test.ini | python3 -m json.tool || true
+      - name: Create sysadmin user with ckanapi (safe)
         run: |
-          echo "Creating sysadmin user with ckanapi..."
-          
-          # Create sysadmin user using ckanapi (local has sysadmin privileges by default)
-          if ckanapi action user_create \
+          set -euo pipefail
+          echo "Creating sysadmin user (ckan_admin) if not exist..."
+          # create user (idempotent - if exists it will return error; ignore)
+          ckanapi action user_create --config /tmp/test.ini \
             name=ckan_admin \
             email=admin@example.com \
             password=test1234 \
             fullname="CKAN Administrator" \
-            about="System administrator created via ckanapi and GitHub Actions" \
-            with_apitoken:true \
-            -c /tmp/test.ini; then
-            echo "Sysadmin user created successfully"
-          else
-            echo "User might already exist, continuing..."
-          fi
-          
-          # Make the user a sysadmin using CKAN CLI (ckanapi doesn't have sysadmin action)
+            about="Created by GitHub Actions test" \
+            with_apitoken=true || echo "user_create returned non-zero (user may already exist)"
+          echo "Ensure ckan_admin is sysadmin via CLI"
           if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
-            echo "User granted sysadmin privileges"
+            echo "ckan_admin promoted to sysadmin"
           else
-            echo "User might already be sysadmin, continuing..."
+            echo "sysadmin add returned non-zero (user may already be sysadmin)"
           fi
-          
-          echo "Sysadmin user setup completed"
-      - name: Promote ckan_admin to sysadmin
-        run: |
-          echo "Promoting ckan_admin to sysadmin..."
-          
-          # Promote user to sysadmin using CKAN CLI with correct config path
-          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
-            echo "User ckan_admin promoted to sysadmin successfully"
+          echo "Retrieve user details and API key (if returned)..."
+          user_data=$(ckanapi action user_show --config /tmp/test.ini id=ckan_admin 2>/dev/null || true)
+          if [ -z "$user_data" ]; then
+            echo "No user data returned by user_show"
           else
-            echo "User might already be sysadmin or promotion failed"
-          fi
-          
-          # Wait a moment for changes to take effect
-          sleep 2
-          
-          # Verify sysadmin status and get API key
-          echo "Retrieving user details to verify sysadmin status and API key..."
-          user_data=$(ckanapi action user_show id=ckan_admin -c /tmp/test.ini)
-          
-          # Check if output is valid JSON
-          if echo "$user_data" | python3 -c "import json, sys; json.load(sys.stdin)" 2>/dev/null; then
-            echo "User details (formatted):"
-            echo "$user_data" | python3 -m json.tool
-            
-            # Extract sysadmin status
-            is_sysadmin=$(echo "$user_data" | python3 -c "
-            import json, sys
-            try:
-                data = json.load(sys.stdin)
-                result = data.get('result', {})
-                print(str(result.get('sysadmin', False)).lower())
-            except:
-                print('false')
-            ")
-            
-            # Extract API key (not token)
-            api_key=$(echo "$user_data" | python3 -c "
-            import json, sys
-            try:
-                data = json.load(sys.stdin)
-                result = data.get('result', {})
-                apikey = result.get('apikey')
-                if apikey and apikey != 'None':
-                    print(apikey)
-                else:
-                    print('')
-            except:
-                print('')
-            ")
-            
-            echo "Sysadmin status: $is_sysadmin"
-            if [ -n "$api_key" ] && [ "$api_key" != "None" ] && [ "$api_key" != "null" ]; then
-              echo "API Key: $api_key"
+            # pretty print and parse
+            echo "$user_data" | python3 -m json.tool || true
+            api_key=$(echo "$user_data" | python3 - <<'PY'
+import json,sys
+try:
+    data=json.load(sys.stdin)
+    r=data.get('result',{})
+    ak=r.get('apikey') or ''
+    print(ak)
+except Exception:
+    print('')
+PY
+)
+            is_sysadmin=$(echo "$user_data" | python3 - <<'PY'
+import json,sys
+try:
+    data=json.load(sys.stdin)
+    r=data.get('result',{})
+    print(str(bool(r.get('sysadmin', False))).lower())
+except Exception:
+    print('false')
+PY
+)
+            echo "sysadmin: $is_sysadmin"
+            if [ -n "$api_key" ]; then
+              echo "API key found. Exporting to GITHUB_ENV"
               echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
             else
-              echo "No API key found in user data"
+              echo "No API key found in user_show result (it may not be returned)."
             fi
-            
-          else
-            echo "Invalid JSON output from user_show command"
-            echo "Raw output was:"
-            echo "$user_data"
           fi
-          
-          echo "Sysadmin promotion process completed"
       - name: Create organization with ckanapi
         run: |
-          echo "Creating demo organization with ckanapi..."
-          
-          # Create organization using ckanapi
-          if ckanapi action organization_create \
+          set -euo pipefail
+          echo "Creating organization demo-organization (idempotent)..."
+          ckanapi action organization_create --config /tmp/test.ini \
             name=demo-organization \
             title="Demo Data Publishing Organization" \
-            description="This is a comprehensive demo organization created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
-            image_url="https://via.placeholder.com/200x100/0066cc/ffffff?text=Demo+Org" \
-            -c /tmp/test.ini; then
-            echo "Organization created successfully!"
-          else
-            echo "Organization might already exist, continuing..."
-          fi
-          
-          # Add admin user to organization
-          if ckanapi action organization_member_create \
-            id=demo-organization \
-            username=ckan_admin \
-            role=admin \
-            -c /tmp/test.ini; then
-            echo "Admin user added to organization"
-          else
-            echo "User might already be a member, continuing..."
-          fi
-          
-          # Verify organization was created
-          # echo "Verifying organization creation..."
-          # ckanapi action organization_show id=demo-organization -c /tmp/test.ini | python3 -m json.tool
-          
-          echo "Organization creation completed"
+            description="Demo org created by GitHub Actions for datapusher-plus testing." || echo "organization_create returned non-zero (may already exist)"
+          echo "Add ckan_admin as admin to the organization"
+          ckanapi action organization_member_create --config /tmp/test.ini \
+            id=demo-organization username=ckan_admin role=admin || echo "organization_member_create returned non-zero (may already be member)"
       - name: Create dataset with ckanapi
         run: |
-          echo "Creating demo dataset with ckanapi..."
-          
-          # Create dataset using ckanapi with comprehensive metadata
-          if ckanapi action package_create \
+          set -euo pipefail
+          echo "Creating dataset my-first-dataset (idempotent)..."
+          # Use tags as a single JSON string
+          TAGS='[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]'
+          ckanapi action package_create --config /tmp/test.ini \
             name=my-first-dataset \
             title="My First Comprehensive Dataset" \
-            notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality, including datapusher-plus integration and automated data processing workflows." \
+            notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
             owner_org=demo-organization \
             license_id=cc-by \
             version=1.0.0 \
@@ -385,112 +319,56 @@ jobs:
             maintainer="CKAN Admin" \
             maintainer_email=admin@example.com \
             url=https://github.com/your-repo/your-project \
-            private:false \
+            private=false \
             state=active \
-            'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
-            -c /tmp/test.ini; then
-            echo "Dataset created successfully!"
-          else
-            echo "Dataset might already exist, continuing..."
-          fi
-          
-          # Verify dataset was created
-          # echo "Verifying dataset creation..."
-          # ckanapi action package_show id=my-first-dataset -c /tmp/test.ini | python3 -m json.tool
-          
-          echo "Dataset creation completed"
+            tags="$TAGS" || echo "package_create returned non-zero (dataset may already exist)"
       - name: Add resource to dataset with ckanapi
         run: |
-          echo "Adding resource to dataset with ckanapi..."
-          
-          # Add resource using ckanapi
-          if ckanapi action resource_create \
+          set -euo pipefail
+          echo "Adding resource to my-first-dataset..."
+          ckanapi action resource_create --config /tmp/test.ini \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
-            description="This is a comprehensive test CSV resource containing sample data for testing CKAN functionality, ckanapi integration, and automated data processing workflows." \
+            description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
-            mimetype="text/csv" \
-            -c /tmp/test.ini; then
-            echo "Resource created successfully!"
-          else
-            echo "Resource creation failed"
-            exit 1
-          fi
-          
-          echo "Resource creation completed"
-          
+            mimetype="text/csv" || { echo "resource_create failed"; ckanapi action package_show --config /tmp/test.ini id=my-first-dataset || true; exit 1; }
       - name: Display CKAN instance inventory
         run: |
-          echo "CKAN Instance Inventory"
-          echo "======================"
-          
-          # Show CKAN status
-          echo "=== CKAN Status ==="
-          ckanapi action status_show -c /tmp/test.ini
-          
+          set -euo pipefail
+          echo "=== CKAN Status (local) ==="
+          ckanapi action status_show --config /tmp/test.ini | python3 -m json.tool || true
           echo ""
           echo "=== All Datasets ==="
-          ckanapi action package_list -c /tmp/test.ini
-          
+          ckanapi action package_list --config /tmp/test.ini || true
           echo ""
           echo "=== All Organizations ==="
-          ckanapi action organization_list -c /tmp/test.ini
-          
+          ckanapi action organization_list --config /tmp/test.ini || true
           echo ""
           echo "=== All Users ==="
-          ckanapi action user_list -c /tmp/test.ini
-          
-      - name: Display test.ini configuration file
-        run: |
-          echo "CKAN Configuration File Contents"
-          echo "================================"
-          echo "File: /tmp/test.ini"
-          echo "================================"
-          cat /tmp/test.ini
-          echo "================================"
-          echo "End of configuration file"
-          echo ""          
-      
+          ckanapi action user_list --config /tmp/test.ini || true
       - name: Final summary
         run: |
           echo "Content creation and verification completed!"
-          echo "=============================================="
           echo "CREATED CONTENT SUMMARY:"
           echo "  Organization: demo-organization"
           echo "    Dataset: my-first-dataset"
           echo "      Resource: Sample CSV Data (100KB)"
           echo ""
-          echo "CREATED USERS:"
+          echo "CREATED USERS (attempted):"
           echo "  - ckan_admin (sysadmin)"
-          echo "  - test_user (regular user)"  
-          echo "  - editor_user (editor)"
           echo ""
-          echo "Access URLs:"
-          echo "  - Dataset: $CKAN_SITE_URL/dataset/my-first-dataset"
-          echo "  - Organization: $CKAN_SITE_URL/organization/demo-organization"
-          echo "  - API Status: $CKAN_SITE_URL/api/3/action/status_show"
+          echo "Access URLs (local to runner container):"
+          echo "  - Dataset: ${CKAN_SITE_URL}/dataset/my-first-dataset"
+          echo "  - Organization: ${CKAN_SITE_URL}/organization/demo-organization"
+          echo "  - API Status: ${CKAN_SITE_URL}/api/3/action/status_show"
           echo ""
-          echo "All operations completed using ckanapi!"
-          echo "=============================================="
-          
+          echo "If you need datapusher-plus functional tests, add steps to install/configure datapusher-plus service and send a POST to datapusher to start processing the CSV."
       - name: Setup datapusher-plus (placeholder)
         run: |
-          echo "This is where you'll add your datapusher-plus specific tests"
-          echo "CKAN is now running successfully at $CKAN_SITE_URL"
-          echo "Sample data has been created and verified using ckanapi:"
-          echo "  - Multiple users with different privileges"
-          echo "  - Organization: demo-organization"
-          echo "  - Dataset: my-first-dataset"
-          echo "  - Resource: Sample CSV Data (CSV file)"
-          echo ""
-          echo "You can now add steps to:"
-          echo "  - Install datapusher-plus extension"
-          echo "  - Configure datapusher-plus settings"  
-          echo "  - Run datapusher-plus specific tests"
-          echo "  - Test data upload and processing functionality"
-          echo "  - Test CSV processing with the created resource"
-          
+          echo "Placeholder: Add datapusher-plus-specific tests here."
+          echo "Important: datapusher-plus may require running a separate service or configuring datapusher hooks."
+          echo "Check datapusher-plus docs for details on running it locally or pointing CKAN to an external datapusher-plus endpoint."
       - name: Cleanup
         if: always()
         run: |
