@@ -407,6 +407,7 @@ jobs:
           fi
           echo "Check 'extensions' or 'plugins' in status_show output:"
           ckanapi action status_show --config /srv/app/src/ckan/test-core.ini | python3 -m json.tool || true
+          
       - name: Create sysadmin user with ckanapi (safe)
         run: |
           set -eu
@@ -431,15 +432,24 @@ jobs:
           curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
           
           echo "=== Getting API key for ckan_admin via HTTP API ==="
-          api_key=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin&fl=apikey")
-          echo "API response: $api_key"
-                    
+          api_response=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin")
+          echo "API response: $api_response"
+          
+          # Extract just the API key value from the JSON response using jq (preferred method)
+          if command -v jq >/dev/null 2>&1; then
+            api_key=$(echo "$api_response" | jq -r '.result.apikey // empty')
+          else
+            # Fallback: extract API key using grep/sed if jq is not available
+            api_key=$(echo "$api_response" | grep -o '"apikey": *"[^"]*"' | sed 's/.*"apikey": *"\([^"]*\)".*/\1/')
+          fi
+          
           if [ -n "$api_key" ]; then
             echo "API key found for ckan_admin: $api_key"
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
           else
             echo "No API key found for ckan_admin - datapusher-plus may not work automatically"
           fi
+          
       - name: List existing users with ckanapi
         run: |
           set -eu
