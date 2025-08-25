@@ -427,24 +427,13 @@ jobs:
             echo "sysadmin add returned non-zero (user may already be sysadmin)"
           fi
           
-          echo "=== Displaying all users with details ==="
-          ckanapi action user_list --config /srv/app/src/ckan/test-core.ini 2>/dev/null | python3 -m json.tool || true
+          echo "=== Displaying all users with details via HTTP API ==="
+          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
           
-          echo "=== Extracting API key for ckan_admin ==="
-          # Get API key from user_list (more reliable than user_create output)
-          api_key=$(ckanapi action user_list --config /srv/app/src/ckan/test-core.ini 2>/dev/null | python3 -c "
-          import json,sys
-          try:
-              data=json.load(sys.stdin)
-              users = data.get('result', [])
-              for user in users:
-                  if user.get('name') == 'ckan_admin':
-                      print(user.get('apikey', ''))
-                      break
-          except Exception as e:
-              print('')
-          " || true)
-          
+          echo "=== Getting API key for ckan_admin via HTTP API ==="
+          api_key=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin&fl=apikey")
+          echo "API response: $api_key"
+                    
           if [ -n "$api_key" ]; then
             echo "API key found for ckan_admin: $api_key"
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
