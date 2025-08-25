@@ -58,15 +58,19 @@ jobs:
 
       - name: Setup database
         run: |
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "
-            CREATE USER IF NOT EXISTS ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';
-            CREATE USER IF NOT EXISTS datastore_write WITH PASSWORD '$CKAN_DB_PASSWORD';
-            CREATE USER IF NOT EXISTS datastore_read WITH PASSWORD '$CKAN_DB_PASSWORD';
-            CREATE DATABASE IF NOT EXISTS ckan_test OWNER ckan_default;
-            CREATE DATABASE IF NOT EXISTS datastore_test OWNER ckan_default;
-            GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;
-            GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;
-            GRANT CONNECT ON DATABASE datastore_test TO datastore_read;
+          # Create users (ignore errors if they exist)
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';" 2>/dev/null || true
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD '$CKAN_DB_PASSWORD';" 2>/dev/null || true
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD '$CKAN_DB_PASSWORD';" 2>/dev/null || true
+          
+          # Create databases
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;" 2>/dev/null || true
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;" 2>/dev/null || true
+          
+          # Grant permissions
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;"
           "
 
       - name: Install requirements
