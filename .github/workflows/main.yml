@@ -565,17 +565,17 @@ jobs:
       - name: Display CKAN instance inventory
         run: |
           set -eu
-          echo "=== CKAN Status (local) ==="
-          ckanapi action status_show --config /srv/app/src/ckan/test-core.ini 2>/dev/null | python3 -m json.tool || true
+          echo "=== CKAN Status (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/status_show" | python3 -m json.tool || true
           echo ""
-          echo "=== All Datasets ==="
-          ckanapi action package_list --config /srv/app/src/ckan/test-core.ini || true
+          echo "=== All Datasets (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/package_list" | python3 -m json.tool || true
           echo ""
-          echo "=== All Organizations ==="
-          ckanapi action organization_list --config /srv/app/src/ckan/test-core.ini || true
+          echo "=== All Organizations (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/organization_list" | python3 -m json.tool || true
           echo ""
-          echo "=== All Users ==="
-          ckanapi action user_list --config /srv/app/src/ckan/test-core.ini || true
+          echo "=== All Users (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
       - name: Final summary
         run: |
           echo "Content creation and verification completed!"
