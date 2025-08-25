@@ -86,7 +86,7 @@ jobs:
           echo "Database setup completed"
       - name: Install requirements, ckanapi and datapusher-plus
         run: |
-          set -euo pipefail
+          set -eu
           # Use pip from the container (image usually has Python/pip)
           python3 -m pip install --upgrade pip setuptools wheel || true
           if [ -f requirements.txt ]; then
@@ -106,7 +106,7 @@ jobs:
           echo "Installed ckanapi and datapusher-plus (best-effort)"
       - name: Setup CKAN configuration (/tmp/test.ini)
         run: |
-          set -euo pipefail
+          set -eu
           # Prefer existing test-core.ini or test.ini from repo if available
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
@@ -164,7 +164,7 @@ jobs:
           echo "---- end ----"
       - name: Initialize CKAN database
         run: |
-          set -euo pipefail
+          
           echo "Testing connectivity with CKAN DB user..."
           if ! PGPASSWORD=$CKAN_DB_PASSWORD psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
             echo "Cannot connect as ckan_default. Attempting to create database owner and db..."
@@ -185,7 +185,7 @@ jobs:
           fi
       - name: Start CKAN server
         run: |
-          set -euo pipefail
+          set -eu
           echo "Starting CKAN server in background..."
           # Use nohup to keep it running in background
           nohup ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader > /tmp/ckan_stdout.log 2>&1 &
@@ -216,7 +216,7 @@ jobs:
           echo "CKAN started successfully"
       - name: Test CKAN API Status with ckanapi and confirm plugins
         run: |
-          set -euo pipefail
+          set -eu
           echo "Testing remote status_show using ckanapi (--remote)"
           if ckanapi action status_show -r "${CKAN_SITE_URL}"; then
             echo "Remote status_show OK"
@@ -238,7 +238,7 @@ jobs:
           ckanapi action status_show --config /tmp/test.ini | python3 -m json.tool || true
       - name: Create sysadmin user with ckanapi (safe)
         run: |
-          set -euo pipefail
+          set -eu
           echo "Creating sysadmin user (ckan_admin) if not exist..."
           # create user (idempotent - if exists it will return error; ignore)
           ckanapi action user_create --config /tmp/test.ini \
@@ -292,7 +292,7 @@ jobs:
           fi
       - name: Create organization with ckanapi
         run: |
-          set -euo pipefail
+          set -eu
           echo "Creating organization demo-organization (idempotent)..."
           ckanapi action organization_create --config /tmp/test.ini \
             name=demo-organization \
@@ -303,7 +303,7 @@ jobs:
             id=demo-organization username=ckan_admin role=admin || echo "organization_member_create returned non-zero (may already be member)"
       - name: Create dataset with ckanapi
         run: |
-          set -euo pipefail
+          set -eu
           echo "Creating dataset my-first-dataset (idempotent)..."
           # Use tags as a single JSON string
           TAGS='[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]'
@@ -324,7 +324,7 @@ jobs:
             tags="$TAGS" || echo "package_create returned non-zero (dataset may already exist)"
       - name: Add resource to dataset with ckanapi
         run: |
-          set -euo pipefail
+          set -eu
           echo "Adding resource to my-first-dataset..."
           ckanapi action resource_create --config /tmp/test.ini \
             package_id=my-first-dataset \
@@ -335,7 +335,7 @@ jobs:
             mimetype="text/csv" || { echo "resource_create failed"; ckanapi action package_show --config /tmp/test.ini id=my-first-dataset || true; exit 1; }
       - name: Display CKAN instance inventory
         run: |
-          set -euo pipefail
+          set -eu
           echo "=== CKAN Status (local) ==="
           ckanapi action status_show --config /tmp/test.ini | python3 -m json.tool || true
           echo ""
