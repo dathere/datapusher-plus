@@ -66,7 +66,7 @@ jobs:
           fi
       - name: Setup database users and permissions
         run: |
-          set -euo pipefail
+          set -eu 
           echo "Creating database users (if not exist)..."
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='ckan_default'" | grep -q 1 || \
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';"
