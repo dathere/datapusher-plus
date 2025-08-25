@@ -406,60 +406,98 @@ jobs:
           fi
           echo "Check 'extensions' or 'plugins' in status_show output:"
           ckanapi action status_show --config /srv/app/src/ckan/test-core.ini | python3 -m json.tool || true
-      - name: Create sysadmin user with ckanapi (safe)
+      - name: Create sysadmin user with ckanapi
         run: |
-          set -eu
-          echo "Creating sysadmin user (ckan_admin) if not exist..."
-          # create user (idempotent - if exists it will return error; ignore)
-          ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
+          echo "Creating sysadmin user with ckanapi..."
+          
+          # Create sysadmin user using ckanapi (local has sysadmin privileges by default)
+          if ckanapi action user_create \
             name=ckan_admin \
             email=admin@example.com \
             password=test1234 \
             fullname="CKAN Administrator" \
-            about="Created by GitHub Actions test" \
-            with_apitoken=true || echo "user_create returned non-zero (user may already exist)"
-          echo "Ensure ckan_admin is sysadmin via CLI"
-          if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
-            echo "ckan_admin promoted to sysadmin"
+            about="System administrator created via ckanapi and GitHub Actions" \
+            with_apitoken:true \
+            -c /tmp/test.ini; then
+            echo "Sysadmin user created successfully"
           else
-            echo "sysadmin add returned non-zero (user may already be sysadmin)"
+            echo "User might already exist, continuing..."
           fi
-          echo "Retrieve user details and API key (if returned)..."
-          user_data=$(ckanapi action user_show --config /srv/app/src/ckan/test-core.ini id=ckan_admin 2>/dev/null || true)
-          if [ -z "$user_data" ]; then
-            echo "No user data returned by user_show"
+          
+          # Make the user a sysadmin using CKAN CLI (ckanapi doesn't have sysadmin action)
+          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
+            echo "User granted sysadmin privileges"
           else
-            # pretty print and parse
-            echo "$user_data" | python3 -m json.tool || true
-            api_key=$(echo "$user_data" | python3 - <<'PY'
-            import json,sys
+            echo "User might already be sysadmin, continuing..."
+          fi
+          
+          echo "Sysadmin user setup completed"
+      - name: Promote ckan_admin to sysadmin
+        run: |
+          echo "Promoting ckan_admin to sysadmin..."
+          
+          # Promote user to sysadmin using CKAN CLI with correct config path
+          if ckan -c /tmp/test.ini sysadmin add ckan_admin; then
+            echo "User ckan_admin promoted to sysadmin successfully"
+          else
+            echo "User might already be sysadmin or promotion failed"
+          fi
+          
+          # Wait a moment for changes to take effect
+          sleep 2
+          
+          # Verify sysadmin status and get API key
+          echo "Retrieving user details to verify sysadmin status and API key..."
+          user_data=$(ckanapi action user_show id=ckan_admin -c /tmp/test.ini)
+          
+          # Check if output is valid JSON
+          if echo "$user_data" | python3 -c "import json, sys; json.load(sys.stdin)" 2>/dev/null; then
+            echo "User details (formatted):"
+            echo "$user_data" | python3 -m json.tool
+            
+            # Extract sysadmin status
+            is_sysadmin=$(echo "$user_data" | python3 -c "
+            import json, sys
             try:
-                data=json.load(sys.stdin)
-                r=data.get('result',{})
-                ak=r.get('apikey') or ''
-                print(ak)
-            except Exception:
-                print('')
-            PY
-            )
-                        is_sysadmin=$(echo "$user_data" | python3 - <<'PY'
-            import json,sys
-            try:
-                data=json.load(sys.stdin)
-                r=data.get('result',{})
-                print(str(bool(r.get('sysadmin', False))).lower())
-            except Exception:
+                data = json.load(sys.stdin)
+                result = data.get('result', {})
+                print(str(result.get('sysadmin', False)).lower())
+            except:
                 print('false')
-            PY
-            )
-            echo "sysadmin: $is_sysadmin"
-            if [ -n "$api_key" ]; then
-              echo "API key found. Exporting to GITHUB_ENV"
+            ")
+            
+            # Extract API key (not token)
+            api_key=$(echo "$user_data" | python3 -c "
+            import json, sys
+            try:
+                data = json.load(sys.stdin)
+                result = data.get('result', {})
+                apikey = result.get('apikey')
+                if apikey and apikey != 'None':
+                    print(apikey)
+                else:
+                    print('')
+            except:
+                print('')
+            ")
+            
+            echo "Sysadmin status: $is_sysadmin"
+            if [ -n "$api_key" ] && [ "$api_key" != "None" ] && [ "$api_key" != "null" ]; then
+              echo "API Key: $api_key"
               echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
             else
-              echo "No API key found in user_show result (it may not be returned)."
+              echo "No API key found in user data"
             fi
+            
+          else
+            echo "Invalid JSON output from user_show command"
+            echo "Raw output was:"
+            echo "$user_data"
           fi
+          
+          echo "Sysadmin promotion process completed"
+
+          
       - name: Create organization with ckanapi
         run: |
           set -eu
