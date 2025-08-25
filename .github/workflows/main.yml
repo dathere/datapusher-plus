@@ -167,7 +167,6 @@ jobs:
           [server:main]
           use = config:common.ini
           [app:main]
-          use = config:common.ini
           ckan.site_url = http://localhost:5000
           sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
           ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
