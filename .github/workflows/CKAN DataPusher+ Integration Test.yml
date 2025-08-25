@@ -1,4 +1,4 @@
-name: CKAN Runner with ckanapi
+name: CKAN Runner with ckanapi lite
 on:
   workflow_dispatch:
 
