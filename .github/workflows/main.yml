@@ -192,7 +192,7 @@ jobs:
           ckan.site_title = CKAN Test
           ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
           scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
-          scheming.presets = ckanext.scheming:presets.json ckanext.dcat.schemas:presets.yaml
+          scheming.presets = ckanext.scheming:presets.json
           scheming.dataset_fallback = false
           ckanext.datapusher_plus.use_proxy = false
           ckanext.datapusher_plus.download_proxy = 
