@@ -106,79 +106,110 @@ jobs:
           pip install -e 'git+https://github.com/dathere/datapusher-plus.git#egg=datapusher-plus' || true
           pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming' || true
           echo "Installed ckanapi and datapusher-plus (best-effort)"
-
-      - name: Try to install qsv (musl static) - best-effort
+      - name: Install qsv binary (improved with verification)
         run: |
           set -eu
-          echo "Attempting to download static qsv musl binary (best-effort)..."
+          echo "Attempting to download static qsv musl binary..."
           QSV_VER="4.0.0"
           QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
           QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
-          mkdir -p /tmp/qsv && cd /tmp/qsv || true
+          mkdir -p /tmp/qsv && cd /tmp/qsv
+          
+          # Download and install qsv
           if wget -q --spider "$QSV_URL"; then
-            wget -q "$QSV_URL" -O "$QSV_ZIP" || true
-            unzip -o "$QSV_ZIP" || true
-            # try to find 'qsv' or 'qsvdp' binary
+            echo "Downloading qsv from $QSV_URL"
+            wget -q "$QSV_URL" -O "$QSV_ZIP"
+            unzip -o "$QSV_ZIP"
+            
+            # Install available binaries
             if [ -f qsvdp ]; then
-              mv qsvdp /usr/local/bin/qsvdp || true
-              chmod +x /usr/local/bin/qsvdp || true
+              mv qsvdp /usr/local/bin/qsvdp
+              chmod +x /usr/local/bin/qsvdp
               echo "Installed qsvdp to /usr/local/bin/qsvdp"
             elif [ -f qsv ]; then
-              mv qsv /usr/local/bin/qsv || true
-              chmod +x /usr/local/bin/qsv || true
+              mv qsv /usr/local/bin/qsv
+              chmod +x /usr/local/bin/qsv
               echo "Installed qsv to /usr/local/bin/qsv"
             else
-              echo "Downloaded archive but could not find qsv binary inside"
+              echo "ERROR: No qsv binary found in downloaded archive"
+              ls -la
+              exit 1
             fi
           else
-            echo "qsv release URL not reachable; skipping qsv install"
+            echo "ERROR: qsv release URL not reachable"
+            exit 1
           fi
-          /usr/local/bin/qsvdp --version >/dev/null 2>&1 || /usr/local/bin/qsv --version >/dev/null 2>&1 || echo "qsv not installed or not runnable (this is okay for plugin presence test)."
-
-      
+          
+          # Verify installation
+          if [ -f /usr/local/bin/qsvdp ]; then
+            echo "qsvdp version check:"
+            /usr/local/bin/qsvdp --version || echo "qsvdp not executable"
+          elif [ -f /usr/local/bin/qsv ]; then
+            echo "qsv version check:"
+            /usr/local/bin/qsv --version || echo "qsv not executable"
+          else
+            echo "ERROR: No qsv binary installed"
+            exit 1
+          fi
       
       - name: Setup CKAN configuration (/tmp/test.ini)
         run: |
           set -eu
-          # Prefer existing test-core.ini or test.ini from repo if available
-          if [ -f /srv/app/src/ckan/test-core.ini ]; then
-            cp /srv/app/src/ckan/test-core.ini /tmp/test.ini
-            echo "Copied /srv/app/src/ckan/test-core.ini -> /tmp/test.ini"
-          elif [ -f /srv/app/src/ckan/test.ini ]; then
-            cp /srv/app/src/ckan/test.ini /tmp/test.ini
-            echo "Copied /srv/app/src/ckan/test.ini -> /tmp/test.ini"
-          fi
-
-          # Ensure the DB/solr/redis URLs are set correctly (defensive)
-          sed -i "s|sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /tmp/test.ini || true
-          sed -i "s|ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /tmp/test.ini || true
-          sed -i "s|ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /tmp/test.ini || true
-          if ! grep -q "^solr_url" /tmp/test.ini; then
-            echo "solr_url = ${CKAN_SOLR_URL}" >> /tmp/test.ini
-          fi
-          if ! grep -q "^ckan.redis.url" /tmp/test.ini; then
-            echo "ckan.redis.url = ${CKAN_REDIS_URL}" >> /tmp/test.ini
-          fi
           
-          # --- Ensure the entire minimal block is present (append missing section headers + missing key=value lines)
-          cat > /tmp/minimal_test_block.ini <<'MIN'
+          # Create a basic test.ini from scratch to ensure proper format
+          cat > /tmp/test.ini <<'EOF'
           [DEFAULT]
           debug = true
+          
           [server:main]
-          use = config:common.ini
+          use = config:/srv/app/src/ckan/production.ini
+          host = 0.0.0.0
+          port = 5000
+          
           [app:main]
+          use = config:/srv/app/src/ckan/production.ini
           ckan.site_url = http://localhost:5000
+          ckan.site_id = default
+          ckan.site_title = CKAN Test
+          
+          # Database configuration
           sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
           ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
           ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
+          
+          # Search configuration
           solr_url = http://solr:8983/solr/ckan
+          
+          # Redis configuration
           ckan.redis.url = redis://redis:6379/1
-          ckan.site_id = default
-          ckan.site_title = CKAN Test
-          ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
+          
+          # Plugins configuration
+          ckan.plugins = datastore datapusher_plus scheming_datasets
+          
+          # Determine which qsv binary is available
+          EOF
+          
+          # Determine qsv binary path and add to config
+          if [ -f /usr/local/bin/qsvdp ]; then
+            echo "ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp" >> /tmp/test.ini
+            echo "Using qsvdp binary"
+          elif [ -f /usr/local/bin/qsv ]; then
+            echo "ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsv" >> /tmp/test.ini
+            echo "Using qsv binary"
+          else
+            echo "ERROR: No qsv binary found. datapusher-plus requires qsv."
+            exit 1
+          fi
+          
+          # Add remaining datapusher-plus configuration
+          cat >> /tmp/test.ini <<'EOF'
+          
+          # Schema configuration
           scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
           scheming.presets = ckanext.scheming:presets.json ckanext.dcat.schemas:presets.yaml
           scheming.dataset_fallback = false
+          
+          # Datapusher-plus configuration
           ckanext.datapusher_plus.use_proxy = false
           ckanext.datapusher_plus.download_proxy = 
           ckanext.datapusher_plus.ssl_verify = false
@@ -219,63 +250,18 @@ jobs:
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
-          MIN
+          EOF
           
-          # Ensure the basic section headers exist (if missing, append them)
-          for hdr in "[DEFAULT]" "[server:main]" "[app:main]"; do
-            if ! grep -Fq "$hdr" /tmp/test.ini; then
-              echo "$hdr" >> /tmp/test.ini
-              echo "Appended missing section header: $hdr"
-            fi
-          done
-          
-          # For each key=value line in the minimal block (ignore blank lines and sections),
-          # append the line to /tmp/test.ini if the key doesn't already exist.
-          while IFS= read -r line; do
-            # skip blank lines or section headers
-            case "$line" in
-              ""|\[*\]) continue ;;
-            esac
-            # get key left of the first '=' trimmed
-            key=$(printf '%s' "$line" | awk -F= '{name=$1; gsub(/^[ \t]+|[ \t]+$/,"",name); print name}')
-            if [ -z "$key" ]; then
-              continue
-            fi
-            # check if key exists in /tmp/test.ini (compare exact key name before '=' ignoring leading/trailing spaces)
-            if awk -F= -v k="$key" '{
-                  n=$1; gsub(/^[ \t]+|[ \t]+$/,"",n);
-                  if(n==k){ exit 0 }
-                } END { exit 1 }' /tmp/test.ini; then
-              # key exists; do nothing (preserve user's value)
-              :
-            else
-              echo "Appending missing key: $key"
-              echo "$line" >> /tmp/test.ini
-            fi
-          done < /tmp/minimal_test_block.ini  
-          rm -f /tmp/minimal_test_block.ini || true
-      
-          # Append datapusher plugin(s) to ckan.plugins if present; otherwise add a plugins line
-          REQUIRED_PLUGINS="datastore datapusher_plus scheming_datasets"
-          if grep -q "^ckan.plugins" /tmp/test.ini; then
-            echo "Appending required plugins to existing ckan.plugins line"
-            current=$(grep "^ckan.plugins" /tmp/test.ini | head -n1 | cut -d'=' -f2-)
-            for p in $REQUIRED_PLUGINS; do
-              echo "$current" | grep -qw "$p" || current="$current $p"
-            done
-            awk -v new="ckan.plugins = $current" 'BEGIN{done=0} {if(!done && $1=="ckan.plugins") {print new; done=1} else print $0}' /tmp/test.ini > /tmp/test.ini.new && mv /tmp/test.ini.new /tmp/test.ini
-          else
-            echo "ckan.plugins = $REQUIRED_PLUGINS" >> /tmp/test.ini
-            echo "Added ckan.plugins line with required plugins."
-          fi
-      
-          echo "---- /tmp/test.ini (head) ----"
-          head -n 120 /tmp/test.ini || true
+          echo "---- Final /tmp/test.ini (head) ----"
+          head -n 50 /tmp/test.ini || true
           echo "---- end ----"
+          
+          # Verify qsv binary path in config
+          echo "Verifying qsv_bin configuration:"
+          grep "ckanext.datapusher_plus.qsv_bin" /tmp/test.ini || echo "ERROR: qsv_bin not found in config"
 
       - name: Initialize CKAN database
         run: |
-          
           echo "Testing connectivity with CKAN DB user..."
           if ! PGPASSWORD=$CKAN_DB_PASSWORD psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
             echo "Cannot connect as ckan_default. Attempting to create database owner and db..."
@@ -294,6 +280,42 @@ jobs:
           else
             echo "Datastore permission step returned non-zero; continuing."
           fi
+
+      - name: Test configuration loading before starting server
+        run: |
+          set -eu
+          echo "Testing CKAN configuration loading..."
+          
+          # Test if config can be loaded without starting the server
+          python3 -c "
+          import sys
+          sys.path.insert(0, '/srv/app/src/ckan')
+          try:
+              from ckan.config.environment import load_environment
+              from ckan.common import config
+              from paste.deploy import appconfig
+              
+              # Load config
+              conf = appconfig('config:/tmp/test.ini')
+              load_environment(conf)
+              
+              # Check if qsv_bin config is available
+              qsv_bin = config.get('ckanext.datapusher_plus.qsv_bin')
+              print(f'qsv_bin config value: {qsv_bin}')
+              
+              if qsv_bin is None:
+                  print('ERROR: qsv_bin configuration is None')
+                  sys.exit(1)
+              else:
+                  print('SUCCESS: qsv_bin configuration loaded correctly')
+                  
+          except Exception as e:
+              print(f'Configuration loading failed: {e}')
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
+          "
+
       - name: Start CKAN server
         run: |
           set -eu
@@ -302,6 +324,7 @@ jobs:
           nohup ckan -c /tmp/test.ini run --host 0.0.0.0 --port 5000 --disable-reloader > /tmp/ckan_stdout.log 2>&1 &
           CKAN_PID=$!
           echo "CKAN PID=$CKAN_PID"
+          
           # wait for port / API
           timeout=120
           while [ $timeout -gt 0 ]; do
@@ -383,7 +406,7 @@ jobs:
                 print('')
             PY
             )
-                        is_sysadmin=$(echo "$user_data" | python3 - <<'PY'
+            is_sysadmin=$(echo "$user_data" | python3 - <<'PY'
             import json,sys
             try:
                 data=json.load(sys.stdin)
