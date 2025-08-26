@@ -1,4 +1,4 @@
-name: CKAN Runner with ckanapi
+name: CKAN Runner with ckanapi lite
 on:
   workflow_dispatch:
 
@@ -14,6 +14,7 @@ jobs:
     container:
       image: ckan/ckan-dev:2.11
       options: --user root
+    
     services:
       solr:
         image: ckan/ckan-solr:2.11-solr9
@@ -28,6 +29,7 @@ jobs:
       redis:
         image: redis:3
         ports: ["6379:6379"]
+    
     env:
       CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
       CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
@@ -36,186 +38,233 @@ jobs:
       CKAN_REDIS_URL: redis://redis:6379/1
 
     steps:
-      - name: Setup environment
-        run: |
-          mkdir -p /__w/_temp
-          chmod -R 777 /__w/_temp /__w/
-          apt-get update -y
-          apt-get install -y curl wget postgresql-client jq unzip
-          
       - uses: actions/checkout@v4
       
+      - name: Install dependencies
+        run: |
+          apt-get update -y
+          apt-get install -y postgresql-client jq curl unzip wget \
+            python3-dev python3-pip python3-wheel build-essential \
+            libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev
+          pip install --upgrade ckanapi
+          pip install -e 'git+https://github.com/dathere/datapusher-plus.git#egg=datapusher-plus'
+          pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'
+
+      - name: Wait for PostgreSQL
+        run: |
+          for i in {1..30}; do
+            if PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
+              echo "PostgreSQL ready"
+              break
+            fi
+            echo "Waiting for PostgreSQL... ($i/30)"
+            sleep 3
+          done
+
       - name: Setup database
         run: |
-          # Wait for PostgreSQL
-          timeout=90
-          while [ $timeout -gt 0 ]; do
-            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1 && break
-            sleep 3
-            timeout=$((timeout-3))
-          done
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres << EOF
+          CREATE USER IF NOT EXISTS ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';
+          CREATE USER IF NOT EXISTS datastore_write WITH PASSWORD '$CKAN_DB_PASSWORD';
+          CREATE USER IF NOT EXISTS datastore_read WITH PASSWORD '$CKAN_DB_PASSWORD';
           
-          # Create users and databases
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres <<EOF
-          CREATE USER ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';
-          CREATE USER datastore_write WITH PASSWORD '$CKAN_DB_PASSWORD';
-          CREATE USER datastore_read WITH PASSWORD '$CKAN_DB_PASSWORD';
-          CREATE DATABASE ckan_test OWNER ckan_default;
-          CREATE DATABASE datastore_test OWNER ckan_default;
+          CREATE DATABASE IF NOT EXISTS ckan_test OWNER ckan_default;
+          CREATE DATABASE IF NOT EXISTS datastore_test OWNER ckan_default;
+          
           GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;
           GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;
           GRANT CONNECT ON DATABASE datastore_test TO datastore_read;
           EOF
-          
-      - name: Install requirements
+
+      - name: Install qsv binary
         run: |
-          pip install --upgrade pip setuptools wheel
-          [ -f requirements.txt ] && pip install -r requirements.txt
-          [ -f setup.py ] || [ -f pyproject.toml ] && pip install -e .
-          pip install --upgrade ckanapi
-          pip install -e 'git+https://github.com/dathere/datapusher-plus.git#egg=datapusher-plus'
-          pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'
+          QSV_VER="4.0.0"
+          QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
+          QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
           
-      - name: Install qsv
-        run: |
-          wget -q https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-musl.zip
-          unzip -q qsv-4.0.0-x86_64-unknown-linux-musl.zip
-          mv qsvdp /usr/local/bin/qsvdp && chmod +x /usr/local/bin/qsvdp
-          
+          wget -q "$QSV_URL" -O /tmp/"$QSV_ZIP"
+          unzip -o /tmp/"$QSV_ZIP" -d /tmp/
+          mv /tmp/qsvdp /usr/local/bin/qsvdp 2>/dev/null || mv /tmp/qsv /usr/local/bin/qsvdp
+          chmod +x /usr/local/bin/qsvdp
+
       - name: Configure CKAN
         run: |
-          cat > /srv/app/src/ckan/test-core.ini <<'EOF'
+          cat > /srv/app/src/ckan/test-core.ini << EOF
           [DEFAULT]
           debug = true
           
           [app:main]
-          use = egg:ckan
-          ckan.site_url = http://localhost:5000
+          use = config:../../src/ckan/ckan/config/middleware/common_middleware.ini
+          
+          # Basic settings
+          ckan.site_url = $CKAN_SITE_URL
           ckan.site_id = default
           ckan.site_title = CKAN Test
           
-          sqlalchemy.url = postgresql://ckan_default:pass@postgres/ckan_test
-          ckan.datastore.write_url = postgresql://datastore_write:pass@postgres/datastore_test
-          ckan.datastore.read_url = postgresql://datastore_read:pass@postgres/datastore_test
-          solr_url = http://solr:8983/solr/ckan
-          ckan.redis.url = redis://redis:6379/1
+          # Database
+          sqlalchemy.url = $CKAN_SQLALCHEMY_URL
+          ckan.datastore.write_url = $CKAN_DATASTORE_WRITE_URL
+          ckan.datastore.read_url = $CKAN_DATASTORE_READ_URL
           
+          # Search
+          solr_url = $CKAN_SOLR_URL
+          ckan.redis.url = $CKAN_REDIS_URL
+          
+          # Plugins
           ckan.plugins = datastore datapusher_plus scheming_datasets
           
-          # Datapusher Plus settings
-          ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
+          # Scheming configuration
           scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
           scheming.presets = ckanext.scheming:presets.json
           scheming.dataset_fallback = false
-          ckanext.datapusher_plus.auto_push = false
-          ckanext.datapusher_plus.ssl_verify = false
-          ckanext.datapusher_plus.upload_log_level = INFO
+          
+          # Datapusher-plus core settings
+          ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
           ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
-          ckanext.datapusher_plus.preview_rows = 100
           ckanext.datapusher_plus.download_timeout = 300
           ckanext.datapusher_plus.max_content_length = 1256000000000
           ckanext.datapusher_plus.chunk_size = 16384
+          
+          # Data processing settings  
+          ckanext.datapusher_plus.preview_rows = 100
           ckanext.datapusher_plus.default_excel_sheet = 0
           ckanext.datapusher_plus.sort_and_dupe_check = true
           ckanext.datapusher_plus.dedup = false
+          ckanext.datapusher_plus.unsafe_prefix = unsafe_
+          ckanext.datapusher_plus.reserved_colnames = _id
           ckanext.datapusher_plus.prefer_dmy = false
           ckanext.datapusher_plus.ignore_file_hash = true
+          
+          # Indexing settings
           ckanext.datapusher_plus.auto_index_threshold = 3
           ckanext.datapusher_plus.auto_index_dates = true
           ckanext.datapusher_plus.auto_unique_index = true
+          
+          # Statistics settings
+          ckanext.datapusher_plus.add_summary_stats_resource = false
+          ckanext.datapusher_plus.summary_stats_with_preview = false
           ckanext.datapusher_plus.qsv_stats_string_max_length = 32767
           ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created
           ckanext.datapusher_plus.qsv_freq_limit = 10
+          
+          # Alias and mapping settings
           ckanext.datapusher_plus.auto_alias = true
           ckanext.datapusher_plus.auto_alias_unique = false
           ckanext.datapusher_plus.copy_readbuffer_size = 1048576
           ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
+          
+          # Spatial settings
           ckanext.datapusher_plus.auto_spatial_simplication = true
           ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
           ckanext.datapusher_plus.latitude_fields = latitude,lat
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
+          
+          # Security and proxy settings
+          ckanext.datapusher_plus.use_proxy = false
+          ckanext.datapusher_plus.download_proxy = 
+          ckanext.datapusher_plus.ssl_verify = false
+          ckanext.datapusher_plus.pii_screening = false
+          ckanext.datapusher_plus.pii_found_abort = false
+          ckanext.datapusher_plus.pii_show_candidates = false
+          ckanext.datapusher_plus.pii_quick_screen = false
+          
+          # Miscellaneous settings
+          ckanext.datapusher_plus.upload_log_level = INFO
+          ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_bytecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
           EOF
-          
+
       - name: Initialize CKAN
         run: |
           ckan -c /srv/app/src/ckan/test-core.ini db init
-          ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres
-          
-      - name: Start CKAN server
+          ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions | \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres
+
+      - name: Start CKAN
         run: |
-          nohup ckan -c /srv/app/src/ckan/test-core.ini run --host 0.0.0.0 --port 5000 --disable-reloader > /tmp/ckan.log 2>&1 &
+          nohup ckan -c /srv/app/src/ckan/test-core.ini run --host 0.0.0.0 --port 5000 --disable-reloader &
+          
           # Wait for CKAN to start
-          timeout=60
-          while [ $timeout -gt 0 ]; do
-            curl -fsS "http://localhost:5000/api/3/action/status_show" >/dev/null 2>&1 && break
+          for i in {1..40}; do
+            if curl -s $CKAN_SITE_URL/api/3/action/status_show >/dev/null 2>&1; then
+              echo "CKAN started"
+              break
+            fi
+            echo "Waiting for CKAN... ($i/40)"
             sleep 3
-            timeout=$((timeout-3))
           done
-          
-      - name: Create sysadmin and API token
+
+      - name: Create admin user and get API key
         run: |
-          # Create sysadmin user
+          # Create admin user
           ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
-            name=ckan_admin \
+            name=admin \
             email=admin@example.com \
-            password=test1234 \
-            fullname="CKAN Administrator" 2>/dev/null || true
+            password=admin123 \
+            fullname="Admin User" 2>/dev/null || echo "User may already exist"
           
-          ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin
+          # Make user sysadmin
+          ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin
           
-          # Create API token for datapusher-plus
-          dp_token=$(ckan -c /srv/app/src/ckan/test-core.ini user token add ckan_admin dpplus | tail -n 1 | tr -d '\t')
-          ckan config-tool /srv/app/src/ckan/test-core.ini "ckanext.datapusher_plus.api_token=$dp_token"
+          # Get API key for admin user
+          echo "=== Getting API key for admin user ==="
+          api_response=$(curl -s "$CKAN_SITE_URL/api/3/action/user_show?id=admin")
+          api_key=$(echo "$api_response" | jq -r '.result.apikey // empty')
           
+          if [ -n "$api_key" ]; then
+            echo "API key found for admin: $api_key"
+            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+          else
+            echo "No API key found for admin"
+          fi
+
+      - name: Create datapusher-plus API token
+        run: |
+          echo "Creating dedicated API token for datapusher-plus service..."
+          
+          # Create API token specifically for datapusher-plus
+          dp_token=$(ckan -c /srv/app/src/ckan/test-core.ini user token add admin dpplus | tail -n 1 | tr -d '\t')
+          
+          if [ -n "$dp_token" ]; then
+            echo "Created datapusher-plus API token: $dp_token"
+            
+            # Add the token to the CKAN configuration file
+            echo "ckanext.datapusher_plus.api_token = $dp_token" >> /srv/app/src/ckan/test-core.ini
+            
+            # Also set in environment for potential use in other steps
+            echo "DATAPUSHER_PLUS_API_TOKEN=$dp_token" >> $GITHUB_ENV
+            
+            echo "API token added to CKAN configuration successfully"
+          else
+            echo "Failed to create API token for datapusher-plus"
+            exit 1
+          fi
+
       - name: Create test data
         run: |
           # Create organization
           ckanapi action organization_create --config /srv/app/src/ckan/test-core.ini \
-            name=demo-organization \
-            title="Demo Data Publishing Organization" \
-            description="Demo org for datapusher-plus testing" || true
-          
-          ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
-            id=demo-organization username=ckan_admin role=admin || true
+            name=demo-org \
+            title="Demo Organization" || true
           
           # Create dataset
           ckanapi action package_create --config /srv/app/src/ckan/test-core.ini \
-            name=my-first-dataset \
-            title="My First Dataset" \
-            notes="Demo dataset for testing datapusher-plus" \
-            owner_org=demo-organization \
-            license_id=cc-by \
-            private:false \
-            state=active \
-            'tags:[{"name":"demo"},{"name":"test"}]' || true
+            name=test-dataset \
+            title="Test Dataset" \
+            owner_org=demo-org \
+            'tags:[{"name":"test"}]' || true
           
           # Add resource
           ckanapi action resource_create --config /srv/app/src/ckan/test-core.ini \
-            package_id=my-first-dataset \
+            package_id=test-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
-            name="Sample CSV Data" \
-            description="Test CSV resource" \
-            format=CSV \
-            mimetype="text/csv"
-          
-          # Trigger datapusher-plus
-          resource_id=$(ckanapi action package_show id=my-first-dataset --config /srv/app/src/ckan/test-core.ini | \
-            python3 -c "import json,sys; print(json.load(sys.stdin)['result']['resources'][0]['id'])")
-          
-          ckanapi action datapusher_submit resource_id="$resource_id" --config /srv/app/src/ckan/test-core.ini || true
-          
+            name="Test CSV" \
+            format=CSV
+
       - name: Verify setup
         run: |
           echo "=== CKAN Status ==="
-          curl -s "http://localhost:5000/api/3/action/status_show" | jq '.result'
+          curl -s "$CKAN_SITE_URL/api/3/action/status_show" | jq '.'
           
-          echo -e "\n=== Created Content ==="
-          echo "Organization: demo-organization"
-          echo "Dataset: my-first-dataset"
-          echo "Resource: Sample CSV Data"
-          echo "User: ckan_admin (sysadmin)"
-          
-      - name: Cleanup
-        if: always()
-        run: pkill -f "ckan.*run" || true
+          echo "=== Datasets ==="
+          curl -s "$CKAN_SITE_URL/api/3/action/package_list" | jq '.'
