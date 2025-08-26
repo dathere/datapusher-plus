@@ -106,7 +106,6 @@ jobs:
           pip install -e 'git+https://github.com/dathere/datapusher-plus.git#egg=datapusher-plus' || true
           pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming' || true
           echo "Installed ckanapi and datapusher-plus (best-effort)"
-
       - name: Try to install qsv (musl static) - best-effort
         run: |
           set -eu
@@ -134,13 +133,10 @@ jobs:
             echo "qsv release URL not reachable; skipping qsv install"
           fi
           /usr/local/bin/qsvdp --version >/dev/null 2>&1 || /usr/local/bin/qsv --version >/dev/null 2>&1 || echo "qsv not installed or not runnable (this is okay for plugin presence test)."
-
       
       - name: Setup CKAN configuration (/srv/app/src/ckan/test-core.ini)
         run: |
           set -eu
-
-
           # Defensive URL substitutions (keep these)
           sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}|g" /srv/app/src/ckan/test-core.ini || true
           sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL:-***postgres/datastore_test}|g" /srv/app/src/ckan/test-core.ini || true
@@ -151,7 +147,6 @@ jobs:
           if ! grep -q "^ckan.redis.url" /srv/app/src/ckan/test-core.ini; then
             echo "ckan.redis.url = ${CKAN_REDIS_URL:-redis://redis:6379/1}" >> /srv/app/src/ckan/test-core.ini
           fi
-
           # Desired values (use env vars when present, otherwise fall back)
           CKAN_SITE_URL="${CKAN_SITE_URL:-http://localhost:5000}"
           CKAN_SQLALCHEMY_URL="${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}"
@@ -159,7 +154,6 @@ jobs:
           CKAN_DATASTORE_READ_URL="${CKAN_DATASTORE_READ_URL:-***postgres/datastore_test}"
           CKAN_SOLR_URL="${CKAN_SOLR_URL:-http://solr:8983/solr/ckan}"
           CKAN_REDIS_URL="${CKAN_REDIS_URL:-redis://redis:6379/1}"
-
           # create temp files to hold lists (POSIX sh-safe)
           REPLACE_FILE="$(mktemp)"
           ADD_FILE="$(mktemp)"
@@ -167,7 +161,6 @@ jobs:
           : > "$REPLACE_FILE"
           : > "$ADD_FILE"
           : > "$MISSING_ADD_FILE"
-
           # REPLACE_ENTRIES (key|value) - write expanded lines to REPLACE_FILE
           printf '%s\n' \
             "ckan.site_url|${CKAN_SITE_URL}" \
@@ -177,7 +170,6 @@ jobs:
             "solr_url|${CKAN_SOLR_URL}" \
             "ckan.redis.url|${CKAN_REDIS_URL}" \
             > "$REPLACE_FILE"
-
           # ADD_LINES content (one entry per line). Comments start with '#'
           cat > "$ADD_FILE" <<'EOF'
           ckan.site_id = default
@@ -229,10 +221,8 @@ jobs:
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
           EOF
-
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             echo "Patching selective keys in /srv/app/src/ckan/test-core.ini (only the keys you listed)..."
-
             # Ensure single debug = true under [DEFAULT]: remove existing debug lines in DEFAULT then add one
             awk 'BEGIN{in=0}
               /^\[DEFAULT\]/{ print; in=1; next }
@@ -246,7 +236,6 @@ jobs:
                 }
               }
               END { if(in) print "debug = true" }' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.tmp && mv /srv/app/src/ckan/test-core.ini.tmp /srv/app/src/ckan/test-core.ini
-
             # Process REPLACE_FILE: replace if present, otherwise write to missing file
             while IFS= read -r entry || [ -n "$entry" ]; do
               key="$(printf '%s' "$entry" | cut -d'|' -f1)"
@@ -259,7 +248,6 @@ jobs:
                 printf '%s\n' "${key} = ${value}" >> "$MISSING_ADD_FILE"
               fi
             done < "$REPLACE_FILE"
-
             # Process ADD_FILE: replace if present, otherwise collect to missing file
             while IFS= read -r ln || [ -n "$ln" ]; do
               # comment lines - check if exact comment exists
@@ -281,7 +269,6 @@ jobs:
                   ;;
               esac
             done < "$ADD_FILE"
-
             # If there are missing lines, insert them after the first [app:main] header, or append the section
             if [ -s "$MISSING_ADD_FILE" ]; then
               awk -v addfile="$MISSING_ADD_FILE" '
@@ -304,16 +291,13 @@ jobs:
                   }
                 }' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.new && mv /srv/app/src/ckan/test-core.ini.new /srv/app/src/ckan/test-core.ini
             fi
-
             # Final defensive catch: ensure sqlalchemy and datastore URLs reflect env (again)
             sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /srv/app/src/ckan/test-core.ini || true
             sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /srv/app/src/ckan/test-core.ini || true
             sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /srv/app/src/ckan/test-core.ini || true
-
           else
             echo "/srv/app/src/ckan/test-core.ini not found — no selective patching performed."
           fi
-
           # Append datapusher plugin(s) to ckan.plugins if present; otherwise add a plugins line
           REQUIRED_PLUGINS="datastore datapusher_plus scheming_datasets"
           if grep -q "^ckan.plugins" /srv/app/src/ckan/test-core.ini; then
@@ -327,12 +311,9 @@ jobs:
             echo "ckan.plugins = $REQUIRED_PLUGINS" >> /srv/app/src/ckan/test-core.ini
             echo "Added ckan.plugins line with required plugins."
           fi
-
           echo "---- /srv/app/src/ckan/test-core.ini (cat) ----"
           cat /srv/app/src/ckan/test-core.ini || true
           echo "---- end ----"
-
-
       - name: Initialize CKAN database
         run: |
           
@@ -449,7 +430,6 @@ jobs:
           else
             echo "No API key found for ckan_admin - datapusher-plus may not work automatically"
           fi
-
       - name: Create API token for datapusher-plus and add to config
         run: |
           set -eu
@@ -538,7 +518,6 @@ jobs:
             ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
             exit 1
           fi
-
       - name: Manually trigger datapusher-plus processing
         run: |
           set -eu
@@ -561,7 +540,6 @@ jobs:
           else
             echo "Could not find resource ID for manual datapusher processing"
           fi
-
       - name: Display CKAN instance inventory
         run: |
           set -eu
