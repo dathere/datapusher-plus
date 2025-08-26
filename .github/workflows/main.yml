@@ -428,7 +428,6 @@ jobs:
           else
             echo "Failed to create API token for datapusher-plus"
           fi     
-
       - name: Create organization with ckanapi
         run: |
           set -eu
@@ -464,32 +463,22 @@ jobs:
           else
             echo "Dataset might already exist, continuing..."
           fi
-      - name: Add resource to dataset with ckan action
+      - name: Add resource to dataset with ckanapi
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
-          
-          # Ensure SECRET_KEY is in the config file
-          if ! grep -q "^app.SECRET_KEY" /srv/app/src/ckan/test-core.ini; then
-            echo "app.SECRET_KEY = secret_key_for_testing_only" >> /srv/app/src/ckan/test-core.ini
-            echo "Added SECRET_KEY to config"
-          fi
-          
-          # Set working directory to ensure config file is found correctly
-          cd /srv/app/src/ckan
-          
-          if ckan action resource_create \
+          if ckanapi action resource_create \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
             description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
             mimetype="text/csv" \
-            -c test-core.ini; then
+            -c /srv/app/src/ckan/test-core.ini; then
             echo "Resource created successfully!"
           else
             echo "Resource creation failed"
-            ckan action package_show id=my-first-dataset -c test-core.ini || true
+            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
             exit 1
           fi
           
@@ -507,7 +496,23 @@ jobs:
           echo ""
           echo "=== All Users (HTTP API) ==="
           curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
-
+      - name: Final summary
+        run: |
+          echo "Content creation and verification completed!"
+          echo "CREATED CONTENT SUMMARY:"
+          echo "  Organization: demo-organization"
+          echo "    Dataset: my-first-dataset"
+          echo "      Resource: Sample CSV Data (100KB)"
+          echo ""
+          echo "CREATED USERS (attempted):"
+          echo "  - ckan_admin (sysadmin)"
+          echo ""
+          echo "Access URLs (local to runner container):"
+          echo "  - Dataset: ${CKAN_SITE_URL}/dataset/my-first-dataset"
+          echo "  - Organization: ${CKAN_SITE_URL}/organization/demo-organization"
+          echo "  - API Status: ${CKAN_SITE_URL}/api/3/action/status_show"
+          echo ""
+          echo "If you need datapusher-plus functional tests, add steps to install/configure datapusher-plus service and send a POST to datapusher to start processing the CSV."
       - name: Setup datapusher-plus (placeholder)
         run: |
           echo "Placeholder: Add datapusher-plus-specific tests here."
