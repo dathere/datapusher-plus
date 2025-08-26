@@ -464,11 +464,11 @@ jobs:
           else
             echo "Dataset might already exist, continuing..."
           fi
-      - name: Add resource to dataset with ckanapi
+      - name: Add resource to dataset with ckan action
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
-          if ckanapi action resource_create \
+          if ckan action resource_create \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
@@ -479,7 +479,7 @@ jobs:
             echo "Resource created successfully!"
           else
             echo "Resource creation failed"
-            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
+            ckan action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
             exit 1
           fi
           
