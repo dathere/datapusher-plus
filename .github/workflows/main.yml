@@ -468,6 +468,16 @@ jobs:
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
+          
+          # Ensure SECRET_KEY is in the config file
+          if ! grep -q "^app.SECRET_KEY" /srv/app/src/ckan/test-core.ini; then
+            echo "app.SECRET_KEY = secret_key_for_testing_only" >> /srv/app/src/ckan/test-core.ini
+            echo "Added SECRET_KEY to config"
+          fi
+          
+          # Set working directory to ensure config file is found correctly
+          cd /srv/app/src/ckan
+          
           if ckan action resource_create \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
@@ -475,11 +485,11 @@ jobs:
             description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
             mimetype="text/csv" \
-            -c /srv/app/src/ckan/test-core.ini; then
+            -c test-core.ini; then
             echo "Resource created successfully!"
           else
             echo "Resource creation failed"
-            ckan action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
+            ckan action package_show id=my-first-dataset -c test-core.ini || true
             exit 1
           fi
           
