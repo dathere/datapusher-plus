@@ -468,9 +468,9 @@ jobs:
             maintainer="CKAN Admin" \
             maintainer_email=admin@example.com \
             url=https://github.com/your-repo/your-project \
-            private:=false \
+            private:false \
             state=active \
-            'tags:=[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
+            'tags:[{"name":"demo"},{"name":"test"}]' \
             -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
             
             echo "Dataset created successfully!"
