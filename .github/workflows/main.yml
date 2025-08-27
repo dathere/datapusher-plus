@@ -391,6 +391,17 @@ jobs:
           
           echo "=== Getting API key for ckan_admin via HTTP API ==="
           api_response=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin")
+          if command -v jq >/dev/null 2>&1; then
+            api_key=$(echo "$api_response" | jq -r '.result.apikey // empty')
+          else
+            # Fallback method
+            api_key=$(echo "$api_response" | grep -o '"apikey": *"[^"]*"' | sed 's/.*"apikey": *"\([^"]*\)".*/\1/')
+          fi
+          
+          if [ -n "$api_key" ]; then
+            echo "API key found for ckan_admin: $api_key"
+            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV  # This saves it for later steps
+          fi
           echo "API response: $api_response"
           
           # Extract just the API key value from the JSON response using jq (preferred method)
@@ -443,7 +454,9 @@ jobs:
         run: |
           set -eu
           echo "Creating dataset my-first-dataset (idempotent)..."
-          if ckanapi action package_create \
+          
+          # Capture the response to extract package ID
+          dataset_response=$(ckanapi action package_create \
             name=my-first-dataset \
             title="My First Comprehensive Dataset" \
             notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
@@ -458,30 +471,106 @@ jobs:
             private:false \
             state=active \
             'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
-            -c /srv/app/src/ckan/test-core.ini; then
-            echo "Dataset created successfully!"
+            -c /srv/app/src/ckan/test-core.ini --output json) || echo "Dataset might already exist, getting existing one..."
+          
+          # Extract package ID
+          if [ -n "$dataset_response" ]; then
+            package_id=$(echo "$dataset_response" | jq -r '.id // empty')
+            echo "Dataset created/found with ID: $package_id"
+            echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
           else
-            echo "Dataset might already exist, continuing..."
+            # Fallback: get existing dataset
+            echo "Getting existing dataset..."
+            existing_dataset=$(ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini --output json)
+            package_id=$(echo "$existing_dataset" | jq -r '.id // empty')
+            echo "Existing dataset ID: $package_id"
+            echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
           fi
+          
       - name: Add resource to dataset with ckanapi
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
-          if ckanapi action resource_create \
+          
+          # Capture the response to extract resource ID
+          resource_response=$(ckanapi action resource_create \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
             description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
             mimetype="text/csv" \
-            -c /srv/app/src/ckan/test-core.ini; then
+            -c /srv/app/src/ckan/test-core.ini --output json)
+          
+          if [ $? -eq 0 ] && [ -n "$resource_response" ]; then
             echo "Resource created successfully!"
+            # Extract resource ID
+            resource_id=$(echo "$resource_response" | jq -r '.id // empty')
+            echo "Resource created with ID: $resource_id"
+            echo "RESOURCE_ID=$resource_id" >> $GITHUB_ENV
           else
             echo "Resource creation failed"
             ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
             exit 1
           fi
+
+      - name: Test DataStore functionality
+        run: |
+          set -eu
+          echo "Testing DataStore functionality..."
           
+          # Check if we have the required variables
+          if [ -z "$CKAN_API_KEY" ] || [ -z "$PACKAGE_ID" ]; then
+            echo "Missing required variables: CKAN_API_KEY=$CKAN_API_KEY, PACKAGE_ID=$PACKAGE_ID"
+            exit 1
+          fi
+          
+          echo "Using API Key: $CKAN_API_KEY"
+          echo "Using Package ID: $PACKAGE_ID"
+          
+          # Test 1: List all DataStore resources
+          echo "=== Test 1: Listing all DataStore resources ==="
+          curl -X GET "http://localhost:5000/api/3/action/datastore_search?resource_id=_table_metadata" | python3 -m json.tool || true
+          echo ""
+          
+          # Test 2: Create a new DataStore resource
+          echo "=== Test 2: Creating new DataStore resource ==="
+          datastore_response=$(curl -X POST http://localhost:5000/api/3/action/datastore_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"resource\": {\"package_id\": \"$PACKAGE_ID\"}, \"fields\": [ {\"id\": \"a\"}, {\"id\": \"b\"} ], \"records\": [ { \"a\": 1, \"b\": \"xyz\"}, {\"a\": 2, \"b\": \"zzz\"} ]}")
+          
+          echo "DataStore create response:"
+          echo "$datastore_response" | python3 -m json.tool || echo "$datastore_response"
+          
+          # Extract the resource ID from the response
+          test_resource_id=$(echo "$datastore_response" | jq -r '.result.resource_id // empty')
+          
+          if [ -n "$test_resource_id" ]; then
+            echo ""
+            echo "=== Test 3: Searching the created DataStore resource ==="
+            echo "Test Resource ID: $test_resource_id"
+            curl -X GET "http://localhost:5000/api/3/action/datastore_search?resource_id=$test_resource_id" | python3 -m json.tool || true
+            echo ""
+            echo "DataStore functionality test completed successfully!"
+          else
+            echo "Failed to create DataStore resource or extract resource ID"
+            exit 1
+          fi
+          
+          # Optional: Test with the CSV resource if it was processed by datapusher-plus
+          if [ -n "$RESOURCE_ID" ]; then
+            echo ""
+            echo "=== Test 4: Checking if CSV resource was processed by DataStore ==="
+            echo "CSV Resource ID: $RESOURCE_ID"
+            csv_datastore_response=$(curl -s -X GET "http://localhost:5000/api/3/action/datastore_search?resource_id=$RESOURCE_ID")
+            if echo "$csv_datastore_response" | jq -e '.success' >/dev/null 2>&1; then
+              echo "CSV resource found in DataStore:"
+              echo "$csv_datastore_response" | python3 -m json.tool || true
+            else
+              echo "CSV resource not yet processed by DataStore (this may be expected if datapusher-plus hasn't run yet)"
+            fi
+          fi
       - name: Display CKAN instance inventory
         run: |
           set -eu
