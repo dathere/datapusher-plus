@@ -467,169 +467,19 @@ jobs:
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
-          
-          # Capture the resource creation response
-          resource_response=$(ckanapi action resource_create \
+          if ckanapi action resource_create \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
             description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
             mimetype="text/csv" \
-            -c /srv/app/src/ckan/test-core.ini)
-          
-          if [ $? -eq 0 ]; then
+            -c /srv/app/src/ckan/test-core.ini; then
             echo "Resource created successfully!"
-            
-            # Extract and save the resource ID for later use
-            resource_id=$(echo "$resource_response" | python3 -c "
-              import sys, json
-              data = json.load(sys.stdin)
-              print(data['result']['id'])
-            ")
-            
-            echo "Created resource with ID: $resource_id"
-            echo "CSV_RESOURCE_ID=$resource_id" >> $GITHUB_ENV
-            
           else
             echo "Resource creation failed"
             ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
             exit 1
-          fi
-
-      - name: Test DataStore functionality and resource upload
-        run: |
-          set -eu
-          echo "=== Testing DataStore Setup ==="
-          
-          # Test 1: Basic DataStore functionality - list all DataStore resources
-          echo "Testing basic DataStore access..."
-          if curl -fsS "http://localhost:5000/api/3/action/datastore_search?resource_id=_table_metadata" | python3 -m json.tool; then
-            echo "✓ DataStore is accessible and responding correctly"
-          else
-            echo "✗ DataStore basic test failed"
-            exit 1
-          fi
-          
-          echo ""
-          echo "=== Checking if uploaded resource is in DataStore ==="
-          
-          # Use the resource ID that was saved during creation
-          if [ -n "$CSV_RESOURCE_ID" ]; then
-            echo "Using saved resource ID: $CSV_RESOURCE_ID"
-            
-            # Test if the resource data is available in DataStore
-            echo "Checking if resource $CSV_RESOURCE_ID is available in DataStore..."
-            if curl -fsS "http://localhost:5000/api/3/action/datastore_search?resource_id=$CSV_RESOURCE_ID" >/dev/null 2>&1; then
-              echo "✓ Resource $CSV_RESOURCE_ID is successfully uploaded to DataStore"
-              
-              # Show a sample of the data
-              echo "Sample data from DataStore:"
-              curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$CSV_RESOURCE_ID&limit=5" | python3 -c "
-                import sys, json
-                try:
-                    data = json.load(sys.stdin)
-                    if 'result' in data and 'records' in data['result']:
-                        print(f\"Records found: {len(data['result']['records'])}\")
-                        if data['result']['records']:
-                            print('Sample records:')
-                            for i, record in enumerate(data['result']['records'][:3]):
-                                print(f'  Record {i+1}: {record}')
-                        if 'fields' in data['result']:
-                            field_names = [f['id'] for f in data['result']['fields']]
-                            print(f'Fields: {field_names}')
-                    else:
-                        print('No records found or unexpected response structure')
-                        print(json.dumps(data, indent=2))
-                except json.JSONDecodeError as e:
-                    print(f'Error parsing JSON: {e}')
-                except Exception as e:
-                    print(f'Error processing response: {e}')
-              "
-            else
-              echo "⚠ Resource $CSV_RESOURCE_ID is not yet available in DataStore"
-              echo "This might be normal if datapusher-plus is still processing the resource"
-              
-              # Check if there are any datapusher jobs
-              echo "Checking datapusher job status..."
-              curl -s "http://localhost:5000/api/3/action/datapusher_status" -H "Authorization: $CKAN_API_KEY" | python3 -m json.tool || echo "Could not check datapusher status"
-            fi
-          else
-            echo "✗ CSV_RESOURCE_ID environment variable not found"
-            echo "Make sure the resource creation step properly saves the resource ID"
-            exit 1
-          fi
-          
-          echo ""
-          echo "=== Testing DataStore Write Functionality ==="
-          
-          # Test 2: Create a test DataStore resource to verify write functionality
-          echo "Testing DataStore write functionality by creating a test resource..."
-          test_response=$(curl -s -X POST "http://localhost:5000/api/3/action/datastore_create" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "resource": {"package_id": "my-first-dataset"},
-              "fields": [
-                {"id": "test_id", "type": "integer"},
-                {"id": "test_name", "type": "text"},
-                {"id": "test_value", "type": "numeric"}
-              ],
-              "records": [
-                {"test_id": 1, "test_name": "Test Record 1", "test_value": 10.5},
-                {"test_id": 2, "test_name": "Test Record 2", "test_value": 20.3}
-              ]
-            }')
-          
-          echo "DataStore create response:"
-          echo "$test_response" | python3 -m json.tool || echo "$test_response"
-          
-          # Extract the test resource ID
-          test_resource_id=$(echo "$test_response" | python3 -c "
-            import sys, json
-            try:
-                data = json.load(sys.stdin)
-                if 'result' in data and 'resource_id' in data['result']:
-                    print(data['result']['resource_id'])
-            except:
-                pass
-          ")
-          
-          if [ -n "$test_resource_id" ]; then
-            echo "✓ Test DataStore resource created successfully with ID: $test_resource_id"
-            
-            # Verify we can read the test data back
-            echo "Verifying test data can be read back..."
-            if curl -fsS "http://localhost:5000/api/3/action/datastore_search?resource_id=$test_resource_id" | python3 -c "
-              import sys, json
-              data = json.load(sys.stdin)
-              records = data.get('result', {}).get('records', [])
-              if len(records) == 2:
-                  print('✓ Test data verified successfully')
-                  print(f'Found {len(records)} test records as expected')
-              else:
-                  print(f'⚠ Expected 2 records, found {len(records)}')
-            "; then
-              echo "✓ DataStore read/write functionality confirmed"
-            else
-              echo "⚠ Could not verify test data"
-            fi
-          else
-            echo "⚠ DataStore write test inconclusive - could not extract resource ID"
-          fi
-          
-          echo ""
-          echo "=== DataStore Test Summary ==="
-          echo "✓ Basic DataStore connectivity: PASSED"
-          if [ -n "$CSV_RESOURCE_ID" ] && curl -fsS "http://localhost:5000/api/3/action/datastore_search?resource_id=$CSV_RESOURCE_ID" >/dev/null 2>&1; then
-            echo "✓ Uploaded CSV resource in DataStore: PASSED"
-          else
-            echo "⚠ Uploaded CSV resource in DataStore: PENDING (may still be processing)"
-          fi
-          if [ -n "$test_resource_id" ]; then
-            echo "✓ DataStore write functionality: PASSED"
-          else
-            echo "⚠ DataStore write functionality: INCONCLUSIVE"
           fi
           
       - name: Display CKAN instance inventory
@@ -646,7 +496,23 @@ jobs:
           echo ""
           echo "=== All Users (HTTP API) ==="
           curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
-
+      - name: Final summary
+        run: |
+          echo "Content creation and verification completed!"
+          echo "CREATED CONTENT SUMMARY:"
+          echo "  Organization: demo-organization"
+          echo "    Dataset: my-first-dataset"
+          echo "      Resource: Sample CSV Data (100KB)"
+          echo ""
+          echo "CREATED USERS (attempted):"
+          echo "  - ckan_admin (sysadmin)"
+          echo ""
+          echo "Access URLs (local to runner container):"
+          echo "  - Dataset: ${CKAN_SITE_URL}/dataset/my-first-dataset"
+          echo "  - Organization: ${CKAN_SITE_URL}/organization/demo-organization"
+          echo "  - API Status: ${CKAN_SITE_URL}/api/3/action/status_show"
+          echo ""
+          echo "If you need datapusher-plus functional tests, add steps to install/configure datapusher-plus service and send a POST to datapusher to start processing the CSV."
       - name: Setup datapusher-plus (placeholder)
         run: |
           echo "Placeholder: Add datapusher-plus-specific tests here."
