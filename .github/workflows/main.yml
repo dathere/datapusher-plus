@@ -450,44 +450,64 @@ jobs:
           echo "Add ckan_admin as admin to the organization"
           ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
             id=demo-organization username=ckan_admin role=admin || echo "organization_member_create returned non-zero (may already be member)"
-      - name: Create dataset with ckanapi
+      - name: Create dataset with curl
         run: |
           set -eu
           echo "Creating dataset my-first-dataset (idempotent)..."
           
-          # Try to create dataset and capture output
-          if dataset_response=$(ckanapi action package_create \
-            name=my-first-dataset \
-            title="My First Comprehensive Dataset" \
-            notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
-            owner_org=demo-organization \
-            license_id=cc-by \
-            version=1.0.0 \
-            author="GitHub Actions Automation" \
-            author_email=noreply@example.com \
-            maintainer="CKAN Admin" \
-            maintainer_email=admin@example.com \
-            url=https://github.com/your-repo/your-project \
-            private:false \
-            state=active \
-            'tags:[{"name":"demo"},{"name":"test"}]' \
-            -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
-            
-            echo "Dataset created successfully!"
-            # Extract package ID using jq
-            echo "$dataset_response"
-            echo "Dataset created with ID: $package_id"
+          # Use the API key we extracted earlier
+          if [ -z "$CKAN_API_KEY" ]; then
+            echo "No API key available, cannot create dataset"
+            exit 1
+          fi
+          
+          # Try to create dataset using curl
+          dataset_response=$(curl -s -X POST http://localhost:5000/api/3/action/package_create \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "my-first-dataset",
+              "title": "My First Comprehensive Dataset",
+              "notes": "This is a comprehensive demo dataset created via curl and GitHub Actions for testing CKAN functionality and datapusher-plus integration.",
+              "owner_org": "demo-organization",
+              "license_id": "cc-by",
+              "version": "1.0.0",
+              "author": "GitHub Actions Automation",
+              "author_email": "noreply@example.com",
+              "maintainer": "CKAN Admin",
+              "maintainer_email": "admin@example.com",
+              "url": "https://github.com/your-repo/your-project",
+              "private": false,
+              "state": "active",
+              "tags": [
+                {"name": "demo"},
+                {"name": "test"},
+                {"name": "github-actions"},
+                {"name": "automation"},
+                {"name": "csv-data"},
+                {"name": "datapusher-plus"}
+              ]
+            }')
+          
+          echo "Dataset creation response:"
+          echo "$dataset_response" | python3 -m json.tool || echo "$dataset_response"
+          
+          # Check if creation was successful and extract package ID
+          if echo "$dataset_response" | jq -e '.success' >/dev/null 2>&1; then
+            package_id=$(echo "$dataset_response" | jq -r '.result.id // empty')
+            echo "Dataset created successfully with ID: $package_id"
             echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
-            
           else
             echo "Dataset creation failed or dataset already exists, trying to get existing one..."
-            # Get existing dataset
-            if existing_dataset=$(ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
-              package_id=$(echo "$existing_dataset" | jq -r '.id // empty')
+            # Try to get existing dataset
+            existing_response=$(curl -s -X GET "http://localhost:5000/api/3/action/package_show?id=my-first-dataset")
+            if echo "$existing_response" | jq -e '.success' >/dev/null 2>&1; then
+              package_id=$(echo "$existing_response" | jq -r '.result.id // empty')
               echo "Found existing dataset with ID: $package_id"
               echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
             else
               echo "Failed to create or retrieve dataset"
+              echo "Error response: $existing_response"
               exit 1
             fi
           fi
