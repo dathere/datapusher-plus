@@ -475,7 +475,7 @@ jobs:
             
             echo "Dataset created successfully!"
             # Extract package ID using jq
-            package_id=$(echo "$dataset_response" | jq -r '.id // empty')
+            echo "$dataset_response"
             echo "Dataset created with ID: $package_id"
             echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
             
