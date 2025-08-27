@@ -455,8 +455,8 @@ jobs:
           set -eu
           echo "Creating dataset my-first-dataset (idempotent)..."
           
-          # Capture the response to extract package ID
-          dataset_response=$(ckanapi action package_create \
+          # Try to create dataset and capture output
+          if dataset_response=$(ckanapi action package_create \
             name=my-first-dataset \
             title="My First Comprehensive Dataset" \
             notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
@@ -468,52 +468,69 @@ jobs:
             maintainer="CKAN Admin" \
             maintainer_email=admin@example.com \
             url=https://github.com/your-repo/your-project \
-            private:false \
+            private:=false \
             state=active \
-            'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
-            -c /srv/app/src/ckan/test-core.ini --output json) || echo "Dataset might already exist, getting existing one..."
-          
-          # Extract package ID
-          if [ -n "$dataset_response" ]; then
+            'tags:=[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
+            -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
+            
+            echo "Dataset created successfully!"
+            # Extract package ID using jq
             package_id=$(echo "$dataset_response" | jq -r '.id // empty')
-            echo "Dataset created/found with ID: $package_id"
+            echo "Dataset created with ID: $package_id"
             echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
+            
           else
-            # Fallback: get existing dataset
-            echo "Getting existing dataset..."
-            existing_dataset=$(ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini --output json)
-            package_id=$(echo "$existing_dataset" | jq -r '.id // empty')
-            echo "Existing dataset ID: $package_id"
-            echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
+            echo "Dataset creation failed or dataset already exists, trying to get existing one..."
+            # Get existing dataset
+            if existing_dataset=$(ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
+              package_id=$(echo "$existing_dataset" | jq -r '.id // empty')
+              echo "Found existing dataset with ID: $package_id"
+              echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
+            else
+              echo "Failed to create or retrieve dataset"
+              exit 1
+            fi
           fi
-          
       - name: Add resource to dataset with ckanapi
         run: |
           set -eu
           echo "Adding resource to my-first-dataset..."
           
-          # Capture the response to extract resource ID
-          resource_response=$(ckanapi action resource_create \
+          # Create resource and capture output
+          if resource_response=$(ckanapi action resource_create \
             package_id=my-first-dataset \
             url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
             name="Sample CSV Data - 100KB Test File" \
             description="Test CSV resource for datapusher-plus pipeline." \
             format=CSV \
             mimetype="text/csv" \
-            -c /srv/app/src/ckan/test-core.ini --output json)
-          
-          if [ $? -eq 0 ] && [ -n "$resource_response" ]; then
+            -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
+            
             echo "Resource created successfully!"
-            # Extract resource ID
+            # Extract resource ID using jq
             resource_id=$(echo "$resource_response" | jq -r '.id // empty')
             echo "Resource created with ID: $resource_id"
             echo "RESOURCE_ID=$resource_id" >> $GITHUB_ENV
+            
           else
-            echo "Resource creation failed"
-            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
-            exit 1
+            echo "Resource creation failed, checking if it already exists..."
+            # Try to get the package to see existing resources
+            if package_info=$(ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
+              echo "Package info retrieved, checking for existing resources..."
+              # Get the first resource ID if any exist
+              resource_id=$(echo "$package_info" | jq -r '.resources[0].id // empty')
+              if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
+                echo "Found existing resource with ID: $resource_id"
+                echo "RESOURCE_ID=$resource_id" >> $GITHUB_ENV
+              else
+                echo "No existing resources found"
+                exit 1
+              fi
+            else
+              echo "Failed to create resource or retrieve package info"
+              exit 1
+            fi
           fi
-
       - name: Test DataStore functionality
         run: |
           set -eu
