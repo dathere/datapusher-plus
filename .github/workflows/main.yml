@@ -383,12 +383,24 @@ jobs:
           set -eu
           echo "Creating user admin_ckan..."
           
-          ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
+          user_response=$(ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
             name=admin_ckan \
             email=admins@example.com \
             password=test1234 \
             fullname="CKAN Administrator" \
-            about="Created by GitHub Actions test" 2>/dev/null || echo "user_create returned non-zero (user may already exist)"
+            about="Created by GitHub Actions test" 2>/dev/null) || echo "user_create returned non-zero (user may already exist)"
+          
+          echo "User creation response: $user_response"
+          
+          # Extract API key from the response
+          api_key=$(echo "$user_response" | jq -r '.apikey // empty')
+          
+          if [ -n "$api_key" ] && [ "$api_key" != "null" ] && [ "$api_key" != "empty" ]; then
+            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+            echo "API key saved: $api_key"
+          else
+            echo "No API key found in response"
+          fi
           
           echo "User admin_ckan creation completed"
           
