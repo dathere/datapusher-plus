@@ -379,6 +379,7 @@ jobs:
             email=admins@example.com \
             password=test1234 \
             fullname="CKAN Administrator" \
+            with_apitoken=true \
             about="Created by GitHub Actions test" 2>/dev/null) || echo "user_create returned non-zero (user may already exist)"
           
           echo "User creation response: $user_response"
