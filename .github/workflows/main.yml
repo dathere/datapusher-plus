@@ -441,7 +441,46 @@ jobs:
             exit 1
           fi
           
-          echo "API token creation completed"  
+          echo "API token creation completed"
+        
+      - name: Create API token for datapusher-plus and add to config
+        run: |
+          set -eu
+          echo "Creating API token for datapusher-plus service account..."
+          
+          # Create API token for admin_ckan user specifically for datapusher-plus
+          dp_token=$(ckan -c /srv/app/src/ckan/test-core.ini user token add admin_ckan dpplus | tail -n 1 | tr -d '\t')
+          
+          if [ -n "$dp_token" ]; then
+            echo "Created datapusher-plus API token: $dp_token"
+            
+            # Add the token to the CKAN configuration file
+            ckan config-tool /srv/app/src/ckan/test-core.ini "ckanext.datapusher_plus.api_token=$dp_token"
+            
+            # Also set in environment for potential use in other steps
+            echo "DATAPUSHER_PLUS_API_TOKEN=$dp_token" >> $GITHUB_ENV
+            
+            echo "API token added to CKAN configuration successfully"
+          else
+            echo "Failed to create API token for datapusher-plus"
+          fi    
+
+      - name: TESTING API TOKEN!!!  Display API tokens for admin_ckan
+        run: |
+          set -eu
+          echo "Displaying API tokens for admin_ckan user..."
+          
+          token_list=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -d '{"user_id": "admin_ckan"}' \
+            "http://localhost:5000/api/3/action/api_token_list")
+          
+          echo "API token list response: $token_list"
+          echo ""
+          echo "=== Formatted API Token List ==="
+          echo "$token_list" | python3 -m json.tool || echo "$token_list"
+          echo "*********************************************************************************"
 
       - name: Create organization with ckanapi
         run: |
