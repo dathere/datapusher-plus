@@ -369,7 +369,7 @@ jobs:
 
 
           
-      - name: Create user admin_ckan
+      - name: Create sysadmin user admin_ckan and get apikey
         run: |
           set -eu
           echo "Creating user admin_ckan..."
@@ -461,7 +461,6 @@ jobs:
           else
             echo "Dataset might already exist, continuing..."
           fi
-          
       - name: Add resource to dataset with ckanapi
         run: |
           set -eu
@@ -495,23 +494,6 @@ jobs:
           echo ""
           echo "=== All Users (HTTP API) ==="
           curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
-      - name: Final summary
-        run: |
-          echo "Content creation and verification completed!"
-          echo "CREATED CONTENT SUMMARY:"
-          echo "  Organization: demo-organization"
-          echo "    Dataset: my-first-dataset"
-          echo "      Resource: Sample CSV Data (100KB)"
-          echo ""
-          echo "CREATED USERS (attempted):"
-          echo "  - admin_ckan (sysadmin)"
-          echo ""
-          echo "Access URLs (local to runner container):"
-          echo "  - Dataset: ${CKAN_SITE_URL}/dataset/my-first-dataset"
-          echo "  - Organization: ${CKAN_SITE_URL}/organization/demo-organization"
-          echo "  - API Status: ${CKAN_SITE_URL}/api/3/action/status_show"
-          echo ""
-          echo "If you need datapusher-plus functional tests, add steps to install/configure datapusher-plus service and send a POST to datapusher to start processing the CSV."
 
       - name: Test datastore functionality
         run: |
