@@ -450,7 +450,7 @@ jobs:
           
           # Get user details including API key via HTTP API (now that user exists)
           echo "Retrieving user details and API key via HTTP API..."
-          user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin")
+          user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=default")
           echo "User details response: $user_details"
           
           # Extract API key using jq
