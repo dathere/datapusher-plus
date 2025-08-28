@@ -371,34 +371,77 @@ jobs:
           set -eu
           echo "Creating sysadmin user (ckan_admin) using CKAN CLI..."
           
-          echo "Attempting to create sysadmin user with interactive responses..."
+          # Install expect to handle interactive prompts properly
+          apt-get install -y expect || echo "Expect installation failed, trying alternative approach"
           
-          # Direct approach: pipe responses to sysadmin add command
-          if printf "Y\nadmin@example.com\nCKAN Administrator\ntest1234\ntest1234\n" | \
-             ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
-            echo "Sysadmin user created successfully"
+          if command -v expect >/dev/null 2>&1; then
+            echo "Using expect to handle interactive prompts..."
+            
+            # Create expect script for sysadmin creation (avoiding heredoc in YAML)
+            echo '#!/usr/bin/expect -f' > /tmp/create_sysadmin.exp
+            echo 'set timeout 30' >> /tmp/create_sysadmin.exp
+            echo 'spawn ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin' >> /tmp/create_sysadmin.exp
+            echo 'expect {' >> /tmp/create_sysadmin.exp
+            echo '    "Create new user: ckan_admin? \\[Y/n\\]:" {' >> /tmp/create_sysadmin.exp
+            echo '        send "Y\\r"' >> /tmp/create_sysadmin.exp
+            echo '        exp_continue' >> /tmp/create_sysadmin.exp
+            echo '    }' >> /tmp/create_sysadmin.exp
+            echo '    "Email address*:" {' >> /tmp/create_sysadmin.exp
+            echo '        send "admin@example.com\\r"' >> /tmp/create_sysadmin.exp
+            echo '        exp_continue' >> /tmp/create_sysadmin.exp
+            echo '    }' >> /tmp/create_sysadmin.exp
+            echo '    "Password*:" {' >> /tmp/create_sysadmin.exp
+            echo '        send "test1234\\r"' >> /tmp/create_sysadmin.exp
+            echo '        exp_continue' >> /tmp/create_sysadmin.exp
+            echo '    }' >> /tmp/create_sysadmin.exp
+            echo '    "Repeat for confirmation*:" {' >> /tmp/create_sysadmin.exp
+            echo '        send "test1234\\r"' >> /tmp/create_sysadmin.exp
+            echo '        exp_continue' >> /tmp/create_sysadmin.exp
+            echo '    }' >> /tmp/create_sysadmin.exp
+            echo '    eof' >> /tmp/create_sysadmin.exp
+            echo '}' >> /tmp/create_sysadmin.exp
+            
+            chmod +x /tmp/create_sysadmin.exp
+            
+            if /tmp/create_sysadmin.exp; then
+              echo "Sysadmin user created successfully with expect"
+            else
+              echo "Expect method failed, trying fallback approach..."
+            fi
           else
-            echo "Primary sysadmin creation failed, trying two-step approach..."
+            echo "Expect not available, using alternative method..."
+          fi
+          
+          # Fallback method: check if user exists first
+          if ! curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin" | grep -q '"success": true'; then
+            echo "User not found, trying alternative creation method..."
             
-            # Two-step approach: create user first, then promote
-            echo "Step 1: Creating user with user add command..."
-            if printf "Y\nadmin@example.com\nCKAN Administrator\ntest1234\ntest1234\n" | \
-               ckan -c /srv/app/src/ckan/test-core.ini user add ckan_admin; then
-              echo "User created successfully"
-            else
-              echo "User creation step had issues, but continuing to promotion step..."
-            fi
+            # Create user creation script with proper timing
+            echo '#!/bin/bash' > /tmp/create_user.sh
+            echo '{' >> /tmp/create_user.sh
+            echo '  sleep 1' >> /tmp/create_user.sh
+            echo '  echo "Y"' >> /tmp/create_user.sh
+            echo '  sleep 1' >> /tmp/create_user.sh
+            echo '  echo "admin@example.com"' >> /tmp/create_user.sh
+            echo '  sleep 1' >> /tmp/create_user.sh
+            echo '  echo "test1234"' >> /tmp/create_user.sh
+            echo '  sleep 1' >> /tmp/create_user.sh
+            echo '  echo "test1234"' >> /tmp/create_user.sh
+            echo '  sleep 1' >> /tmp/create_user.sh
+            echo '} | timeout 60 ckan -c /srv/app/src/ckan/test-core.ini user add ckan_admin' >> /tmp/create_user.sh
             
-            # Step 2: Promote existing user to sysadmin (this should not be interactive if user exists)
-            echo "Step 2: Promoting user to sysadmin..."
-            if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
-              echo "User promoted to sysadmin successfully"
+            chmod +x /tmp/create_user.sh
+            
+            echo "Attempting user creation with timed responses..."
+            if /tmp/create_user.sh; then
+              echo "User created, now promoting to sysadmin..."
+              ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin
             else
-              echo "Failed to promote user to sysadmin, checking user existence..."
-              # Final check to see what went wrong
-              curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin" | head -5 || echo "User does not exist in system"
-              exit 1
+              echo "Alternative user creation also failed"
             fi
+          else
+            echo "User already exists, attempting to promote to sysadmin..."
+            ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin
           fi
           
           # Verify sysadmin was created by listing all sysadmins
