@@ -371,21 +371,32 @@ jobs:
           set -eu
           echo "Creating sysadmin user (ckan_admin) using CKAN CLI..."
           
-          # Use CKAN CLI to create sysadmin user directly (creates user and promotes to sysadmin in one command)
-          # This avoids interactive prompts by providing all required parameters
-          echo "Creating sysadmin user with CLI (non-interactive mode)..."
-          if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin \
-            email=admin@example.com \
-            name=ckan_admin \
-            password=test1234; then
+          echo "Attempting to create sysadmin user with interactive responses..."
+          
+          # Direct approach: pipe responses to sysadmin add command
+          if printf "Y\nadmin@example.com\nCKAN Administrator\ntest1234\ntest1234\n" | \
+             ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
             echo "Sysadmin user created successfully"
           else
-            echo "Sysadmin creation failed, checking if user already exists..."
-            # Check if user already exists and try to promote to sysadmin
-            if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
-              echo "Existing user promoted to sysadmin"
+            echo "Primary sysadmin creation failed, trying two-step approach..."
+            
+            # Two-step approach: create user first, then promote
+            echo "Step 1: Creating user with user add command..."
+            if printf "Y\nadmin@example.com\nCKAN Administrator\ntest1234\ntest1234\n" | \
+               ckan -c /srv/app/src/ckan/test-core.ini user add ckan_admin; then
+              echo "User created successfully"
             else
-              echo "Failed to create or promote user to sysadmin"
+              echo "User creation step had issues, but continuing to promotion step..."
+            fi
+            
+            # Step 2: Promote existing user to sysadmin (this should not be interactive if user exists)
+            echo "Step 2: Promoting user to sysadmin..."
+            if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
+              echo "User promoted to sysadmin successfully"
+            else
+              echo "Failed to promote user to sysadmin, checking user existence..."
+              # Final check to see what went wrong
+              curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin" | head -5 || echo "User does not exist in system"
               exit 1
             fi
           fi
