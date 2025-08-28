@@ -365,6 +365,17 @@ jobs:
             exit 1
           fi
           echo "CKAN started successfully"
+
+      - name: Create user ckan_admin
+        run: |
+          set -eu
+          echo "Creating user ckan_admin via CLI..."
+          
+          ckan -c /srv/app/src/ckan/test-core.ini user add ckan_admin \
+            email=admin@example.com \
+            password=test1234
+          
+          echo "User ckan_admin created"
   
       - name: Fetch default user details and API tokens
         run: |
