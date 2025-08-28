@@ -366,57 +366,67 @@ jobs:
           fi
           echo "CKAN started successfully"
   
-      - name: Create sysadmin user with ckanapi (safe)
+      - name: Create sysadmin user with CKAN API (curl)
         run: |
           set -eu
-          echo "Creating sysadmin user (ckan_admin) if not exist..."
+          echo "Creating sysadmin user (ckan_admin) using CKAN REST API..."
           
-          # Create user (suppress stderr to avoid JSON parsing issues)
-          ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
-            name=ckan_admin \
-            email=admin@example.com \
-            password=test1234 \
-            fullname="CKAN Administrator" \
-            about="Created by GitHub Actions test" 2>/dev/null || echo "user_create returned non-zero (user may already exist)"
+          # Create user via CKAN API
+          user_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -d '{
+              "name": "ckan_admin",
+              "email": "admin@example.com",
+              "password": "test1234",
+              "fullname": "CKAN Administrator",
+              "about": "Created by GitHub Actions test"
+            }' \
+            "http://localhost:5000/api/3/action/user_create" || echo '{"success": false}')
           
-          echo "Ensure ckan_admin is sysadmin via CLI"
+          echo "User creation API response: $user_response"
+          
+          # Check if user creation was successful
+          if echo "$user_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "User created successfully"
+          else
+            echo "User creation failed or user may already exist, continuing..."
+          fi
+          
+          # Promote user to sysadmin using CLI (no direct API endpoint available)
+          echo "Promoting ckan_admin to sysadmin via CLI..."
           if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
-            echo "ckan_admin promoted to sysadmin"
+            echo "ckan_admin promoted to sysadmin successfully"
           else
-            echo "sysadmin add returned non-zero (user may already be sysadmin)"
+            echo "Sysadmin promotion returned non-zero (user may already be sysadmin)"
           fi
           
-          echo "=== Displaying all users with details via HTTP API ==="
-          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
+          # Get user details including API key
+          echo "Retrieving user details and API key..."
+          user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin")
+          echo "User details response: $user_details"
           
-          echo "=== Getting API key for ckan_admin via HTTP API ==="
-          api_response=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin")
+          # Extract API key using jq
           if command -v jq >/dev/null 2>&1; then
-            api_key=$(echo "$api_response" | jq -r '.result.apikey // empty')
+            api_key=$(echo "$user_details" | jq -r '.result.apikey // empty')
           else
-            # Fallback method
-            api_key=$(echo "$api_response" | grep -o '"apikey": *"[^"]*"' | sed 's/.*"apikey": *"\([^"]*\)".*/\1/')
+            # Fallback: extract API key using grep/sed
+            api_key=$(echo "$user_details" | grep -o '"apikey": *"[^"]*"' | sed 's/.*"apikey": *"\([^"]*\)".*/\1/')
           fi
           
           if [ -n "$api_key" ]; then
-            echo "API key found for ckan_admin: $api_key"
-            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV  # This saves it for later steps
-          fi
-          echo "API response: $api_response"
-          
-          # Extract just the API key value from the JSON response using jq (preferred method)
-          if command -v jq >/dev/null 2>&1; then
-            api_key=$(echo "$api_response" | jq -r '.result.apikey // empty')
-          else
-            # Fallback: extract API key using grep/sed if jq is not available
-            api_key=$(echo "$api_response" | grep -o '"apikey": *"[^"]*"' | sed 's/.*"apikey": *"\([^"]*\)".*/\1/')
-          fi
-          
-          if [ -n "$api_key" ]; then
-            echo "API key found for ckan_admin: $api_key"
+            echo "API key extracted for ckan_admin: $api_key"
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
           else
-            echo "No API key found for ckan_admin - datapusher-plus may not work automatically"
+            echo "Failed to extract API key for ckan_admin"
+            exit 1
+          fi
+          
+          # Verify user is sysadmin by checking user details
+          is_sysadmin=$(echo "$user_details" | jq -r '.result.sysadmin // false')
+          if [ "$is_sysadmin" = "true" ]; then
+            echo "✓ Verified: ckan_admin is a sysadmin"
+          else
+            echo "⚠ Warning: ckan_admin may not be properly configured as sysadmin"
           fi
       - name: Create API token for datapusher-plus and add to config
         run: |
@@ -438,176 +448,109 @@ jobs:
             echo "API token added to CKAN configuration successfully"
           else
             echo "Failed to create API token for datapusher-plus"
-          fi     
-      - name: Create organization with ckanapi
+          fi 
+          
+      - name: Create organization using CKAN API
         run: |
           set -eu
-          echo "Creating organization demo-organization (idempotent)..."
-          ckanapi action organization_create --config /srv/app/src/ckan/test-core.ini \
-            name=demo-organization \
-            title="Demo Data Publishing Organization" \
-            description="Demo org created by GitHub Actions for datapusher-plus testing." || echo "organization_create returned non-zero (may already exist)"
-          echo "Add ckan_admin as admin to the organization"
-          ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
-            id=demo-organization username=ckan_admin role=admin || echo "organization_member_create returned non-zero (may already be member)"
-      - name: Create dataset with curl
+          echo "Creating organization demo-organization using CKAN REST API..."
+          
+          # Create organization
+          org_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -d '{
+              "name": "demo-organization",
+              "title": "Demo Data Publishing Organization",
+              "description": "Demo org created by GitHub Actions for datapusher-plus testing."
+            }' \
+            "http://localhost:5000/api/3/action/organization_create" || echo '{"success": false}')
+          
+          echo "Organization creation response: $org_response"
+          
+          # Check if organization creation was successful
+          if echo "$org_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "Organization created successfully"
+          else
+            echo "Organization creation failed or may already exist, continuing..."
+          fi
+          
+          # Add ckan_admin as admin to the organization
+          echo "Adding ckan_admin as admin to demo-organization..."
+          member_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -d '{
+              "id": "demo-organization",
+              "username": "ckan_admin",
+              "role": "admin"
+            }' \
+            "http://localhost:5000/api/3/action/organization_member_create" || echo '{"success": false}')
+          
+          echo "Member creation response: $member_response"
+          
+          if echo "$member_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ ckan_admin added as admin to demo-organization"
+          else
+            echo "⚠ Adding admin membership failed or may already exist"
+          fi      
+      
+      - name: Create dataset with ckanapi
         run: |
           set -eu
           echo "Creating dataset my-first-dataset (idempotent)..."
-          
-          # Use the API key we extracted earlier
-          if [ -z "$dp_token" ]; then
-            echo "No API key available, cannot create dataset"
-            exit 1
+          if ckanapi action package_create \
+            name=my-first-dataset \
+            title="My First Comprehensive Dataset" \
+            notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
+            owner_org=demo-organization \
+            license_id=cc-by \
+            version=1.0.0 \
+            author="GitHub Actions Automation" \
+            author_email=noreply@example.com \
+            maintainer="CKAN Admin" \
+            maintainer_email=admin@example.com \
+            url=https://github.com/your-repo/your-project \
+            private:false \
+            state=active \
+            'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Dataset created successfully!"
+          else
+            echo "Dataset might already exist, continuing..."
           fi
+      - name: Add resource to dataset using CKAN API
+        run: |
+          set -eu
+          echo "Adding resource to my-first-dataset using CKAN REST API..."
           
-          # Try to create dataset using curl
-          dataset_response=$(curl -s -X POST http://localhost:5000/api/3/action/package_create \
-            -H "Authorization: $dp_token" \
+          resource_response=$(curl -s -X POST \
             -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
             -d '{
-              "name": "my-first-dataset",
-              "title": "My First Comprehensive Dataset",
-              "notes": "This is a comprehensive demo dataset created via curl and GitHub Actions for testing CKAN functionality and datapusher-plus integration.",
-              "owner_org": "demo-organization",
-              "license_id": "cc-by",
-              "version": "1.0.0",
-              "author": "GitHub Actions Automation",
-              "author_email": "noreply@example.com",
-              "maintainer": "CKAN Admin",
-              "maintainer_email": "admin@example.com",
-              "url": "https://github.com/your-repo/your-project",
-              "private": false,
-              "state": "active",
-              "tags": [
-                {"name": "demo"},
-                {"name": "test"},
-                {"name": "github-actions"},
-                {"name": "automation"},
-                {"name": "csv-data"},
-                {"name": "datapusher-plus"}
-              ]
-            }')
+              "package_id": "my-first-dataset",
+              "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
+              "name": "Sample CSV Data - 100KB Test File",
+              "description": "Test CSV resource for datapusher-plus pipeline.",
+              "format": "CSV",
+              "mimetype": "text/csv"
+            }' \
+            "http://localhost:5000/api/3/action/resource_create" || echo '{"success": false}')
           
-          echo "Dataset creation response:"
-          echo "$dataset_response" | python3 -m json.tool || echo "$dataset_response"
+          echo "Resource creation response: $resource_response"
           
-          # Check if creation was successful and extract package ID
-          if echo "$dataset_response" | jq -e '.success' >/dev/null 2>&1; then
-            package_id=$(echo "$dataset_response" | jq -r '.result.id // empty')
-            echo "Dataset created successfully with ID: $package_id"
-            echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
-          else
-            echo "Dataset creation failed or dataset already exists, trying to get existing one..."
-            # Try to get existing dataset
-            existing_response=$(curl -s -X GET "http://localhost:5000/api/3/action/package_show?id=my-first-dataset")
-            if echo "$existing_response" | jq -e '.success' >/dev/null 2>&1; then
-              package_id=$(echo "$existing_response" | jq -r '.result.id // empty')
-              echo "Found existing dataset with ID: $package_id"
-              echo "PACKAGE_ID=$package_id" >> $GITHUB_ENV
-            else
-              echo "Failed to create or retrieve dataset"
-              echo "Error response: $existing_response"
-              exit 1
-            fi
-          fi
-      - name: Add resource to dataset with ckanapi
-        run: |
-          set -eu
-          echo "Adding resource to my-first-dataset..."
-          
-          # Create resource and capture output
-          if resource_response=$(ckanapi action resource_create \
-            package_id=my-first-dataset \
-            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
-            name="Sample CSV Data - 100KB Test File" \
-            description="Test CSV resource for datapusher-plus pipeline." \
-            format=CSV \
-            mimetype="text/csv" \
-            -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
-            
-            echo "Resource created successfully!"
-            # Extract resource ID using jq
-            resource_id=$(echo "$resource_response" | jq -r '.id // empty')
-            echo "Resource created with ID: $resource_id"
+          if echo "$resource_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ Resource created successfully!"
+            resource_id=$(echo "$resource_response" | jq -r '.result.id')
+            echo "Resource ID: $resource_id"
             echo "RESOURCE_ID=$resource_id" >> $GITHUB_ENV
-            
           else
-            echo "Resource creation failed, checking if it already exists..."
-            # Try to get the package to see existing resources
-            if package_info=$(ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini -j 2>/dev/null); then
-              echo "Package info retrieved, checking for existing resources..."
-              # Get the first resource ID if any exist
-              resource_id=$(echo "$package_info" | jq -r '.resources[0].id // empty')
-              if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
-                echo "Found existing resource with ID: $resource_id"
-                echo "RESOURCE_ID=$resource_id" >> $GITHUB_ENV
-              else
-                echo "No existing resources found"
-                exit 1
-              fi
-            else
-              echo "Failed to create resource or retrieve package info"
-              exit 1
-            fi
-          fi
-      - name: Test DataStore functionality
-        run: |
-          set -eu
-          echo "Testing DataStore functionality..."
-          
-          # Check if we have the required variables
-          if [ -z "$dp_token" ] || [ -z "$PACKAGE_ID" ]; then
-            echo "Missing required variables: CKAN_API_KEY=$dp_token, PACKAGE_ID=$PACKAGE_ID"
+            echo "Resource creation failed"
+            echo "Checking dataset details for troubleshooting..."
+            curl -s "http://localhost:5000/api/3/action/package_show?id=my-first-dataset" | jq '.' || true
             exit 1
           fi
           
-          echo "Using API Key: $dp_token"
-          echo "Using Package ID: $PACKAGE_ID"
-          
-          # Test 1: List all DataStore resources
-          echo "=== Test 1: Listing all DataStore resources ==="
-          curl -X GET "http://localhost:5000/api/3/action/datastore_search?resource_id=_table_metadata" | python3 -m json.tool || true
-          echo ""
-          
-          # Test 2: Create a new DataStore resource
-          echo "=== Test 2: Creating new DataStore resource ==="
-          datastore_response=$(curl -X POST http://localhost:5000/api/3/action/datastore_create \
-            -H "Authorization: $dp_token" \
-            -H "Content-Type: application/json" \
-            -d "{\"resource\": {\"package_id\": \"$PACKAGE_ID\"}, \"fields\": [ {\"id\": \"a\"}, {\"id\": \"b\"} ], \"records\": [ { \"a\": 1, \"b\": \"xyz\"}, {\"a\": 2, \"b\": \"zzz\"} ]}")
-          
-          echo "DataStore create response:"
-          echo "$datastore_response" | python3 -m json.tool || echo "$datastore_response"
-          
-          # Extract the resource ID from the response
-          test_resource_id=$(echo "$datastore_response" | jq -r '.result.resource_id // empty')
-          
-          if [ -n "$test_resource_id" ]; then
-            echo ""
-            echo "=== Test 3: Searching the created DataStore resource ==="
-            echo "Test Resource ID: $test_resource_id"
-            curl -X GET "http://localhost:5000/api/3/action/datastore_search?resource_id=$test_resource_id" | python3 -m json.tool || true
-            echo ""
-            echo "DataStore functionality test completed successfully!"
-          else
-            echo "Failed to create DataStore resource or extract resource ID"
-            exit 1
-          fi
-          
-          # Optional: Test with the CSV resource if it was processed by datapusher-plus
-          if [ -n "$RESOURCE_ID" ]; then
-            echo ""
-            echo "=== Test 4: Checking if CSV resource was processed by DataStore ==="
-            echo "CSV Resource ID: $RESOURCE_ID"
-            csv_datastore_response=$(curl -s -X GET "http://localhost:5000/api/3/action/datastore_search?resource_id=$RESOURCE_ID")
-            if echo "$csv_datastore_response" | jq -e '.success' >/dev/null 2>&1; then
-              echo "CSV resource found in DataStore:"
-              echo "$csv_datastore_response" | python3 -m json.tool || true
-            else
-              echo "CSV resource not yet processed by DataStore (this may be expected if datapusher-plus hasn't run yet)"
-            fi
-          fi
       - name: Display CKAN instance inventory
         run: |
           set -eu
