@@ -515,6 +515,62 @@ jobs:
           echo "  - API Status: ${CKAN_SITE_URL}/api/3/action/status_show"
           echo ""
           echo "If you need datapusher-plus functional tests, add steps to install/configure datapusher-plus service and send a POST to datapusher to start processing the CSV."
+
+      - name: Test datastore functionality
+        run: |
+          set -eu
+          echo "Testing datastore functionality..."
+          
+          # Test 1: Check if datastore is accessible by querying table metadata
+          echo "=== Testing datastore read access ==="
+          metadata_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=_table_metadata")
+          echo "Table metadata response: $metadata_response"
+          
+          if echo "$metadata_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ Datastore read access working"
+          else
+            echo "✗ Datastore read access failed"
+            exit 1
+          fi
+          
+          # Test 2: Create a test datastore table
+          echo "=== Testing datastore write access ==="
+          test_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -d '{
+              "resource": {"package_id": "my-first-dataset"},
+              "fields": [{"id": "test_col", "type": "text"}, {"id": "value", "type": "int"}],
+              "records": [{"test_col": "hello", "value": 1}, {"test_col": "world", "value": 2}]
+            }' \
+            "http://localhost:5000/api/3/action/datastore_create")
+          
+          echo "Test table creation response: $test_response"
+          
+          if echo "$test_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ Datastore write access working"
+            
+            # Extract resource_id for cleanup
+            test_resource_id=$(echo "$test_response" | jq -r '.result.resource_id')
+            
+            # Test 3: Query the test table
+            echo "=== Testing datastore query ==="
+            query_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$test_resource_id")
+            echo "Query response: $query_response"
+            
+            # Cleanup: Delete test table
+            echo "=== Cleaning up test table ==="
+            curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $CKAN_API_KEY" \
+              -d "{\"resource_id\": \"$test_resource_id\"}" \
+              "http://localhost:5000/api/3/action/datastore_delete" >/dev/null
+            
+            echo "✓ Datastore functionality test completed successfully"
+          else
+            echo "✗ Datastore write access failed"
+          fi
+      
       - name: Setup datapusher-plus (placeholder)
         run: |
           echo "Placeholder: Add datapusher-plus-specific tests here."
