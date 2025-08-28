@@ -456,14 +456,14 @@ jobs:
           echo "Creating dataset my-first-dataset (idempotent)..."
           
           # Use the API key we extracted earlier
-          if [ -z "$CKAN_API_KEY" ]; then
+          if [ -z "$dp_token" ]; then
             echo "No API key available, cannot create dataset"
             exit 1
           fi
           
           # Try to create dataset using curl
           dataset_response=$(curl -s -X POST http://localhost:5000/api/3/action/package_create \
-            -H "Authorization: $CKAN_API_KEY" \
+            -H "Authorization: $dp_token" \
             -H "Content-Type: application/json" \
             -d '{
               "name": "my-first-dataset",
