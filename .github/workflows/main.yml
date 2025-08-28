@@ -407,7 +407,23 @@ jobs:
           
           echo "User admin_ckan creation completed"
           
+      - name: Display API tokens for admin_ckan
+        run: |
+          set -eu
+          echo "Displaying API tokens for admin_ckan user..."
+          
+          token_list=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -d '{"user_id": "admin_ckan"}' \
+            "http://localhost:5000/api/3/action/api_token_list")
+          
+          echo "API token list response: $token_list"
+          echo ""
+          echo "=== Formatted API Token List ==="
+          echo "$token_list" | python3 -m json.tool || echo "$token_list"
 
+          
       - name: Create API token for datapusher-plus and add to config
         run: |
           set -eu
