@@ -430,50 +430,16 @@ jobs:
             echo "Failed to create API token for datapusher-plus"
           fi     
 
-      - name: Create organization using CKAN REST API
+      - name: Create organization using ckanapi
         run: |
           set -eu
-          echo "Creating organization demo-organization using CKAN REST API..."
-          echo "API key saved: $CKAN_API_KEY"
-          # Create organization
-          org_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -d '{
-              "name": "demo-organization",
-              "title": "Demo Data Publishing Organization",
-              "description": "Demo org created by GitHub Actions for datapusher-plus testing."
-            }' \
-            "http://localhost:5000/api/3/action/organization_create" || echo '{"success": false}')
+          echo "Creating organization using ckanapi..."
           
-          echo "Organization creation response: $org_response"
-          
-          # Check if organization creation was successful
-          if echo "$org_response" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "Organization created successfully"
-          else
-            echo "Organization creation failed or may already exist, continuing..."
-          fi
-          
-          # Add admin_ckan as admin to the organization
-          echo "Adding admin_ckan as admin to demo-organization..."
-          member_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -d '{
-              "id": "demo-organization",
-              "username": "admin_ckan",
-              "role": "admin"
-            }' \
-            "http://localhost:5000/api/3/action/organization_member_create" || echo '{"success": false}')
-          
-          echo "Member creation response: $member_response"
-          
-          if echo "$member_response" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "✓ admin_ckan added as admin to demo-organization"
-          else
-            echo "⚠ Adding admin membership failed or may already exist"
-          fi
+          ckanapi action organization_create --config /srv/app/src/ckan/test-core.ini \
+            --apikey "$CKAN_API_KEY" \
+            name=demo-organization \
+            title="Demo Data Publishing Organization" \
+            description="Demo org created by GitHub Actions." || echo "Organization creation failed"
 
       - name: Create dataset using CKAN REST API
         run: |
