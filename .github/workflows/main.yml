@@ -366,7 +366,7 @@ jobs:
           fi
           echo "CKAN started successfully"
   
-      - name: Fetch default user details
+      - name: Fetch default user details and API tokens
         run: |
           set -eu
           echo "Fetching details for default user..."
@@ -379,6 +379,29 @@ jobs:
           
           echo "=== Default User Details (Formatted) ==="
           echo "$user_details" | python3 -m json.tool || echo "$user_details"
+          
+          # Extract API key for authentication
+          api_key=$(echo "$user_details" | jq -r '.result.apikey // empty')
+          
+          if [ -n "$api_key" ] && [ "$api_key" != "null" ] && [ "$api_key" != "empty" ]; then
+            echo ""
+            echo "=== Available API Tokens for Default User ==="
+            token_list=$(curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $api_key" \
+              -d '{"user_id": "default"}' \
+              "http://localhost:5000/api/3/action/api_token_list")
+            
+            echo "API token list (raw): $token_list"
+            echo ""
+            echo "=== Formatted API Token List ==="
+            echo "$token_list" | python3 -m json.tool || echo "$token_list"
+            
+            # Store API key for subsequent steps
+            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+          else
+            echo "No API key found for default user"
+          fi
           
 
       - name: Create API token for datapusher-plus and add to config
