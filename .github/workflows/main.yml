@@ -385,13 +385,8 @@ jobs:
           echo "User creation response: $user_response"
 
           echo "Converting admin_ckan user to sysadmin..."
-          
           ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin_ckan
-          
           echo "User admin_ckan promoted to sysadmin"
-
-          echo "=== Displaying all users with details via HTTP API ==="
-          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
           
           # Extract only the JSON part (everything from { to })
           json_response=$(echo "$user_response" | sed -n '/{/,/}/p')
@@ -407,42 +402,7 @@ jobs:
           fi
           
           echo "User admin_ckan creation completed"
-          
-      - name: Display API tokens for admin_ckan
-        run: |
-          set -eu
-          echo "Displaying API tokens for admin_ckan user..."
-          
-          token_list=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -d '{"user_id": "admin_ckan"}' \
-            "http://localhost:5000/api/3/action/api_token_list")
-          
-          echo "API token list response: $token_list"
-          echo ""
-          echo "=== Formatted API Token List ==="
-          echo "$token_list" | python3 -m json.tool || echo "$token_list"
-
-          
-      - name: Create API token from console
-        run: |
-          set -eu
-          echo "Creating API token for admin_ckan from console..."
-          
-          # Create API token using CLI
-          new_token=$(ckan -c /srv/app/src/ckan/test-core.ini user token add admin_ckan github-workflow | tail -n 1 | tr -d '\t')
-          
-          if [ -n "$new_token" ]; then
-            echo "Successfully created API token: $new_token"
-            echo "NEW_API_TOKEN=$new_token" >> $GITHUB_ENV
-          else
-            echo "Failed to create API token"
-            exit 1
-          fi
-          
-          echo "API token creation completed"
-        
+           
       - name: Create API token for datapusher-plus and add to config
         run: |
           set -eu
@@ -465,23 +425,6 @@ jobs:
             echo "Failed to create API token for datapusher-plus"
           fi    
 
-      - name: TESTING API TOKEN!!!  Display API tokens for admin_ckan
-        run: |
-          set -eu
-          echo "Displaying API tokens for admin_ckan user..."
-          
-          token_list=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -d '{"user_id": "admin_ckan"}' \
-            "http://localhost:5000/api/3/action/api_token_list")
-          
-          echo "API token list response: $token_list"
-          echo ""
-          echo "=== Formatted API Token List ==="
-          echo "$token_list" | python3 -m json.tool || echo "$token_list"
-          echo "*********************************************************************************"
-
       - name: Create organization with ckanapi
         run: |
           set -eu
@@ -493,6 +436,7 @@ jobs:
           echo "Add admin_ckan as admin to the organization"
           ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
             id=demo-organization username=admin_ckan role=admin || echo "organization_member_create returned non-zero (may already be member)"
+      
       - name: Create dataset with ckanapi
         run: |
           set -eu
@@ -517,6 +461,7 @@ jobs:
           else
             echo "Dataset might already exist, continuing..."
           fi
+          
       - name: Add resource to dataset with ckanapi
         run: |
           set -eu
