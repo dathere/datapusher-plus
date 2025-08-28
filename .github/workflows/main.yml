@@ -430,100 +430,57 @@ jobs:
             echo "Failed to create API token for datapusher-plus"
           fi     
 
-      - name: Create organization using ckanapi
+      - name: Create organization with ckanapi
         run: |
           set -eu
-          echo "Creating organization using ckanapi..."
-          
+          echo "Creating organization demo-organization (idempotent)..."
           ckanapi action organization_create --config /srv/app/src/ckan/test-core.ini \
-            --apikey "$CKAN_API_KEY" \
             name=demo-organization \
             title="Demo Data Publishing Organization" \
-            description="Demo org created by GitHub Actions." || echo "Organization creation failed"
-
-      - name: Create dataset using CKAN REST API
+            description="Demo org created by GitHub Actions for datapusher-plus testing." || echo "organization_create returned non-zero (may already exist)"
+          echo "Add admin_ckan as admin to the organization"
+          ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
+            id=demo-organization username=admin_ckan role=admin || echo "organization_member_create returned non-zero (may already be member)"
+      - name: Create dataset with ckanapi
         run: |
           set -eu
-          echo "Creating dataset my-first-dataset using CKAN REST API..."
-          
-          dataset_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -d '{
-              "name": "my-first-dataset",
-              "title": "My First Comprehensive Dataset",
-              "notes": "This is a comprehensive demo dataset created via CKAN REST API and GitHub Actions for testing CKAN functionality and datapusher-plus integration.",
-              "owner_org": "demo-organization",
-              "license_id": "cc-by",
-              "version": "1.0.0",
-              "author": "GitHub Actions Automation",
-              "author_email": "noreply@example.com",
-              "maintainer": "CKAN Admin",
-              "maintainer_email": "admin@example.com",
-              "url": "https://github.com/your-repo/your-project",
-              "private": false,
-              "state": "active",
-              "tags": [
-                {"name": "demo"},
-                {"name": "test"},
-                {"name": "github-actions"},
-                {"name": "automation"},
-                {"name": "csv-data"},
-                {"name": "datapusher-plus"}
-              ]
-            }' \
-            "http://localhost:5000/api/3/action/package_create" || echo '{"success": false}')
-          
-          echo "Dataset creation response: $dataset_response"
-          
-          if echo "$dataset_response" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "✓ Dataset created successfully!"
-            # Extract dataset ID for use in next step
-            dataset_id=$(echo "$dataset_response" | jq -r '.result.id // .result.name')
-            echo "DATASET_ID=$dataset_id" >> $GITHUB_ENV
+          echo "Creating dataset my-first-dataset (idempotent)..."
+          if ckanapi action package_create \
+            name=my-first-dataset \
+            title="My First Comprehensive Dataset" \
+            notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
+            owner_org=demo-organization \
+            license_id=cc-by \
+            version=1.0.0 \
+            author="GitHub Actions Automation" \
+            author_email=noreply@example.com \
+            maintainer="CKAN Admin" \
+            maintainer_email=admin@example.com \
+            url=https://github.com/your-repo/your-project \
+            private:false \
+            state=active \
+            'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Dataset created successfully!"
           else
-            echo "Dataset creation failed or may already exist"
-            # Try to get existing dataset ID
-            existing_dataset=$(curl -s "http://localhost:5000/api/3/action/package_show?id=my-first-dataset" || echo '{"success": false}')
-            if echo "$existing_dataset" | jq -e '.success == true' >/dev/null 2>&1; then
-              dataset_id=$(echo "$existing_dataset" | jq -r '.result.id // .result.name')
-              echo "DATASET_ID=$dataset_id" >> $GITHUB_ENV
-              echo "Using existing dataset ID: $dataset_id"
-            else
-              echo "Failed to get dataset ID"
-              exit 1
-            fi
+            echo "Dataset might already exist, continuing..."
           fi
-
-      - name: Add resource to dataset using CKAN REST API
+      - name: Add resource to dataset with ckanapi
         run: |
           set -eu
-          echo "Adding resource to my-first-dataset using CKAN REST API..."
-          
-          resource_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -d '{
-              "package_id": "my-first-dataset",
-              "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
-              "name": "Sample CSV Data - 100KB Test File",
-              "description": "Test CSV resource for datapusher-plus pipeline.",
-              "format": "CSV",
-              "mimetype": "text/csv"
-            }' \
-            "http://localhost:5000/api/3/action/resource_create" || echo '{"success": false}')
-          
-          echo "Resource creation response: $resource_response"
-          
-          if echo "$resource_response" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "✓ Resource created successfully!"
-            resource_id=$(echo "$resource_response" | jq -r '.result.id')
-            echo "Resource ID: $resource_id"
-            echo "RESOURCE_ID=$resource_id" >> $GITHUB_ENV
+          echo "Adding resource to my-first-dataset..."
+          if ckanapi action resource_create \
+            package_id=my-first-dataset \
+            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
+            name="Sample CSV Data - 100KB Test File" \
+            description="Test CSV resource for datapusher-plus pipeline." \
+            format=CSV \
+            mimetype="text/csv" \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Resource created successfully!"
           else
             echo "Resource creation failed"
-            echo "Checking dataset details for troubleshooting..."
-            curl -s "http://localhost:5000/api/3/action/package_show?id=my-first-dataset" | jq '.' || true
+            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini || true
             exit 1
           fi
           
