@@ -366,44 +366,19 @@ jobs:
           fi
           echo "CKAN started successfully"
   
-      - name: Create sysadmin user with CKAN CLI
+      - name: Fetch default user details
         run: |
           set -eu
-
-          # Get user details including API key via HTTP API (now that user exists)
-          echo "Retrieving user details and API key via HTTP API..."
+          echo "Fetching details for default user..."
+          
           user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=default")
-          echo "User details response: $user_details"
           
-          # Extract API key using jq
-          if command -v jq >/dev/null 2>&1; then
-            api_key=$(echo "$user_details" | jq -r '.result.apikey // empty')
-            is_sysadmin=$(echo "$user_details" | jq -r '.result.sysadmin // false')
-          else
-            # Fallback: extract API key using grep/sed
-            api_key=$(echo "$user_details" | grep -o '"apikey": *"[^"]*"' | sed 's/.*"apikey": *"\([^"]*\)".*/\1/')
-            is_sysadmin=$(echo "$user_details" | grep -o '"sysadmin": *[^,}]*' | sed 's/.*"sysadmin": *\([^,}]*\).*/\1/')
-          fi
+          echo "=== Default User Details (Raw JSON) ==="
+          echo "$user_details"
+          echo ""
           
-          if [ -n "$api_key" ]; then
-            echo "API key extracted for default: $api_key"
-            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
-          else
-            echo "Failed to extract API key for default"
-            exit 1
-          fi
-          
-          # Verify user is sysadmin
-          if [ "$is_sysadmin" = "true" ]; then
-            echo "✓ Verified: default is a sysadmin"
-          else
-            echo "⚠ Warning: default may not be properly configured as sysadmin"
-            echo "User details: $user_details"
-            exit 1
-          fi
-          
-          echo "=== Displaying all users with details via HTTP API ==="
-          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
+          echo "=== Default User Details (Formatted) ==="
+          echo "$user_details" | python3 -m json.tool || echo "$user_details"
           
 
       - name: Create API token for datapusher-plus and add to config
