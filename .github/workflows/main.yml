@@ -557,12 +557,12 @@ jobs:
           echo "Testing DataStore functionality..."
           
           # Check if we have the required variables
-          if [ -z "$CKAN_API_KEY" ] || [ -z "$PACKAGE_ID" ]; then
-            echo "Missing required variables: CKAN_API_KEY=$CKAN_API_KEY, PACKAGE_ID=$PACKAGE_ID"
+          if [ -z "$dp_token" ] || [ -z "$PACKAGE_ID" ]; then
+            echo "Missing required variables: CKAN_API_KEY=$dp_token, PACKAGE_ID=$PACKAGE_ID"
             exit 1
           fi
           
-          echo "Using API Key: $CKAN_API_KEY"
+          echo "Using API Key: $dp_token"
           echo "Using Package ID: $PACKAGE_ID"
           
           # Test 1: List all DataStore resources
@@ -573,7 +573,7 @@ jobs:
           # Test 2: Create a new DataStore resource
           echo "=== Test 2: Creating new DataStore resource ==="
           datastore_response=$(curl -X POST http://localhost:5000/api/3/action/datastore_create \
-            -H "Authorization: $CKAN_API_KEY" \
+            -H "Authorization: $dp_token" \
             -H "Content-Type: application/json" \
             -d "{\"resource\": {\"package_id\": \"$PACKAGE_ID\"}, \"fields\": [ {\"id\": \"a\"}, {\"id\": \"b\"} ], \"records\": [ { \"a\": 1, \"b\": \"xyz\"}, {\"a\": 2, \"b\": \"zzz\"} ]}")
           
