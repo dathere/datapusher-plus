@@ -369,6 +369,10 @@ jobs:
       - name: Fetch default user details and API tokens
         run: |
           set -eu
+
+          echo "=== Displaying all users with details via HTTP API ==="
+          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
+          
           echo "Fetching details for default user..."
           
           user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=default")
@@ -379,6 +383,8 @@ jobs:
           
           echo "=== Default User Details (Formatted) ==="
           echo "$user_details" | python3 -m json.tool || echo "$user_details"
+          
+          
           
           # Extract API key for authentication
           api_key=$(echo "$user_details" | jq -r '.result.apikey // empty')
