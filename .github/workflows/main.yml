@@ -397,7 +397,7 @@ jobs:
           json_response=$(echo "$user_response" | sed -n '/{/,/}/p')
           
           # Extract API key from the JSON
-          api_key=$(echo "$json_response" | jq -r '.apikey // empty')
+          api_key=$(echo "$json_response" | jq -r '.token // empty')
           
           if [ -n "$api_key" ] && [ "$api_key" != "null" ] && [ "$api_key" != "empty" ]; then
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
