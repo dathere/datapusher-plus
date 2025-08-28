@@ -376,6 +376,15 @@ jobs:
             password=test1234
           
           echo "User ckan_admin created"
+          
+      - name: Convert ckan_admin to sysadmin
+        run: |
+          set -eu
+          echo "Converting ckan_admin user to sysadmin..."
+          
+          ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin
+          
+          echo "User ckan_admin promoted to sysadmin"
   
       - name: Fetch default user details and API tokens
         run: |
