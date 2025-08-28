@@ -395,7 +395,10 @@ jobs:
       - name: Convert admin_ckan to sysadmin
         run: |
           set -eu
-          echo "Converting admin_admin user to sysadmin..."
+          echo "=== Displaying all users with details via HTTP API ==="
+          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
+          
+          echo "Converting admin_ckan user to sysadmin..."
           
           ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin_ckan
           
