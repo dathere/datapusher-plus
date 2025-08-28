@@ -367,16 +367,7 @@ jobs:
           fi
           echo "CKAN started successfully"
 
-      - name: Create user ckan_admin
-        run: |
-          set -eu
-          echo "Creating user ckan_admin via CLI..."
-          
-          ckan -c /srv/app/src/ckan/test-core.ini user add ckan_admin \
-            email=admin@example.com \
-            password=test1234
-          
-          echo "User ckan_admin created"
+
           
       - name: Create user admin_ckan
         run: |
@@ -391,6 +382,15 @@ jobs:
             about="Created by GitHub Actions test" 2>/dev/null) || echo "user_create returned non-zero (user may already exist)"
           
           echo "User creation response: $user_response"
+
+          echo "Converting admin_ckan user to sysadmin..."
+          
+          ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin_ckan
+          
+          echo "User admin_ckan promoted to sysadmin"
+
+          echo "=== Displaying all users with details via HTTP API ==="
+          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
           
           # Extract only the JSON part (everything from { to })
           json_response=$(echo "$user_response" | sed -n '/{/,/}/p')
@@ -406,62 +406,6 @@ jobs:
           fi
           
           echo "User admin_ckan creation completed"
-          
-      - name: Convert admin_ckan to sysadmin
-        run: |
-          set -eu
-          echo "=== Displaying all users with details via HTTP API ==="
-          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
-          
-          echo "Converting admin_ckan user to sysadmin..."
-          
-          ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin_ckan
-          
-          echo "User admin_ckan promoted to sysadmin"
-        
-  
-      - name: Fetch default user details and API tokens
-        run: |
-          set -eu
-
-          echo "=== Displaying all users with details via HTTP API ==="
-          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
-          
-          echo "Fetching details for default user..."
-          
-          user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=default")
-          
-          echo "=== Default User Details (Raw JSON) ==="
-          echo "$user_details"
-          echo ""
-          
-          echo "=== Default User Details (Formatted) ==="
-          echo "$user_details" | python3 -m json.tool || echo "$user_details"
-          
-          
-          
-          # Extract API key for authentication
-          api_key=$(echo "$user_details" | jq -r '.result.apikey // empty')
-          
-          if [ -n "$api_key" ] && [ "$api_key" != "null" ] && [ "$api_key" != "empty" ]; then
-            echo ""
-            echo "=== Available API Tokens for Default User ==="
-            token_list=$(curl -s -X POST \
-              -H "Content-Type: application/json" \
-              -H "Authorization: $api_key" \
-              -d '{"user_id": "default"}' \
-              "http://localhost:5000/api/3/action/api_token_list")
-            
-            echo "API token list (raw): $token_list"
-            echo ""
-            echo "=== Formatted API Token List ==="
-            echo "$token_list" | python3 -m json.tool || echo "$token_list"
-            
-            # Store API key for subsequent steps
-            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
-          else
-            echo "No API key found for default user"
-          fi
           
 
       - name: Create API token for datapusher-plus and add to config
@@ -490,7 +434,7 @@ jobs:
         run: |
           set -eu
           echo "Creating organization demo-organization using CKAN REST API..."
-          
+          echo "API key saved: $CKAN_API_KEY"
           # Create organization
           org_response=$(curl -s -X POST \
             -H "Content-Type: application/json" \
