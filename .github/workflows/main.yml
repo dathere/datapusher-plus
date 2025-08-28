@@ -174,6 +174,7 @@ jobs:
           cat > "$ADD_FILE" <<'EOF'
           ckan.site_id = default
           ckan.site_title = CKAN Test
+          ckan.auth.create_default_api_keys = true
           ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
           scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
           scheming.presets = ckanext.scheming:presets.json
