@@ -385,7 +385,7 @@ jobs:
           
           ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
             name=admin_ckan \
-            email=admin@example.com \
+            email=admins@example.com \
             password=test1234 \
             fullname="CKAN Administrator" \
             about="Created by GitHub Actions test" 2>/dev/null || echo "user_create returned non-zero (user may already exist)"
