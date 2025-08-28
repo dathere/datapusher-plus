@@ -366,51 +366,47 @@ jobs:
           fi
           echo "CKAN started successfully"
   
-      - name: Create sysadmin user with CKAN REST API
+      - name: Create sysadmin user with CKAN CLI
         run: |
           set -eu
-          echo "Creating sysadmin user (ckan_admin) using CKAN REST API..."
+          echo "Creating sysadmin user (ckan_admin) using CKAN CLI..."
           
-          # Create user via CKAN API
-          user_response=$(curl -s -X POST \
-            -H "Content-Type: application/json" \
-            -d '{
-              "name": "ckan_admin",
-              "email": "admin@example.com",
-              "password": "test1234",
-              "fullname": "CKAN Administrator",
-              "about": "Created by GitHub Actions test"
-            }' \
-            "http://localhost:5000/api/3/action/user_create" || echo '{"success": false}')
-          
-          echo "User creation API response: $user_response"
-          
-          # Check if user creation was successful
-          if echo "$user_response" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "User created successfully"
+          # Use CKAN CLI to create sysadmin user directly (creates user and promotes to sysadmin in one command)
+          # This avoids interactive prompts by providing all required parameters
+          echo "Creating sysadmin user with CLI (non-interactive mode)..."
+          if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin \
+            email=admin@example.com \
+            name=ckan_admin \
+            password=test1234; then
+            echo "Sysadmin user created successfully"
           else
-            echo "User creation failed or user may already exist, continuing..."
+            echo "Sysadmin creation failed, checking if user already exists..."
+            # Check if user already exists and try to promote to sysadmin
+            if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
+              echo "Existing user promoted to sysadmin"
+            else
+              echo "Failed to create or promote user to sysadmin"
+              exit 1
+            fi
           fi
           
-          # Promote user to sysadmin using CLI (no direct API endpoint available)
-          echo "Promoting ckan_admin to sysadmin via CLI..."
-          if ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin; then
-            echo "ckan_admin promoted to sysadmin successfully"
-          else
-            echo "Sysadmin promotion returned non-zero (user may already be sysadmin)"
-          fi
+          # Verify sysadmin was created by listing all sysadmins
+          echo "Listing all sysadmins to verify creation..."
+          ckan -c /srv/app/src/ckan/test-core.ini sysadmin list || true
           
-          # Get user details including API key
-          echo "Retrieving user details and API key..."
+          # Get user details including API key via HTTP API (now that user exists)
+          echo "Retrieving user details and API key via HTTP API..."
           user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin")
           echo "User details response: $user_details"
           
           # Extract API key using jq
           if command -v jq >/dev/null 2>&1; then
             api_key=$(echo "$user_details" | jq -r '.result.apikey // empty')
+            is_sysadmin=$(echo "$user_details" | jq -r '.result.sysadmin // false')
           else
             # Fallback: extract API key using grep/sed
             api_key=$(echo "$user_details" | grep -o '"apikey": *"[^"]*"' | sed 's/.*"apikey": *"\([^"]*\)".*/\1/')
+            is_sysadmin=$(echo "$user_details" | grep -o '"sysadmin": *[^,}]*' | sed 's/.*"sysadmin": *\([^,}]*\).*/\1/')
           fi
           
           if [ -n "$api_key" ]; then
@@ -421,16 +417,18 @@ jobs:
             exit 1
           fi
           
-          # Verify user is sysadmin by checking user details
-          is_sysadmin=$(echo "$user_details" | jq -r '.result.sysadmin // false')
+          # Verify user is sysadmin
           if [ "$is_sysadmin" = "true" ]; then
             echo "✓ Verified: ckan_admin is a sysadmin"
           else
             echo "⚠ Warning: ckan_admin may not be properly configured as sysadmin"
+            echo "User details: $user_details"
+            exit 1
           fi
           
           echo "=== Displaying all users with details via HTTP API ==="
           curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
+          
 
       - name: Create API token for datapusher-plus and add to config
         run: |
