@@ -369,85 +369,7 @@ jobs:
       - name: Create sysadmin user with CKAN CLI
         run: |
           set -eu
-          echo "Creating sysadmin user (ckan_admin) using CKAN CLI..."
-          
-          # Install expect to handle interactive prompts properly
-          apt-get install -y expect || echo "Expect installation failed, trying alternative approach"
-          
-          if command -v expect >/dev/null 2>&1; then
-            echo "Using expect to handle interactive prompts..."
-            
-            # Create expect script for sysadmin creation (avoiding heredoc in YAML)
-            echo '#!/usr/bin/expect -f' > /tmp/create_sysadmin.exp
-            echo 'set timeout 30' >> /tmp/create_sysadmin.exp
-            echo 'spawn ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin' >> /tmp/create_sysadmin.exp
-            echo 'expect {' >> /tmp/create_sysadmin.exp
-            echo '    "Create new user: ckan_admin? \\[Y/n\\]:" {' >> /tmp/create_sysadmin.exp
-            echo '        send "Y\\r"' >> /tmp/create_sysadmin.exp
-            echo '        exp_continue' >> /tmp/create_sysadmin.exp
-            echo '    }' >> /tmp/create_sysadmin.exp
-            echo '    "Email address*:" {' >> /tmp/create_sysadmin.exp
-            echo '        send "admin@example.com\\r"' >> /tmp/create_sysadmin.exp
-            echo '        exp_continue' >> /tmp/create_sysadmin.exp
-            echo '    }' >> /tmp/create_sysadmin.exp
-            echo '    "Password*:" {' >> /tmp/create_sysadmin.exp
-            echo '        send "test1234\\r"' >> /tmp/create_sysadmin.exp
-            echo '        exp_continue' >> /tmp/create_sysadmin.exp
-            echo '    }' >> /tmp/create_sysadmin.exp
-            echo '    "Repeat for confirmation*:" {' >> /tmp/create_sysadmin.exp
-            echo '        send "test1234\\r"' >> /tmp/create_sysadmin.exp
-            echo '        exp_continue' >> /tmp/create_sysadmin.exp
-            echo '    }' >> /tmp/create_sysadmin.exp
-            echo '    eof' >> /tmp/create_sysadmin.exp
-            echo '}' >> /tmp/create_sysadmin.exp
-            
-            chmod +x /tmp/create_sysadmin.exp
-            
-            if /tmp/create_sysadmin.exp; then
-              echo "Sysadmin user created successfully with expect"
-            else
-              echo "Expect method failed, trying fallback approach..."
-            fi
-          else
-            echo "Expect not available, using alternative method..."
-          fi
-          
-          # Fallback method: check if user exists first
-          if ! curl -s "http://localhost:5000/api/3/action/user_show?id=ckan_admin" | grep -q '"success": true'; then
-            echo "User not found, trying alternative creation method..."
-            
-            # Create user creation script with proper timing
-            echo '#!/bin/bash' > /tmp/create_user.sh
-            echo '{' >> /tmp/create_user.sh
-            echo '  sleep 1' >> /tmp/create_user.sh
-            echo '  echo "Y"' >> /tmp/create_user.sh
-            echo '  sleep 1' >> /tmp/create_user.sh
-            echo '  echo "admin@example.com"' >> /tmp/create_user.sh
-            echo '  sleep 1' >> /tmp/create_user.sh
-            echo '  echo "test1234"' >> /tmp/create_user.sh
-            echo '  sleep 1' >> /tmp/create_user.sh
-            echo '  echo "test1234"' >> /tmp/create_user.sh
-            echo '  sleep 1' >> /tmp/create_user.sh
-            echo '} | timeout 60 ckan -c /srv/app/src/ckan/test-core.ini user add ckan_admin' >> /tmp/create_user.sh
-            
-            chmod +x /tmp/create_user.sh
-            
-            echo "Attempting user creation with timed responses..."
-            if /tmp/create_user.sh; then
-              echo "User created, now promoting to sysadmin..."
-              ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin
-            else
-              echo "Alternative user creation also failed"
-            fi
-          else
-            echo "User already exists, attempting to promote to sysadmin..."
-            ckan -c /srv/app/src/ckan/test-core.ini sysadmin add ckan_admin
-          fi
-          
-          # Verify sysadmin was created by listing all sysadmins
-          echo "Listing all sysadmins to verify creation..."
-          ckan -c /srv/app/src/ckan/test-core.ini sysadmin list || true
-          
+
           # Get user details including API key via HTTP API (now that user exists)
           echo "Retrieving user details and API key via HTTP API..."
           user_details=$(curl -s "http://localhost:5000/api/3/action/user_show?id=default")
@@ -464,18 +386,18 @@ jobs:
           fi
           
           if [ -n "$api_key" ]; then
-            echo "API key extracted for ckan_admin: $api_key"
+            echo "API key extracted for default: $api_key"
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
           else
-            echo "Failed to extract API key for ckan_admin"
+            echo "Failed to extract API key for default"
             exit 1
           fi
           
           # Verify user is sysadmin
           if [ "$is_sysadmin" = "true" ]; then
-            echo "✓ Verified: ckan_admin is a sysadmin"
+            echo "✓ Verified: default is a sysadmin"
           else
-            echo "⚠ Warning: ckan_admin may not be properly configured as sysadmin"
+            echo "⚠ Warning: default may not be properly configured as sysadmin"
             echo "User details: $user_details"
             exit 1
           fi
@@ -489,8 +411,8 @@ jobs:
           set -eu
           echo "Creating API token for datapusher-plus service account..."
           
-          # Create API token for ckan_admin user specifically for datapusher-plus
-          dp_token=$(ckan -c /srv/app/src/ckan/test-core.ini user token add ckan_admin dpplus | tail -n 1 | tr -d '\t')
+          # Create API token for default user specifically for datapusher-plus
+          dp_token=$(ckan -c /srv/app/src/ckan/test-core.ini user token add default dpplus | tail -n 1 | tr -d '\t')
           
           if [ -n "$dp_token" ]; then
             echo "Created datapusher-plus API token: $dp_token"
@@ -531,14 +453,14 @@ jobs:
             echo "Organization creation failed or may already exist, continuing..."
           fi
           
-          # Add ckan_admin as admin to the organization
-          echo "Adding ckan_admin as admin to demo-organization..."
+          # Add default as admin to the organization
+          echo "Adding default as admin to demo-organization..."
           member_response=$(curl -s -X POST \
             -H "Content-Type: application/json" \
             -H "Authorization: $CKAN_API_KEY" \
             -d '{
               "id": "demo-organization",
-              "username": "ckan_admin",
+              "username": "default",
               "role": "admin"
             }' \
             "http://localhost:5000/api/3/action/organization_member_create" || echo '{"success": false}')
@@ -546,7 +468,7 @@ jobs:
           echo "Member creation response: $member_response"
           
           if echo "$member_response" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "✓ ckan_admin added as admin to demo-organization"
+            echo "✓ default added as admin to demo-organization"
           else
             echo "⚠ Adding admin membership failed or may already exist"
           fi
@@ -660,7 +582,7 @@ jobs:
           echo "      Resource: Sample CSV Data (100KB)"
           echo ""
           echo "CREATED USERS (attempted):"
-          echo "  - ckan_admin (sysadmin)"
+          echo "  - default (sysadmin)"
           echo ""
           echo "Access URLs (local to runner container):"
           echo "  - Dataset: ${CKAN_SITE_URL}/dataset/my-first-dataset"
