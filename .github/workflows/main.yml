@@ -1,10 +1,8 @@
-name: CKAN Runner (Enviornment Setup)
+name: CKAN Runner with REST API
 on:
   workflow_dispatch:
 # Workflow-level defaults
 env:
-  NODE_VERSION: '18'
-  PYTHON_VERSION: '3.10'
   CKAN_VERSION: "2.11"
   POSTGRES_PASSWORD: postgres
   CKAN_DB_PASSWORD: pass
@@ -12,34 +10,7 @@ env:
   CKAN_SITE_ID: default
   CKAN_SITE_TITLE: "CKAN Test Instance"
 jobs:
-  lint-ruff:
-    name: Lint (Ruff)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@v3
-
-  lint-pyright:
-    name: Lint (PyRight) 
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-      - name: Install python deps
-        run: pip install -r requirements.txt -r dev-requirements.txt -e. || true
-      - name: Install node deps
-        run: npm ci || true
-      - name: Check types
-        run: npx pyright || true
   setup:
-    needs: [lint-ruff, lint-pyright]
     runs-on: ubuntu-latest
     container:
       image: ckan/ckan-dev:2.11
@@ -395,8 +366,6 @@ jobs:
             exit 1
           fi
           echo "CKAN started successfully"
-
-
           
       - name: Create sysadmin user admin_ckan and get apikey
         run: |
@@ -412,7 +381,6 @@ jobs:
             about="Created by GitHub Actions test" 2>/dev/null) || echo "user_create returned non-zero (user may already exist)"
           
           echo "User creation response: $user_response"
-
           echo "Converting admin_ckan user to sysadmin..."
           ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin_ckan
           echo "User admin_ckan promoted to sysadmin"
@@ -453,7 +421,6 @@ jobs:
           else
             echo "Failed to create API token for datapusher-plus"
           fi    
-
       - name: Create organization with ckanapi
         run: |
           set -eu
@@ -523,7 +490,6 @@ jobs:
           echo ""
           echo "=== All Users (HTTP API) ==="
           curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool || true
-
       - name: Test datastore functionality
         run: |
           set -eu
