@@ -68,55 +68,14 @@ dataset_fields:
   - field_name: end_date
     label: Automatic Update End Date
     form_snippet: date.html
-    validators: ignore_missing check_end_date
+    validators: ignore_missing 
     help_text: If this dataset has an Update Type of Automatic and Automatic Updates should stop at some point, please indicate the end date at which Automatic Updates should stop. If not, leave this field blank.
     help_inline: true
-
-  - field_name: update_frequency
-    label: Update Frequency
-    #required: True
-    form_include_blank_choice: true
-    preset: select
-    choices:
-      - label: Real-time
-        value: real-time
-      - label: 15 minutes or less
-        value: 15 minutes or less
-      - label: Hourly
-        value: hourly
-      - label: Daily
-        value: daily
-      - label: Weekly
-        value: weekly
-      - label: Monthly
-        value: monthly
-      - label: Quarterly
-        value: quarterly
-      - label: Every 6 months
-        value: every 6 months
-      - label: Annually
-        value: annually
-      - label: As needed
-        value: as needed
-      - label: Never
-        value: never
-      - label: Other
-        value: other
 
   - field_name: next_update
     label: Next Update
     form_snippet: date.html
 
-    field_name: caveats_usage
-    label: Caveats and Usage
-    form_snippet: markdown.html
-    help_text: this help is going to be displayed inline.
-    help_inline: true
-
-  - field_name: tag_string
-    label: Tags
-    preset: tag_string_autocomplete_hidden
-    form_placeholder: eg. economy, mental health, government
 
   - field_name: dpp_suggestions
     label: DPP Suggestions

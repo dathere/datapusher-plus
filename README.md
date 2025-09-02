@@ -48,7 +48,7 @@ There are two Formula types that are indicated by adding these keywords to the s
 
 In addition, Datapusher+ is no longer a webservice, but a full-fledged CKAN extension. It drops usage of the deprecated [CKAN Service Provider][], with the unmaintained [Messytables] replaced by the blazing-fast [qsv] data-wrangling engine.
 
-[TNRIS](https://tnris.org)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
+[TxGIO](https://geographic.texas.gov/)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
 of Datapusher+, specifically, to support a [Resource-first upload workflow](docs/RESOURCE_FIRST_WORKFLOW.md#Resource-first-Upload-Workflow).
 
 For a more detailed overview, see the [CKAN Monthly Live Jan 2023 presentation](https://docs.google.com/presentation/d/e/2PACX-1vT0BfmrrtaEINRGg4UI_m7B02_X6HlFr4yN_DXmgX9goVtgu2DNmZjl-SowL9ZA2ibQhDjScRRJh95q/pub?start=false&loop=false&delayms=3000).
@@ -143,11 +143,53 @@ Without an index, it takes 1.3 seconds.
       Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what
       caused the job to fail! YIKES!!!!
 
+## DRUF: Dataset Resource Upload First Workflow
+
+DataPusher+ supports an optional **DRUF (Dataset Resource Upload First)** workflow that allows users to upload data files before creating dataset metadata. This resource-first approach is particularly useful for:
+
+- **Data-driven workflows**: Where the structure and content of the data informs the metadata
+- **Exploratory data publishing**: When you want to examine the data before writing descriptions
+- **Simplified workflows**: Reducing the cognitive load of filling out metadata forms upfront
+
+### How DRUF Works
+
+When DRUF is enabled, the dataset creation workflow is modified:
+
+1. **"Add Dataset" buttons** redirect to a resource upload page instead of the metadata form
+2. **Temporary datasets** are automatically created with placeholder metadata
+3. **Resource upload happens first**, allowing DataPusher+ to analyze the data
+4. **Metadata forms** are enhanced with data-driven suggestions based on the uploaded content
+5. **Form redirects** guide users through a logical resource-first workflow
+
+### Enabling DRUF
+
+- To enable DRUF you need [`DRUF compatable ckan version`](https://github.com/ckan/ckan/tree/7778-iformredirect) 
+- You need to have scheming extension enabled and use the example DRUF compatable schema included in the dp+ extension.
+
+Add the following configuration to your CKAN config file (e.g., `/etc/ckan/default/ckan.ini`):
+
+
+```ini
+# Enable DRUF (Dataset Resource Upload First) workflow
+ckanext.datapusher_plus.enable_druf = true
+ckanext.datapusher_plus.enable_form_redirect = true
+```
+
+
+### Backwards Compatibility
+
+DRUF is completely optional and disabled by default. When disabled:
+- Standard CKAN dataset creation workflow is preserved
+- No template modifications are applied
+- Full backwards compatibility with existing CKAN installations
+
+
 ## Requirements:
 * CKAN 2.10+
 * Python 3.10+
 * tested and developed on Ubuntu 22.04.5
 * [`ckan.datastore.sqlsearch.enabled`](https://docs.ckan.org/en/2.10/maintaining/datastore.html#ckanext.datastore.logic.action.datastore_search_sql) set to `true` if you want to use the `temporal_resolution` and `guess_accrual_periodicity` Formula helpers
+* ckanext-scheming extension
 
 ## Development Installation
 
@@ -259,14 +301,10 @@ Add `datapusher_plus` to the plugins in your CKAN configuration file
 ```ini
 ckan.plugins = <other plugins> datapusher_plus
 ```
-
-**Note on DRUF :**
-DRUF is enabled by default when using `datapusher_plus`. If you wish to **disable** DRUF behavior, ensure that the `scheming_datasets` plugin is listed **before** `datapusher_plus` in the plugin list:
-
 Use a DP+ extended scheming schema:
 
 ```ini
-scheming.dataset_schemas =  ckanext.datapusher_plus:dataset_schema.yaml
+scheming.dataset_schemas =  ckanext.datapusher_plus:dataset-druf.yaml
 ```
 
 Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) for details.
