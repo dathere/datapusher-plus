@@ -1,4 +1,4 @@
-name: CKAN Runner with REST API
+name: CKAN Environment spin-up
 on:
   workflow_dispatch:
 # Workflow-level defaults
