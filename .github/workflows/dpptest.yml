@@ -499,109 +499,151 @@ jobs:
           rows_imported="0"
           error_message=""
           
-          # Create resource using the proven method
-          echo "Adding resource to datapusher-plus-test-suite..."
-          if resource_response=$(ckanapi action resource_create \
-            package_id=datapusher-plus-test-suite \
-            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
-            name="Sample CSV Data - 100KB Test File" \
-            description="Test CSV resource for datapusher-plus pipeline testing" \
-            format=CSV \
-            mimetype="text/csv" \
-            -c /srv/app/src/ckan/test-core.ini 2>&1); then
+          # Create resource using direct CKAN API
+          echo "Creating resource using CKAN API..."
+          if resource_response=$(curl -s -X POST "http://localhost:5000/api/3/action/resource_create" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "package_id": "datapusher-plus-test-suite",
+              "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
+              "name": "Sample CSV Data - 100KB Test File",
+              "description": "Test CSV resource for datapusher-plus pipeline testing",
+              "format": "CSV",
+              "mimetype": "text/csv"
+            }' 2>&1); then
             
-            echo "Resource created successfully!"
-            upload_status="SUCCESS"
-            resource_id=$(echo "$resource_response" | jq -r '.id // empty')
-            echo "Resource ID: $resource_id"
+            echo "API call completed. Response:"
+            echo "$resource_response"
+            echo "---"
             
-            # Monitor DataPusher Plus processing
-            echo "Monitoring DataPusher Plus processing..."
-            for attempt in $(seq 1 60); do
-              sleep 2
+            # Check if the API call was successful
+            if echo "$resource_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+              echo "Resource created successfully!"
+              upload_status="SUCCESS"
               
-              # Check DataPusher status
-              if dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
-                "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id"); then
-                
-                if echo "$dp_status_response" | jq . >/dev/null 2>&1; then
-                  dp_success=$(echo "$dp_status_response" | jq -r '.success // false')
-                  if [ "$dp_success" = "true" ]; then
-                    datapusher_status=$(echo "$dp_status_response" | jq -r '.result.status // "unknown"')
-                    echo "Attempt $attempt: DataPusher status = $datapusher_status"
+              # Extract resource ID from clean JSON response
+              resource_id=$(echo "$resource_response" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+              
+              if [ -z "$resource_id" ]; then
+                # Fallback: try different extraction method
+                resource_id=$(echo "$resource_response" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([a-f0-9-]*\)".*/\1/p')
+              fi
+              
+              echo "Extracted Resource ID: $resource_id"
+              
+              # Only proceed if we have a valid resource ID
+              if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
+                # Monitor DataPusher Plus processing
+                echo "Monitoring DataPusher Plus processing..."
+                for attempt in $(seq 1 60); do
+                  sleep 2
+                  
+                  # Check DataPusher status
+                  if dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
+                    "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id"); then
                     
-                    # Check if processing is complete
-                    if [ "$datapusher_status" = "complete" ]; then
-                      echo "DataPusher processing completed!"
-                      break
-                    elif [ "$datapusher_status" = "error" ]; then
-                      error_info=$(echo "$dp_status_response" | jq -r '.result.error.message // "DataPusher processing error"')
-                      error_message="DataPusher error: $error_info"
-                      echo "DataPusher processing failed: $error_message"
+                    # Check if response contains JSON structure
+                    if echo "$dp_status_response" | grep -q '"success"'; then
+                      # Extract success status
+                      if echo "$dp_status_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+                        # Extract datapusher status
+                        datapusher_status=$(echo "$dp_status_response" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+                        
+                        if [ -z "$datapusher_status" ]; then
+                          datapusher_status="unknown"
+                        fi
+                        
+                        echo "Attempt $attempt: DataPusher status = $datapusher_status"
+                        
+                        # Check if processing is complete
+                        if [ "$datapusher_status" = "complete" ]; then
+                          echo "DataPusher processing completed!"
+                          break
+                        elif [ "$datapusher_status" = "error" ]; then
+                          # Try to extract error message
+                          error_info=$(echo "$dp_status_response" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1)
+                          if [ -z "$error_info" ]; then
+                            error_info="DataPusher processing error"
+                          fi
+                          error_message="DataPusher error: $error_info"
+                          echo "DataPusher processing failed: $error_message"
+                          break
+                        fi
+                      else
+                        echo "DataPusher status API returned success=false"
+                        error_message="DataPusher status API error"
+                        break
+                      fi
+                    else
+                      echo "Invalid response from DataPusher status API"
+                      error_message="DataPusher status API returned invalid response"
                       break
                     fi
                   else
-                    echo "DataPusher status API returned success=false"
-                    error_message="DataPusher status API error"
+                    echo "Failed to get DataPusher status"
+                    error_message="DataPusher status API connection error"
                     break
                   fi
-                else
-                  echo "Invalid JSON from DataPusher status API"
-                  error_message="DataPusher status API returned invalid JSON"
-                  break
-                fi
-              else
-                echo "Failed to get DataPusher status"
-                error_message="DataPusher status API connection error"
-                break
-              fi
-              
-              # Show progress
-              if [ $((attempt % 10)) -eq 0 ]; then
-                echo "Still processing... (${attempt}/60)"
-              fi
-            done
-            
-            # Check final resource status
-            echo "Checking final resource and datastore status..."
-            if final_resource=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id"); then
-              # Check for JSON structure without using jq
-              if echo "$final_resource" | grep -q '"datastore_active"'; then
-                # Extract datastore_active status without jq
-                if echo "$final_resource" | grep -q '"datastore_active"[[:space:]]*:[[:space:]]*true'; then
-                  datastore_active="true"
-                else
-                  datastore_active="false"
-                fi
-                echo "DataStore active: $datastore_active"
+                  
+                  # Show progress
+                  if [ $((attempt % 10)) -eq 0 ]; then
+                    echo "Still processing... (${attempt}/60)"
+                  fi
+                done
                 
-                # Get row count if datastore is active
-                if [ "$datastore_active" = "true" ]; then
-                  echo "Getting row count from DataStore..."
-                  if datastore_data=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1"); then
-                    # Check for JSON structure without using jq
-                    if echo "$datastore_data" | grep -q '"total"'; then
-                      # Extract total count without jq
-                      rows_imported=$(echo "$datastore_data" | grep -o '"total"[[:space:]]*:[[:space:]]*[0-9]*' | sed 's/.*"total"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/')
-                      
-                      if [ -z "$rows_imported" ]; then
-                        rows_imported="0"
+                # Check final resource status
+                echo "Checking final resource and datastore status..."
+                if final_resource=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id"); then
+                  # Check for JSON structure
+                  if echo "$final_resource" | grep -q '"datastore_active"'; then
+                    # Extract datastore_active status
+                    if echo "$final_resource" | grep -q '"datastore_active"[[:space:]]*:[[:space:]]*true'; then
+                      datastore_active="true"
+                    else
+                      datastore_active="false"
+                    fi
+                    echo "DataStore active: $datastore_active"
+                    
+                    # Get row count if datastore is active
+                    if [ "$datastore_active" = "true" ]; then
+                      echo "Getting row count from DataStore..."
+                      if datastore_data=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1"); then
+                        # Check for JSON structure
+                        if echo "$datastore_data" | grep -q '"total"'; then
+                          # Extract total count
+                          rows_imported=$(echo "$datastore_data" | grep -o '"total"[[:space:]]*:[[:space:]]*[0-9]*' | sed 's/.*"total"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/')
+                          
+                          if [ -z "$rows_imported" ]; then
+                            rows_imported="0"
+                          fi
+                          echo "Rows imported: $rows_imported"
+                          
+                          # Show sample data preview
+                          echo "Sample data preview:"
+                          echo "$datastore_data" | head -3
+                        fi
                       fi
-                      echo "Rows imported: $rows_imported"
-                      
-                      # Show sample data (just show the first part of response)
-                      echo "Sample data preview:"
-                      echo "$datastore_data" | head -3
                     fi
                   fi
                 fi
+              else
+                error_message="No valid resource ID extracted"
               fi
+            else
+              echo "Resource creation failed via API"
+              upload_status="FAILED"
+              # Try to extract error message
+              error_message=$(echo "$resource_response" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1)
+              if [ -z "$error_message" ]; then
+                error_message="API returned success=false"
+              fi
+              echo "Error: $error_message"
             fi
-            
           else
-            echo "Resource creation failed"
-            echo "$resource_response"
-            error_message="Resource creation failed: $(echo "$resource_response" | head -1)"
+            echo "Resource creation API call failed"
+            upload_status="FAILED"
+            error_message="API call failed: $(echo "$resource_response" | head -1)"
           fi
           
           end_time=$(date +%s)
