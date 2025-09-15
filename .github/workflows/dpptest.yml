@@ -591,10 +591,7 @@ jobs:
           test_files["small_valid.csv"]="https://raw.githubusercontent.com/a5dur/datapusher-plus/refs/heads/main/tests/static/small_valid.csv|Small CSV with basic employee data"
           test_files["medium_mixed_types.csv"]="https://raw.githubusercontent.com/a5dur/datapusher-plus/refs/heads/main/tests/static/medium_mixed_types.csv|Medium CSV with mixed data types"
           test_files["unicode_special.csv"]="https://raw.githubusercontent.com/a5dur/datapusher-plus/refs/heads/main/tests/static/unicode_special.csv|CSV with Unicode and special characters"
-          test_files["large_dataset.csv"]="https://raw.githubusercontent.com/a5dur/datapusher-plus/refs/heads/main/tests/static/large_dataset.csv|Large CSV for performance testing"
-          test_files["malformed.csv"]="https://raw.githubusercontent.com/a5dur/datapusher-plus/refs/heads/main/tests/static/malformed.csv|CSV with formatting issues (may fail)"
-          test_files["empty.csv"]="https://raw.githubusercontent.com/a5dur/datapusher-plus/refs/heads/main/tests/static/empty.csv|Empty CSV file edge case"
-          
+   
           # Create test dataset once
           echo "Creating test dataset for DataPusher Plus..."
           if ckanapi action package_create \
