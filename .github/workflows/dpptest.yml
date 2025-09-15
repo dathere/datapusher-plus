@@ -653,7 +653,8 @@ jobs:
                       fi
                       
                       echo "Attempt $attempt: DataPusher status = $datapusher_status"
-                      
+                      datapusher_status=$(echo "$datapusher_status" | tr -d '\n\r\t ')
+
                       if [ "$datapusher_status" = "complete" ]; then
                         echo "DataPusher processing completed!"
                         break
