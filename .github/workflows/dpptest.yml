@@ -573,6 +573,21 @@ jobs:
           set -eu
           echo "=== Starting Comprehensive DataPusher Plus Testing ==="
           
+          # Verify dataset exists first
+          echo "Verifying test dataset exists..."
+          if ! ckanapi action package_show id=datapusher-plus-test-suite -c /srv/app/src/ckan/test-core.ini >/dev/null 2>&1; then
+            echo "❌ Test dataset 'datapusher-plus-test-suite' not found. Creating it..."
+            ckanapi action package_create \
+              name=datapusher-plus-test-suite \
+              title="DataPusher Plus Test Suite" \
+              owner_org=demo-organization \
+              -c /srv/app/src/ckan/test-core.ini || {
+              echo "Failed to create test dataset"
+              exit 1
+            }
+          fi
+          echo "✅ Test dataset verified"
+          
           # Initialize results tracking
           echo "file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message" > /tmp/test_results.csv
           
@@ -594,20 +609,37 @@ jobs:
             local rows_imported="0"
             local error_message=""
             
-            # Upload file
+            # Upload file with better error handling
             echo "Uploading $file_name..."
-            if upload_response=$(ckanapi action resource_create \
+            upload_response=$(ckanapi action resource_create \
               package_id=datapusher-plus-test-suite \
               upload="$file_path" \
               name="$file_name" \
               description="$description" \
               format=CSV \
               mimetype="text/csv" \
-              -c /srv/app/src/ckan/test-core.ini 2>&1); then
-              
+              -c /srv/app/src/ckan/test-core.ini 2>&1) || {
+              echo "❌ Upload command failed"
+              error_message="ckanapi command failed: $(echo "$upload_response" | head -1)"
+              echo "$file_name,$upload_status,,$datapusher_status,$datastore_active,$rows_imported,$(($(date +%s) - start_time)),\"$error_message\"" >> /tmp/test_results.csv
+              return
+            }
+            
+            echo "Raw upload response:"
+            echo "$upload_response"
+            echo "---"
+            
+            # Try to extract JSON and resource ID
+            if echo "$upload_response" | jq . >/dev/null 2>&1; then
               upload_status="SUCCESS"
               resource_id=$(echo "$upload_response" | jq -r '.id // empty')
               echo "✅ Upload successful. Resource ID: $resource_id"
+            else
+              echo "❌ Upload response is not valid JSON"
+              error_message="Invalid JSON response: $(echo "$upload_response" | head -1)"
+              echo "$file_name,$upload_status,,$datapusher_status,$datastore_active,$rows_imported,$(($(date +%s) - start_time)),\"$error_message\"" >> /tmp/test_results.csv
+              return
+            fi
               
               if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
                 # Wait for DataPusher Plus processing
