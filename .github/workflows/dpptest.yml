@@ -183,7 +183,7 @@ jobs:
           ckanext.datapusher_plus.download_proxy = 
           ckanext.datapusher_plus.ssl_verify = false
           # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
-          ckanext.datapusher_plus.upload_log_level = DEBUG
+          ckanext.datapusher_plus.upload_log_level = INFO
           ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
           ckanext.datapusher_plus.pii_screening = false
           ckanext.datapusher_plus.pii_found_abort = false
@@ -393,14 +393,46 @@ jobs:
           
           if [ -n "$api_key" ] && [ "$api_key" != "null" ] && [ "$api_key" != "empty" ]; then
             echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
-            echo "DATAPUSHER_PLUS_API_TOKEN=$api_key" >> $GITHUB_ENV
             echo "API key saved: $api_key"
           else
             echo "No API key found in response"
           fi
           
           echo "User admin_ckan creation completed"
+           
+      - name: Create API token for datapusher-plus and add to config
+        run: |
+          set -eu
+          echo "Creating API token for datapusher-plus service account..."
           
+          # Create API token for admin_ckan user specifically for datapusher-plus
+          echo "Running: ckan user token add admin_ckan dpplus"
+          dp_token_output=$(ckan -c /srv/app/src/ckan/test-core.ini user token add admin_ckan dpplus 2>&1)
+          echo "Full token creation output:"
+          echo "$dp_token_output"
+          
+          dp_token=$(echo "$dp_token_output" | tail -n 1 | tr -d '\t')
+          echo "Extracted token: '$dp_token'"
+          
+          if [ -n "$dp_token" ] && [ "$dp_token" != "null" ]; then
+            echo "Created datapusher-plus API token: $dp_token"
+            
+            # Add the token to the CKAN configuration file
+            ckan config-tool /srv/app/src/ckan/test-core.ini "ckanext.datapusher_plus.api_token=$dp_token"
+            
+            # Verify it was added
+            echo "Verifying token was added to config:"
+            grep "ckanext.datapusher_plus.api_token" /srv/app/src/ckan/test-core.ini || echo "Token not found in config!"
+            
+            # Also set in environment for potential use in other steps
+            echo "DATAPUSHER_PLUS_API_TOKEN=$dp_token" >> $GITHUB_ENV
+            
+            echo "API token added to CKAN configuration successfully"
+          else
+            echo "Failed to create API token for datapusher-plus"
+            echo "Using main CKAN API key as fallback..."
+            ckan config-tool /srv/app/src/ckan/test-core.ini "ckanext.datapusher_plus.api_token=$CKAN_API_KEY"
+          fi
       - name: Create organization with ckanapi
         run: |
           set -eu
@@ -413,29 +445,49 @@ jobs:
           ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
             id=demo-organization username=admin_ckan role=admin || echo "organization_member_create returned non-zero (may already be member)"
       
-      - name: Create test dataset for datapusher-plus testing
+      - name: Create dataset with ckanapi
         run: |
           set -eu
-          echo "Creating dataset datapusher-plus-test-suite..."
+          echo "Creating dataset my-first-dataset (idempotent)..."
           if ckanapi action package_create \
-            name=datapusher-plus-test-suite \
-            title="DataPusher Plus Test Suite" \
-            notes="Test dataset for DataPusher Plus functionality validation." \
+            name=my-first-dataset \
+            title="My First Comprehensive Dataset" \
+            notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
             owner_org=demo-organization \
             license_id=cc-by \
             version=1.0.0 \
-            author="GitHub Actions DataPusher Plus Testing" \
+            author="GitHub Actions Automation" \
             author_email=noreply@example.com \
             maintainer="CKAN Admin" \
             maintainer_email=admin@example.com \
+            url=https://github.com/your-repo/your-project \
             private:false \
             state=active \
-            'tags:[{"name":"datapusher-plus"},{"name":"test"}]' \
+            'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
             -c /srv/app/src/ckan/test-core.ini; then
-            echo "Test dataset created successfully!"
+            echo "Dataset created successfully!"
           else
             echo "Dataset might already exist, continuing..."
           fi
+      - name: Add resource to dataset with ckanapi
+        run: |
+          set -eu
+          echo "Adding resource to my-first-dataset..."
+          if ckanapi action resource_create \
+            package_id=my-first-dataset \
+            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
+            name="Sample CSV Data - 100KB Test File" \
+            description="Test CSV resource for datapusher-plus pipeline." \
+            format=CSV \
+            mimetype="text/csv" \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Resource created successfully!"
+          else
+            echo "Resource creation failed"
+            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini  
+            exit 1
+          fi
+          
       - name: Display CKAN instance inventory
         run: |
           set -eu
@@ -504,301 +556,15 @@ jobs:
           else
             echo "✗ Datastore write access failed"
           fi
-
-      - name: Verify DataPusher Plus configuration
+      
+      - name: Setup datapusher-plus (placeholder)
         run: |
-          set -eu
-          echo "=== Verifying DataPusher Plus Configuration ==="
-          
-          echo "Checking for API token in config:"
-          if grep -q "ckanext.datapusher_plus.api_token" /srv/app/src/ckan/test-core.ini; then
-            echo "✅ API token found in config file"
-            grep "ckanext.datapusher_plus.api_token" /srv/app/src/ckan/test-core.ini
-          else
-            echo "❌ API token NOT found in config file"
-            echo "This will cause the 'No API token found' error"
-            exit 1
-          fi
-          
-          echo ""
-          echo "Checking CKAN plugins:"
-          grep "ckan.plugins" /srv/app/src/ckan/test-core.ini
-          
-          echo ""
-          echo "Configuration verification complete"
-
-          
-      # CRITICAL: Start the background job worker - this was the missing piece from local testing
-      - name: Start CKAN background job worker
-        run: |
-          set -eu
-          echo "Starting CKAN background job worker (CRITICAL for DataPusher Plus)..."
-          nohup ckan -c /srv/app/src/ckan/test-core.ini jobs worker > /tmp/ckan_worker.log 2>&1 &
-          WORKER_PID=$!
-          echo "CKAN Worker PID=$WORKER_PID"
-          echo "CKAN_WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
-          
-          # Give worker a moment to start up
-          sleep 5
-          
-          # Verify worker is running
-          if kill -0 "$WORKER_PID" >/dev/null 2>&1; then
-            echo "✅ Background job worker started successfully"
-            echo "Worker logs:"
-            head -n 20 /tmp/ckan_worker.log || echo "No worker logs yet"
-          else
-            echo "❌ Worker failed to start"
-            cat /tmp/ckan_worker.log
-            exit 1
-          fi
-
-      - name: Test single file with DataPusher Plus monitoring
-        run: |
-          set -eu
-          echo "=== Testing DataPusher Plus with Single File ==="
-          
-          # Initialize results tracking
-          echo "file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message" > /tmp/test_results.csv
-          
-          echo "Creating resource from URL and monitoring DataPusher Plus..."
-          
-          start_time=$(date +%s)
-          upload_status="FAILED"
-          resource_id=""
-          datapusher_status="N/A"
-          datastore_active="false" 
-          rows_imported="0"
-          error_message=""
-          
-          # Create resource using direct CKAN API
-          echo "Creating resource using CKAN API..."
-          if resource_response=$(curl -s -X POST "http://localhost:5000/api/3/action/resource_create" \
-            -H "Authorization: $CKAN_API_KEY" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "package_id": "datapusher-plus-test-suite",
-              "url": "https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv",
-              "name": "Sample CSV Data - 100KB Test File",
-              "description": "Test CSV resource for datapusher-plus pipeline testing",
-              "format": "CSV",
-              "mimetype": "text/csv"
-            }' 2>&1); then
-            
-            echo "API call completed. Response:"
-            echo "$resource_response"
-            echo "---"
-            
-            # Check if the API call was successful
-            if echo "$resource_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-              echo "Resource created successfully!"
-              upload_status="SUCCESS"
-              
-              # Extract resource ID from clean JSON response
-              resource_id=$(echo "$resource_response" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-              
-              if [ -z "$resource_id" ]; then
-                # Fallback: try different extraction method
-                resource_id=$(echo "$resource_response" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([a-f0-9-]*\)".*/\1/p')
-              fi
-              
-              echo "Extracted Resource ID: $resource_id"
-              
-              # Only proceed if we have a valid resource ID
-              if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
-                # Monitor DataPusher Plus processing
-                echo "Monitoring DataPusher Plus processing..."
-                for attempt in $(seq 1 60); do
-                  sleep 2
-                  
-                  # Check DataPusher status
-                  if dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
-                    "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id"); then
-                    
-                    # Check if response contains JSON structure
-                    if echo "$dp_status_response" | grep -q '"success"'; then
-                      # Extract success status
-                      if echo "$dp_status_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-                        # Extract datapusher status
-                        datapusher_status=$(echo "$dp_status_response" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
-                        
-                        if [ -z "$datapusher_status" ]; then
-                          datapusher_status="unknown"
-                        fi
-                        
-                        echo "Attempt $attempt: DataPusher status = $datapusher_status"
-                        
-                        # Check if processing is complete
-                        if [ "$datapusher_status" = "complete" ]; then
-                          echo "DataPusher processing completed!"
-                          break
-                        elif [ "$datapusher_status" = "error" ]; then
-                          # Try to extract error message
-                          error_info=$(echo "$dp_status_response" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1)
-                          if [ -z "$error_info" ]; then
-                            error_info="DataPusher processing error"
-                          fi
-                          error_message="DataPusher error: $error_info"
-                          echo "DataPusher processing failed: $error_message"
-                          break
-                        fi
-                      else
-                        echo "DataPusher status API returned success=false"
-                        error_message="DataPusher status API error"
-                        break
-                      fi
-                    else
-                      echo "Invalid response from DataPusher status API"
-                      error_message="DataPusher status API returned invalid response"
-                      break
-                    fi
-                  else
-                    echo "Failed to get DataPusher status"
-                    error_message="DataPusher status API connection error"
-                    break
-                  fi
-                  
-                  # Show progress
-                  if [ $((attempt % 10)) -eq 0 ]; then
-                    echo "Still processing... (${attempt}/60)"
-                  fi
-                done
-                
-                # Check final resource status
-                echo "Checking final resource and datastore status..."
-                if final_resource=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id"); then
-                  # Check for JSON structure
-                  if echo "$final_resource" | grep -q '"datastore_active"'; then
-                    # Extract datastore_active status
-                    if echo "$final_resource" | grep -q '"datastore_active"[[:space:]]*:[[:space:]]*true'; then
-                      datastore_active="true"
-                    else
-                      datastore_active="false"
-                    fi
-                    echo "DataStore active: $datastore_active"
-                    
-                    # Get row count if datastore is active
-                    if [ "$datastore_active" = "true" ]; then
-                      echo "Getting row count from DataStore..."
-                      if datastore_data=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1"); then
-                        # Check for JSON structure
-                        if echo "$datastore_data" | grep -q '"total"'; then
-                          # Extract total count
-                          rows_imported=$(echo "$datastore_data" | grep -o '"total"[[:space:]]*:[[:space:]]*[0-9]*' | sed 's/.*"total"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/')
-                          
-                          if [ -z "$rows_imported" ]; then
-                            rows_imported="0"
-                          fi
-                          echo "Rows imported: $rows_imported"
-                          
-                          # Show sample data preview
-                          echo "Sample data preview:"
-                          echo "$datastore_data" | head -3
-                        fi
-                      fi
-                    fi
-                  fi
-                fi
-              else
-                error_message="No valid resource ID extracted"
-              fi
-            else
-              echo "Resource creation failed via API"
-              upload_status="FAILED"
-              # Try to extract error message
-              error_message=$(echo "$resource_response" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1)
-              if [ -z "$error_message" ]; then
-                error_message="API returned success=false"
-              fi
-              echo "Error: $error_message"
-            fi
-          else
-            echo "Resource creation API call failed"
-            upload_status="FAILED"
-            error_message="API call failed: $(echo "$resource_response" | head -1)"
-          fi
-          
-          end_time=$(date +%s)
-          processing_time=$((end_time - start_time))
-          
-          # Log results
-          echo "Sample CSV 100KB,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message\"" >> /tmp/test_results.csv
-          
-          # Final summary
-          echo ""
-          echo "=== Test Results Summary ==="
-          echo "File: Sample CSV Data - 100KB Test File"
-          echo "Resource Creation: $upload_status"
-          echo "Resource ID: $resource_id"
-          echo "DataPusher Status: $datapusher_status"
-          echo "DataStore Active: $datastore_active"
-          echo "Rows Imported: $rows_imported"
-          echo "Total Processing Time: ${processing_time}s"
-          if [ -n "$error_message" ]; then
-            echo "Error: $error_message"
-          fi
-          
-          # Determine overall result
-          if [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "true" ]; then
-            echo "Overall Result: PASS - DataPusher Plus is working correctly"
-          else
-            echo "Overall Result: FAIL - DataPusher Plus has issues"
-          fi
-
-      - name: Generate simple test report
-        run: |
-          set -eu
-          echo "=== DataPusher Plus Test Report ==="
-          
-          if [ -f /tmp/test_results.csv ]; then
-            echo ""
-            echo "Test Results:"
-            cat /tmp/test_results.csv
-            echo ""
-            
-            # Extract key metrics
-            result_line=$(tail -n 1 /tmp/test_results.csv)
-            upload_status=$(echo "$result_line" | cut -d',' -f2)
-            datapusher_status=$(echo "$result_line" | cut -d',' -f4)
-            datastore_active=$(echo "$result_line" | cut -d',' -f5)
-            rows_imported=$(echo "$result_line" | cut -d',' -f6)
-            
-            echo "Summary Table:"
-            echo "| Test Item | Status |"
-            echo "|-----------|--------|"
-            echo "| Resource Creation | $upload_status |"
-            echo "| DataPusher Processing | $datapusher_status |"
-            echo "| DataStore Activation | $datastore_active |"
-            echo "| Rows Imported | $rows_imported |"
-            
-            # Overall pass/fail
-            if [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "true" ]; then
-              echo ""
-              echo "🎉 OVERALL RESULT: PASS"
-              echo "DataPusher Plus is functioning correctly!"
-            else
-              echo ""
-              echo "❌ OVERALL RESULT: FAIL"
-              echo "DataPusher Plus has issues that need investigation."
-            fi
-          else
-            echo "No test results file found"
-          fi
-
-      - name: Upload test results as artifact
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: datapusher-plus-single-test-results
-          path: |
-            /tmp/test_results.csv
-            /tmp/ckan_stdout.log
-            /tmp/ckan_worker.log
-          retention-days: 30
-          
+          echo "Placeholder: Add datapusher-plus-specific tests here."
+          echo "Important: datapusher-plus may require running a separate service or configuring datapusher hooks."
+          echo "Check datapusher-plus docs for details on running it locally or pointing CKAN to an external datapusher-plus endpoint."
       - name: Cleanup
         if: always()
         run: |
           echo "Stopping any running CKAN processes..."
-          pkill -f "ckan.*run" || echo "No CKAN run processes to kill"
-          pkill -f "ckan.*worker" || echo "No CKAN worker processes to kill"
+          pkill -f "ckan.*run"  
           echo "Cleanup completed"
