@@ -568,30 +568,30 @@ jobs:
           echo "File sizes:"
           wc -l /tmp/test_files/*.csv
 
-      - name: Upload test files and monitor DataPusher Plus processing
+      - name: Upload test files and monitor DataPusher Plus processing (using curl)
         run: |
           set -eu
           echo "=== Starting Comprehensive DataPusher Plus Testing ==="
           
           # Verify dataset exists first
           echo "Verifying test dataset exists..."
-          if ! ckanapi action package_show id=datapusher-plus-test-suite -c /srv/app/src/ckan/test-core.ini >/dev/null 2>&1; then
-            echo "❌ Test dataset 'datapusher-plus-test-suite' not found. Creating it..."
-            ckanapi action package_create \
-              name=datapusher-plus-test-suite \
-              title="DataPusher Plus Test Suite" \
-              owner_org=demo-organization \
-              -c /srv/app/src/ckan/test-core.ini || {
-              echo "Failed to create test dataset"
-              exit 1
-            }
+          if ! curl -s "http://localhost:5000/api/3/action/package_show?id=datapusher-plus-test-suite" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "Test dataset not found. Creating it..."
+            curl -s -X POST "http://localhost:5000/api/3/action/package_create" \
+              -H "Authorization: $CKAN_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d '{
+                "name": "datapusher-plus-test-suite",
+                "title": "DataPusher Plus Test Suite", 
+                "owner_org": "demo-organization"
+              }' | jq
           fi
-          echo "✅ Test dataset verified"
+          echo "Test dataset verified"
           
           # Initialize results tracking
           echo "file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message" > /tmp/test_results.csv
           
-          # Function to upload and test a file
+          # Function to upload and test a file using curl
           test_file() {
             local file_path="$1"
             local file_name=$(basename "$file_path")
@@ -600,6 +600,19 @@ jobs:
             echo ""
             echo "===== Testing: $file_name ====="
             echo "Description: $description"
+            echo "File path: $file_path"
+            
+            # Verify file exists
+            if [ ! -f "$file_path" ]; then
+              echo "File not found: $file_path"
+              echo "$file_name,FAILED,,N/A,false,0,0,\"File not found\"" >> /tmp/test_results.csv
+              return
+            fi
+            
+            echo "File size: $(stat -c%s "$file_path") bytes"
+            echo "File preview:"
+            head -3 "$file_path" || echo "Cannot preview file"
+            echo "---"
             
             local start_time=$(date +%s)
             local upload_status="FAILED"
@@ -609,37 +622,153 @@ jobs:
             local rows_imported="0"
             local error_message=""
             
-            # Upload file with better error handling
-            echo "Uploading $file_name..."
-            upload_response=$(ckanapi action resource_create \
-              package_id=datapusher-plus-test-suite \
-              upload="$file_path" \
-              name="$file_name" \
-              description="$description" \
-              format=CSV \
-              mimetype="text/csv" \
-              -c /srv/app/src/ckan/test-core.ini 2>&1) || {
-              echo "❌ Upload command failed"
-              error_message="ckanapi command failed: $(echo "$upload_response" | head -1)"
-              echo "$file_name,$upload_status,,$datapusher_status,$datastore_active,$rows_imported,$(($(date +%s) - start_time)),\"$error_message\"" >> /tmp/test_results.csv
-              return
-            }
+            # Upload file using curl multipart form data
+            echo "Uploading $file_name using curl..."
+            upload_response=$(curl -s -X POST "http://localhost:5000/api/3/action/resource_create" \
+              -H "Authorization: $CKAN_API_KEY" \
+              -F "package_id=datapusher-plus-test-suite" \
+              -F "upload=@$file_path" \
+              -F "name=$file_name" \
+              -F "description=$description" \
+              -F "format=CSV" \
+              -F "mimetype=text/csv" 2>&1)
             
-            echo "Raw upload response:"
-            echo "$upload_response"
+            echo "Upload response received (first 200 chars):"
+            echo "$upload_response" | head -c 200
+            echo ""
             echo "---"
             
-            # Try to extract JSON and resource ID
+            # Check if response is valid JSON and extract resource ID
             if echo "$upload_response" | jq . >/dev/null 2>&1; then
-              upload_status="SUCCESS"
-              resource_id=$(echo "$upload_response" | jq -r '.id // empty')
-              echo "✅ Upload successful. Resource ID: $resource_id"
+              upload_success=$(echo "$upload_response" | jq -r '.success // false')
+              if [ "$upload_success" = "true" ]; then
+                upload_status="SUCCESS"
+                resource_id=$(echo "$upload_response" | jq -r '.result.id // empty')
+                echo "Upload successful. Resource ID: $resource_id"
+              else
+                error_message="Upload API returned success=false: $(echo "$upload_response" | jq -r '.error.message // "unknown error"')"
+                echo "Upload failed: $error_message"
+              fi
             else
-              echo "❌ Upload response is not valid JSON"
-              error_message="Invalid JSON response: $(echo "$upload_response" | head -1)"
-              echo "$file_name,$upload_status,,$datapusher_status,$datastore_active,$rows_imported,$(($(date +%s) - start_time)),\"$error_message\"" >> /tmp/test_results.csv
-              return
+              error_message="Invalid JSON response from upload API"
+              echo "Upload failed: $error_message"
             fi
+            
+            # If upload successful, monitor DataPusher Plus processing
+            if [ "$upload_status" = "SUCCESS" ] && [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
+              echo "Monitoring DataPusher Plus processing for resource: $resource_id"
+              
+              # Wait for DataPusher Plus processing (max 60 seconds)
+              for attempt in $(seq 1 30); do
+                sleep 2
+                
+                # Check DataPusher status using the API pattern that worked in local testing
+                dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
+                  "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id")
+                
+                if echo "$dp_status_response" | jq . >/dev/null 2>&1; then
+                  dp_success=$(echo "$dp_status_response" | jq -r '.success // false')
+                  if [ "$dp_success" = "true" ]; then
+                    datapusher_status=$(echo "$dp_status_response" | jq -r '.result.status // "unknown"')
+                    echo "Attempt $attempt: DataPusher status = $datapusher_status"
+                    
+                    # Check if processing is complete or failed
+                    if [ "$datapusher_status" = "complete" ] || [ "$datapusher_status" = "error" ]; then
+                      if [ "$datapusher_status" = "error" ]; then
+                        error_info=$(echo "$dp_status_response" | jq -r '.result.error.message // "DataPusher processing error"')
+                        error_message="DataPusher error: $error_info"
+                      fi
+                      break
+                    fi
+                  else
+                    echo "DataPusher status API returned success=false"
+                    error_message="DataPusher status API error"
+                    break
+                  fi
+                else
+                  echo "Invalid JSON from DataPusher status API"
+                  error_message="DataPusher status API returned invalid JSON"
+                  break
+                fi
+                
+                # Show progress for longer operations
+                if [ $((attempt % 5)) -eq 0 ]; then
+                  echo "Still waiting... (${attempt}/30)"
+                fi
+              done
+              
+              # Check final resource and datastore status
+              echo "Checking final resource status..."
+              resource_status=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id")
+              
+              if echo "$resource_status" | jq . >/dev/null 2>&1; then
+                datastore_active=$(echo "$resource_status" | jq -r '.result.datastore_active // false')
+                echo "DataStore active: $datastore_active"
+                
+                # If datastore is active, get row count
+                if [ "$datastore_active" = "true" ]; then
+                  echo "Getting row count from DataStore..."
+                  datastore_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1")
+                  if echo "$datastore_response" | jq . >/dev/null 2>&1; then
+                    rows_imported=$(echo "$datastore_response" | jq -r '.result.total // 0')
+                    echo "Rows imported: $rows_imported"
+                  else
+                    echo "Failed to get row count from DataStore"
+                  fi
+                fi
+              else
+                error_message="Failed to get final resource status"
+              fi
+            fi
+            
+            local end_time=$(date +%s)
+            local processing_time=$((end_time - start_time))
+            
+            # Log results
+            echo "$file_name,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message\"" >> /tmp/test_results.csv
+            
+            # Summary
+            echo ""
+            echo "--- Test Summary for $file_name ---"
+            echo "Upload Status: $upload_status"
+            echo "Resource ID: $resource_id"
+            echo "DataPusher Status: $datapusher_status"
+            echo "DataStore Active: $datastore_active"
+            echo "Rows Imported: $rows_imported"
+            echo "Processing Time: ${processing_time}s"
+            if [ -n "$error_message" ]; then
+              echo "Error: $error_message"
+            fi
+            echo "======================================="
+          }
+          
+          # Test all files from the static directory
+          if [ -d "tests/static" ]; then
+            echo "Testing files from tests/static directory:"
+            for file in tests/static/*.csv; do
+              if [ -f "$file" ]; then
+                file_name=$(basename "$file")
+                case "$file_name" in
+                  *small*|*basic*) description="Small CSV file for basic functionality testing" ;;
+                  *medium*|*mixed*) description="Medium CSV with mixed data types" ;;
+                  *large*) description="Large CSV for performance testing" ;;
+                  *unicode*|*special*) description="CSV with Unicode and special characters" ;;
+                  *malformed*|*bad*|*error*) description="CSV with formatting issues for error handling" ;;
+                  *empty*) description="Empty CSV file (edge case)" ;;
+                  *single*) description="CSV with single data row" ;;
+                  *columns*) description="CSV with many columns" ;;
+                  *) description="Test CSV file: $file_name" ;;
+                esac
+                test_file "$file" "$description"
+              fi
+            done
+          else
+            echo "No tests/static directory found, testing fallback files..."
+            test_file "tests/static/basic_test.csv" "Basic fallback test file"
+          fi
+          
+          echo ""
+          echo "=== All tests completed ==="
               
               if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
                 # Wait for DataPusher Plus processing
