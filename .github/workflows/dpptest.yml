@@ -472,15 +472,40 @@ jobs:
       - name: Add resource to dataset with ckanapi
         run: |
           set -eu
-          echo "Adding resource to my-first-dataset..."
-          if ckanapi action resource_create \
-            package_id=my-first-dataset \
-            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
-            name="Sample CSV Data - 100KB Test File" \
-            description="Test CSV resource for datapusher-plus pipeline." \
-            format=CSV \
-            mimetype="text/csv" \
-            -c /srv/app/src/ckan/test-core.ini; then
+          echo "Adding resources from repository test files..."
+          
+          # Get list of test files
+          TEST_FILES=$(find /github/workspace/tests/static -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" 2>/dev/null || find . -name "tests/static" -type d -exec find {} -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" \;)
+          
+          if [ -z "$TEST_FILES" ]; then
+            echo "No test files found in tests/static, checking current directory structure..."
+            find . -name "tests" -type d
+            find . -name "static" -type d
+            exit 1
+          fi
+          
+          echo "Found test files:"
+          echo "$TEST_FILES"
+          
+          # Create resources for each test file
+          for file_path in $TEST_FILES; do
+            file_name=$(basename "$file_path")
+            file_ext=$(echo "$file_name" | sed 's/.*\.//')
+            
+            echo "Adding resource: $file_name"
+            
+            if ckanapi action resource_create \
+              package_id=my-first-dataset \
+              upload="$file_path" \
+              name="Repository Test File - $file_name" \
+              description="Test $file_ext resource from repository tests/static directory." \
+              format="$(echo $file_ext | tr '[:lower:]' '[:upper:]')" \
+              -c /srv/app/src/ckan/test-core.ini; then
+              echo "Resource $file_name created successfully!"
+            else
+              echo "Resource creation failed for $file_name"
+            fi
+          done
             echo "Resource created successfully!"
           else
             echo "Resource creation failed"
@@ -607,14 +632,28 @@ jobs:
           fi
           
           # Create resource using ckanapi (same method that works in other steps)
+          # Get test files from repository
+          echo "Finding test files in repository..."
+          TEST_FILES=$(find /github/workspace/tests/static -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" 2>/dev/null || find . -name "tests/static" -type d -exec find {} -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" \;)
+          
+          if [ -z "$TEST_FILES" ]; then
+            echo "No test files found in tests/static"
+            exit 1
+          fi
+          
+          # Use the first available test file
+          TEST_FILE=$(echo "$TEST_FILES" | head -n 1)
+          TEST_FILENAME=$(basename "$TEST_FILE")
+          
+          echo "Using test file: $TEST_FILE"
           echo "Creating test resource using ckanapi..."
+          
           if resource_response=$(ckanapi action resource_create \
             package_id=datapusher-plus-test \
-            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
-            name="DataPusher Plus Test CSV" \
-            description="Test CSV for DataPusher Plus functionality" \
-            format=CSV \
-            mimetype="text/csv" \
+            upload="$TEST_FILE" \
+            name="DataPusher Plus Test - $TEST_FILENAME" \
+            description="Test file from repository for DataPusher Plus functionality" \
+            format="$(echo $TEST_FILENAME | sed 's/.*\.//' | tr '[:lower:]' '[:upper:]')" \
             -c /srv/app/src/ckan/test-core.ini 2>&1); then
             
             echo "Resource created successfully!"
