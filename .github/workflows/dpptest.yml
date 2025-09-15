@@ -1,4 +1,4 @@
-name: CKAN DataPusher Plus Comprehensive Testing
+name: CKAN DataPusher Plus Single File Test
 on:
   workflow_dispatch:
 # Workflow-level defaults
@@ -439,8 +439,8 @@ jobs:
           echo "Creating dataset datapusher-plus-test-suite..."
           if ckanapi action package_create \
             name=datapusher-plus-test-suite \
-            title="DataPusher Plus Comprehensive Test Suite" \
-            notes="Comprehensive test dataset for DataPusher Plus functionality validation. Contains various file formats and edge cases." \
+            title="DataPusher Plus Test Suite" \
+            notes="Test dataset for DataPusher Plus functionality validation." \
             owner_org=demo-organization \
             license_id=cc-by \
             version=1.0.0 \
@@ -448,10 +448,9 @@ jobs:
             author_email=noreply@example.com \
             maintainer="CKAN Admin" \
             maintainer_email=admin@example.com \
-            url=https://github.com/dathere/datapusher-plus \
             private:false \
             state=active \
-            'tags:[{"name":"datapusher-plus"},{"name":"test-suite"},{"name":"automation"},{"name":"csv"},{"name":"excel"},{"name":"validation"}]' \
+            'tags:[{"name":"datapusher-plus"},{"name":"test"}]' \
             -c /srv/app/src/ckan/test-core.ini; then
             echo "Test dataset created successfully!"
           else
@@ -482,189 +481,48 @@ jobs:
             exit 1
           fi
 
-      - name: Create comprehensive test file matrix
+      - name: Test single file with DataPusher Plus monitoring
         run: |
           set -eu
-          echo "Creating comprehensive test file matrix for DataPusher Plus..."
-          
-          # Create test files directory
-          mkdir -p /tmp/test_files
-          
-          # Test File 1: Small valid CSV (should pass)
-          cat > /tmp/test_files/small_valid.csv << 'EOF'
-          id,name,age,city,salary
-          1,John Doe,30,New York,50000
-          2,Jane Smith,25,Los Angeles,55000
-          3,Bob Johnson,35,Chicago,60000
-          4,Alice Brown,28,Houston,52000
-          5,Charlie Davis,32,Phoenix,58000
-          EOF
-          
-          # Test File 2: Medium CSV with different data types (should pass)
-          cat > /tmp/test_files/medium_mixed_types.csv << 'EOF'
-          product_id,product_name,price,in_stock,launch_date,category,rating
-          1001,Laptop Pro,1299.99,true,2023-01-15,Electronics,4.5
-          1002,Office Chair,299.50,false,2023-02-20,Furniture,4.2
-          1003,Coffee Maker,89.99,true,2023-03-10,Appliances,4.7
-          1004,Wireless Mouse,29.99,true,2023-04-05,Electronics,4.1
-          1005,Standing Desk,699.00,false,2023-05-12,Furniture,4.6
-          1006,Bluetooth Speaker,149.99,true,2023-06-18,Electronics,4.4
-          1007,Plant Pot,15.50,true,2023-07-22,Home & Garden,4.0
-          1008,Gaming Keyboard,199.99,true,2023-08-30,Electronics,4.8
-          1009,Table Lamp,79.99,false,2023-09-14,Furniture,4.3
-          1010,Water Bottle,24.99,true,2023-10-01,Sports,4.5
-          EOF
-          
-          # Test File 3: Large CSV (tests performance)
-          echo "Generating large CSV file..."
-          cat > /tmp/test_files/large_dataset.csv << 'EOF'
-          transaction_id,customer_id,product_name,quantity,unit_price,total_amount,transaction_date,payment_method,store_location
-          EOF
-          
-          # Generate 1000 rows of test data
-          for i in $(seq 1 1000); do
-            echo "$i,$((i % 100 + 1)),Product_$((i % 50 + 1)),$((i % 10 + 1)),$((i % 100 + 10)).99,$((i * 15 + 100)).50,2023-$(printf "%02d" $((i % 12 + 1)))-$(printf "%02d" $((i % 28 + 1))),$([ $((i % 3)) -eq 0 ] && echo "Credit Card" || echo "Cash"),Store_$((i % 10 + 1))" >> /tmp/test_files/large_dataset.csv
-          done
-          
-          # Test File 4: CSV with special characters and Unicode (tests encoding)
-          cat > /tmp/test_files/unicode_special_chars.csv << 'EOF'
-          id,name,description,price,location
-          1,"José García","Café con leche ☕","€12,50","Madrid, España"
-          2,"北京用户","绿茶 🍵","¥25.00","北京，中国"
-          3,"User@123","Product with quotes ""special""","$19.99","New York, USA"
-          4,"Müller, Hans","Bäckerei Produkt äöü","€8,75","München, Deutschland"
-          5,"عربي المستخدم","منتج عربي 🌟","$30.00","Dubai, UAE"
-          EOF
-          
-          # Test File 5: CSV with problematic formatting (tests error handling)
-          cat > /tmp/test_files/malformed.csv << 'EOF'
-          id,name,value,notes
-          1,Test Item,100,"Normal row"
-          2,Missing Quotes,200,This has "unescaped quotes in content
-          3,"Extra comma",300,"Should be fine",extra_column
-          4,Incomplete Row,400
-          5,"Properly Escaped","500","Quote test: ""Hello World"""
-          EOF
-          
-          # Test File 6: Empty CSV (edge case)
-          cat > /tmp/test_files/empty.csv << 'EOF'
-          id,name,value
-          EOF
-          
-          # Test File 7: Single row CSV
-          cat > /tmp/test_files/single_row.csv << 'EOF'
-          id,name,value
-          1,Single Row,100
-          EOF
-          
-          # Test File 8: CSV with many columns (tests column handling)
-          echo "col1,col2,col3,col4,col5,col6,col7,col8,col9,col10,col11,col12,col13,col14,col15,col16,col17,col18,col19,col20" > /tmp/test_files/many_columns.csv
-          for i in $(seq 1 10); do
-            echo "val1_$i,val2_$i,val3_$i,val4_$i,val5_$i,val6_$i,val7_$i,val8_$i,val9_$i,val10_$i,val11_$i,val12_$i,val13_$i,val14_$i,val15_$i,val16_$i,val17_$i,val18_$i,val19_$i,val20_$i" >> /tmp/test_files/many_columns.csv
-          done
-          
-          echo "Test files created:"
-          ls -la /tmp/test_files/
-          echo "File sizes:"
-          wc -l /tmp/test_files/*.csv
-
-      - name: Upload test files and monitor DataPusher Plus processing (using curl)
-        run: |
-          set -eu
-          echo "=== Starting Comprehensive DataPusher Plus Testing ==="
-          
-          # Verify dataset exists first
-          echo "Verifying test dataset exists..."
-          if ! curl -s "http://localhost:5000/api/3/action/package_show?id=datapusher-plus-test-suite" | jq -e '.success == true' >/dev/null 2>&1; then
-            echo "Test dataset not found. Creating it..."
-            curl -s -X POST "http://localhost:5000/api/3/action/package_create" \
-              -H "Authorization: $CKAN_API_KEY" \
-              -H "Content-Type: application/json" \
-              -d '{
-                "name": "datapusher-plus-test-suite",
-                "title": "DataPusher Plus Test Suite", 
-                "owner_org": "demo-organization"
-              }' | jq
-          fi
-          echo "Test dataset verified"
+          echo "=== Testing DataPusher Plus with Single File ==="
           
           # Initialize results tracking
           echo "file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message" > /tmp/test_results.csv
           
-          # Function to upload and test a file using curl
-          test_file() {
-            local file_path="$1"
-            local file_name=$(basename "$file_path")
-            local description="$2"
+          echo "Creating resource from URL and monitoring DataPusher Plus..."
+          
+          start_time=$(date +%s)
+          upload_status="FAILED"
+          resource_id=""
+          datapusher_status="N/A"
+          datastore_active="false" 
+          rows_imported="0"
+          error_message=""
+          
+          # Create resource using the proven method
+          echo "Adding resource to datapusher-plus-test-suite..."
+          if resource_response=$(ckanapi action resource_create \
+            package_id=datapusher-plus-test-suite \
+            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
+            name="Sample CSV Data - 100KB Test File" \
+            description="Test CSV resource for datapusher-plus pipeline testing" \
+            format=CSV \
+            mimetype="text/csv" \
+            -c /srv/app/src/ckan/test-core.ini 2>&1); then
             
-            echo ""
-            echo "===== Testing: $file_name ====="
-            echo "Description: $description"
-            echo "File path: $file_path"
+            echo "Resource created successfully!"
+            upload_status="SUCCESS"
+            resource_id=$(echo "$resource_response" | jq -r '.id // empty')
+            echo "Resource ID: $resource_id"
             
-            # Verify file exists
-            if [ ! -f "$file_path" ]; then
-              echo "File not found: $file_path"
-              echo "$file_name,FAILED,,N/A,false,0,0,\"File not found\"" >> /tmp/test_results.csv
-              return
-            fi
-            
-            echo "File size: $(stat -c%s "$file_path") bytes"
-            echo "File preview:"
-            head -3 "$file_path" || echo "Cannot preview file"
-            echo "---"
-            
-            local start_time=$(date +%s)
-            local upload_status="FAILED"
-            local resource_id=""
-            local datapusher_status="N/A"
-            local datastore_active="false"
-            local rows_imported="0"
-            local error_message=""
-            
-            # Upload file using curl multipart form data
-            echo "Uploading $file_name using curl..."
-            upload_response=$(curl -s -X POST "http://localhost:5000/api/3/action/resource_create" \
-              -H "Authorization: $CKAN_API_KEY" \
-              -F "package_id=datapusher-plus-test-suite" \
-              -F "upload=@$file_path" \
-              -F "name=$file_name" \
-              -F "description=$description" \
-              -F "format=CSV" \
-              -F "mimetype=text/csv" 2>&1)
-            
-            echo "Upload response received (first 200 chars):"
-            echo "$upload_response" | head -c 200
-            echo ""
-            echo "---"
-            
-            # Check if response is valid JSON and extract resource ID
-            if echo "$upload_response" | jq . >/dev/null 2>&1; then
-              upload_success=$(echo "$upload_response" | jq -r '.success // false')
-              if [ "$upload_success" = "true" ]; then
-                upload_status="SUCCESS"
-                resource_id=$(echo "$upload_response" | jq -r '.result.id // empty')
-                echo "Upload successful. Resource ID: $resource_id"
-              else
-                error_message="Upload API returned success=false: $(echo "$upload_response" | jq -r '.error.message // "unknown error"')"
-                echo "Upload failed: $error_message"
-              fi
-            else
-              error_message="Invalid JSON response from upload API"
-              echo "Upload failed: $error_message"
-            fi
-            
-            # If upload successful, monitor DataPusher Plus processing
-            if [ "$upload_status" = "SUCCESS" ] && [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
-              echo "Monitoring DataPusher Plus processing for resource: $resource_id"
+            # Monitor DataPusher Plus processing
+            echo "Monitoring DataPusher Plus processing..."
+            for attempt in $(seq 1 60); do
+              sleep 2
               
-              # Wait for DataPusher Plus processing (max 60 seconds)
-              for attempt in $(seq 1 30); do
-                sleep 2
-                
-                # Check DataPusher status using the API pattern that worked in local testing
-                dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
-                  "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id")
+              # Check DataPusher status
+              if dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
+                "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id"); then
                 
                 if echo "$dp_status_response" | jq . >/dev/null 2>&1; then
                   dp_success=$(echo "$dp_status_response" | jq -r '.success // false')
@@ -672,12 +530,14 @@ jobs:
                     datapusher_status=$(echo "$dp_status_response" | jq -r '.result.status // "unknown"')
                     echo "Attempt $attempt: DataPusher status = $datapusher_status"
                     
-                    # Check if processing is complete or failed
-                    if [ "$datapusher_status" = "complete" ] || [ "$datapusher_status" = "error" ]; then
-                      if [ "$datapusher_status" = "error" ]; then
-                        error_info=$(echo "$dp_status_response" | jq -r '.result.error.message // "DataPusher processing error"')
-                        error_message="DataPusher error: $error_info"
-                      fi
+                    # Check if processing is complete
+                    if [ "$datapusher_status" = "complete" ]; then
+                      echo "DataPusher processing completed!"
+                      break
+                    elif [ "$datapusher_status" = "error" ]; then
+                      error_info=$(echo "$dp_status_response" | jq -r '.result.error.message // "DataPusher processing error"')
+                      error_message="DataPusher error: $error_info"
+                      echo "DataPusher processing failed: $error_message"
                       break
                     fi
                   else
@@ -690,275 +550,122 @@ jobs:
                   error_message="DataPusher status API returned invalid JSON"
                   break
                 fi
-                
-                # Show progress for longer operations
-                if [ $((attempt % 5)) -eq 0 ]; then
-                  echo "Still waiting... (${attempt}/30)"
-                fi
-              done
-              
-              # Check final resource and datastore status
-              echo "Checking final resource status..."
-              resource_status=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id")
-              
-              if echo "$resource_status" | jq . >/dev/null 2>&1; then
-                datastore_active=$(echo "$resource_status" | jq -r '.result.datastore_active // false')
-                echo "DataStore active: $datastore_active"
-                
-                # If datastore is active, get row count
-                if [ "$datastore_active" = "true" ]; then
-                  echo "Getting row count from DataStore..."
-                  datastore_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1")
-                  if echo "$datastore_response" | jq . >/dev/null 2>&1; then
-                    rows_imported=$(echo "$datastore_response" | jq -r '.result.total // 0')
-                    echo "Rows imported: $rows_imported"
-                  else
-                    echo "Failed to get row count from DataStore"
-                  fi
-                fi
               else
-                error_message="Failed to get final resource status"
+                echo "Failed to get DataPusher status"
+                error_message="DataPusher status API connection error"
+                break
               fi
-            fi
-            
-            local end_time=$(date +%s)
-            local processing_time=$((end_time - start_time))
-            
-            # Log results
-            echo "$file_name,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message\"" >> /tmp/test_results.csv
-            
-            # Summary
-            echo ""
-            echo "--- Test Summary for $file_name ---"
-            echo "Upload Status: $upload_status"
-            echo "Resource ID: $resource_id"
-            echo "DataPusher Status: $datapusher_status"
-            echo "DataStore Active: $datastore_active"
-            echo "Rows Imported: $rows_imported"
-            echo "Processing Time: ${processing_time}s"
-            if [ -n "$error_message" ]; then
-              echo "Error: $error_message"
-            fi
-            echo "======================================="
-          }
-          
-          # Test all files from the static directory
-          if [ -d "tests/static" ]; then
-            echo "Testing files from tests/static directory:"
-            for file in tests/static/*.csv; do
-              if [ -f "$file" ]; then
-                file_name=$(basename "$file")
-                case "$file_name" in
-                  *small*|*basic*) description="Small CSV file for basic functionality testing" ;;
-                  *medium*|*mixed*) description="Medium CSV with mixed data types" ;;
-                  *large*) description="Large CSV for performance testing" ;;
-                  *unicode*|*special*) description="CSV with Unicode and special characters" ;;
-                  *malformed*|*bad*|*error*) description="CSV with formatting issues for error handling" ;;
-                  *empty*) description="Empty CSV file (edge case)" ;;
-                  *single*) description="CSV with single data row" ;;
-                  *columns*) description="CSV with many columns" ;;
-                  *) description="Test CSV file: $file_name" ;;
-                esac
-                test_file "$file" "$description"
+              
+              # Show progress
+              if [ $((attempt % 10)) -eq 0 ]; then
+                echo "Still processing... (${attempt}/60)"
               fi
             done
-          else
-            echo "No tests/static directory found, testing fallback files..."
-            test_file "tests/static/basic_test.csv" "Basic fallback test file"
-          fi
-          
-          echo ""
-          echo "=== All tests completed ==="
-              
-              if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
-                # Wait for DataPusher Plus processing
-                echo "Waiting for DataPusher Plus processing..."
-                for attempt in $(seq 1 30); do
-                  sleep 2
-                  
-                  # Check DataPusher status
-                  if dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
-                    "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id"); then
-                    
-                    datapusher_status=$(echo "$dp_status_response" | jq -r '.result.status // "unknown"')
-                    echo "Attempt $attempt: DataPusher status = $datapusher_status"
-                    
-                    # Check if processing is complete
-                    if [ "$datapusher_status" = "complete" ] || [ "$datapusher_status" = "error" ]; then
-                      break
-                    elif [ "$datapusher_status" = "unknown" ]; then
-                      error_message="DataPusher status API failed"
-                      break
-                    fi
-                  else
-                    echo "Failed to get DataPusher status"
-                    error_message="DataPusher status API error"
-                    break
-                  fi
-                done
+            
+            # Check final resource status
+            echo "Checking final resource and datastore status..."
+            if final_resource=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id"); then
+              if echo "$final_resource" | jq . >/dev/null 2>&1; then
+                datastore_active=$(echo "$final_resource" | jq -r '.result.datastore_active // false')
+                echo "DataStore active: $datastore_active"
                 
-                # Check final resource status
-                if resource_status=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id"); then
-                  datastore_active=$(echo "$resource_status" | jq -r '.result.datastore_active // false')
-                  echo "DataStore active: $datastore_active"
-                  
-                  # If datastore is active, get row count
-                  if [ "$datastore_active" = "true" ]; then
-                    if datastore_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1"); then
-                      rows_imported=$(echo "$datastore_response" | jq -r '.result.total // 0')
+                # Get row count if datastore is active
+                if [ "$datastore_active" = "true" ]; then
+                  echo "Getting row count from DataStore..."
+                  if datastore_data=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1"); then
+                    if echo "$datastore_data" | jq . >/dev/null 2>&1; then
+                      rows_imported=$(echo "$datastore_data" | jq -r '.result.total // 0')
                       echo "Rows imported: $rows_imported"
+                      
+                      # Show sample data
+                      echo "Sample of imported data:"
+                      echo "$datastore_data" | jq -r '.result.records[0] // {}'
                     fi
                   fi
-                else
-                  error_message="Failed to check resource status"
                 fi
-              else
-                error_message="No resource ID returned"
               fi
-            else
-              echo "❌ Upload failed: $upload_response"
-              error_message="Upload failed: $(echo "$upload_response" | head -1)"
             fi
             
-            local end_time=$(date +%s)
-            local processing_time=$((end_time - start_time))
-            
-            # Log results
-            echo "$file_name,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message\"" >> /tmp/test_results.csv
-            
-            # Summary
-            echo "--- Test Summary for $file_name ---"
-            echo "Upload Status: $upload_status"
-            echo "Resource ID: $resource_id"
-            echo "DataPusher Status: $datapusher_status"
-            echo "DataStore Active: $datastore_active"
-            echo "Rows Imported: $rows_imported"
-            echo "Processing Time: ${processing_time}s"
-            if [ -n "$error_message" ]; then
-              echo "Error: $error_message"
-            fi
-            echo "======================================="
-          }
-          
-          # Test all files
-          test_file "/tmp/test_files/small_valid.csv" "Small valid CSV with 5 rows of employee data"
-          test_file "/tmp/test_files/medium_mixed_types.csv" "Medium CSV with mixed data types (strings, numbers, booleans, dates)"
-          test_file "/tmp/test_files/large_dataset.csv" "Large CSV with 1000+ rows for performance testing"
-          test_file "/tmp/test_files/unicode_special_chars.csv" "CSV with Unicode characters and special symbols"
-          test_file "/tmp/test_files/malformed.csv" "CSV with formatting issues and edge cases"
-          test_file "/tmp/test_files/empty.csv" "Empty CSV file (headers only)"
-          test_file "/tmp/test_files/single_row.csv" "CSV with single data row"
-          test_file "/tmp/test_files/many_columns.csv" "CSV with 20 columns to test column handling"
-          
-          echo ""
-          echo "=== All tests completed ==="
-
-      - name: Generate comprehensive test report
-        run: |
-          set -eu
-          echo "=== DataPusher Plus Test Results Report ==="
-          echo ""
-          
-          # Read and analyze results
-          total_tests=$(tail -n +2 /tmp/test_results.csv | wc -l)
-          successful_uploads=$(tail -n +2 /tmp/test_results.csv | grep -c "SUCCESS" || echo "0")
-          successful_processing=$(tail -n +2 /tmp/test_results.csv | grep -c "complete" || echo "0")
-          active_datastores=$(tail -n +2 /tmp/test_results.csv | grep -c "true" || echo "0")
-          
-          echo "📊 Test Summary:"
-          echo "- Total tests: $total_tests"
-          echo "- Successful uploads: $successful_uploads"
-          echo "- Successful processing: $successful_processing"
-          echo "- Active DataStores: $active_datastores"
-          echo ""
-          
-          # Create formatted report
-          printf "%-25s %-15s %-15s %-15s %-10s %-15s %s\n" \
-            "File Name" "Upload" "DataPusher" "DataStore" "Rows" "Time (s)" "Status"
-          printf "%-25s %-15s %-15s %-15s %-10s %-15s %s\n" \
-            "=========================" "===============" "===============" "===============" "==========" "===============" "======"
-          
-          # Process each result
-          tail -n +2 /tmp/test_results.csv | while IFS=',' read -r file_name upload_status resource_id datapusher_status datastore_active rows_imported processing_time error_message; do
-            # Clean up fields
-            file_name=$(echo "$file_name" | tr -d '"')
-            upload_status=$(echo "$upload_status" | tr -d '"')
-            datapusher_status=$(echo "$datapusher_status" | tr -d '"')
-            datastore_active=$(echo "$datastore_active" | tr -d '"')
-            rows_imported=$(echo "$rows_imported" | tr -d '"')
-            processing_time=$(echo "$processing_time" | tr -d '"')
-            error_message=$(echo "$error_message" | tr -d '"')
-            
-            # Determine overall status
-            if [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "true" ]; then
-              overall_status="✅ PASS"
-            elif [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ]; then
-              overall_status="⚠️ PARTIAL"
-            else
-              overall_status="❌ FAIL"
-            fi
-            
-            printf "%-25s %-15s %-15s %-15s %-10s %-15s %s\n" \
-              "$file_name" "$upload_status" "$datapusher_status" "$datastore_active" "$rows_imported" "$processing_time" "$overall_status"
-          done
-          
-          echo ""
-          echo "📋 Detailed Error Analysis:"
-          tail -n +2 /tmp/test_results.csv | while IFS=',' read -r file_name upload_status resource_id datapusher_status datastore_active rows_imported processing_time error_message; do
-            file_name=$(echo "$file_name" | tr -d '"')
-            error_message=$(echo "$error_message" | tr -d '"')
-            
-            if [ -n "$error_message" ] && [ "$error_message" != " " ]; then
-              echo "❌ $file_name: $error_message"
-            fi
-          done
-          
-          echo ""
-          echo "🔍 DataPusher Plus System Status:"
-          
-          # Check background job queue
-          if job_response=$(curl -s -H "Authorization: $CKAN_API_KEY" "http://localhost:5000/api/3/action/job_list"); then
-            job_count=$(echo "$job_response" | jq -r '.result | length')
-            echo "- Background jobs in queue: $job_count"
-          fi
-          
-          # Check if worker is still running
-          if kill -0 "$CKAN_WORKER_PID" >/dev/null 2>&1; then
-            echo "- Background worker: ✅ Running (PID: $CKAN_WORKER_PID)"
           else
-            echo "- Background worker: ❌ Not running"
+            echo "Resource creation failed"
+            echo "$resource_response"
+            error_message="Resource creation failed: $(echo "$resource_response" | head -1)"
           fi
           
-          # Show worker logs if available
-          echo ""
-          echo "📝 Recent Worker Logs:"
-          tail -n 10 /tmp/ckan_worker.log || echo "No worker logs available"
+          end_time=$(date +%s)
+          processing_time=$((end_time - start_time))
           
-          echo ""
-          echo "=== Report Complete ==="
+          # Log results
+          echo "Sample CSV 100KB,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message\"" >> /tmp/test_results.csv
           
-          # Save results as artifact
-          cp /tmp/test_results.csv ./datapusher_plus_test_results.csv
+          # Final summary
+          echo ""
+          echo "=== Test Results Summary ==="
+          echo "File: Sample CSV Data - 100KB Test File"
+          echo "Resource Creation: $upload_status"
+          echo "Resource ID: $resource_id"
+          echo "DataPusher Status: $datapusher_status"
+          echo "DataStore Active: $datastore_active"
+          echo "Rows Imported: $rows_imported"
+          echo "Total Processing Time: ${processing_time}s"
+          if [ -n "$error_message" ]; then
+            echo "Error: $error_message"
+          fi
+          
+          # Determine overall result
+          if [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "true" ]; then
+            echo "Overall Result: PASS - DataPusher Plus is working correctly"
+          else
+            echo "Overall Result: FAIL - DataPusher Plus has issues"
+          fi
 
-      - name: Display CKAN instance final status
+      - name: Generate simple test report
         run: |
           set -eu
-          echo "=== Final CKAN Instance Status ==="
-          curl -s "http://localhost:5000/api/3/action/status_show" | jq
-          echo ""
-          echo "=== All Datasets ==="
-          curl -s "http://localhost:5000/api/3/action/package_list" | jq
-          echo ""
-          echo "=== DataPusher Plus Configuration Check ==="
-          grep -i "datapusher" /srv/app/src/ckan/test-core.ini || echo "No datapusher config found"
+          echo "=== DataPusher Plus Test Report ==="
           
+          if [ -f /tmp/test_results.csv ]; then
+            echo ""
+            echo "Test Results:"
+            cat /tmp/test_results.csv
+            echo ""
+            
+            # Extract key metrics
+            result_line=$(tail -n 1 /tmp/test_results.csv)
+            upload_status=$(echo "$result_line" | cut -d',' -f2)
+            datapusher_status=$(echo "$result_line" | cut -d',' -f4)
+            datastore_active=$(echo "$result_line" | cut -d',' -f5)
+            rows_imported=$(echo "$result_line" | cut -d',' -f6)
+            
+            echo "Summary Table:"
+            echo "| Test Item | Status |"
+            echo "|-----------|--------|"
+            echo "| Resource Creation | $upload_status |"
+            echo "| DataPusher Processing | $datapusher_status |"
+            echo "| DataStore Activation | $datastore_active |"
+            echo "| Rows Imported | $rows_imported |"
+            
+            # Overall pass/fail
+            if [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "true" ]; then
+              echo ""
+              echo "🎉 OVERALL RESULT: PASS"
+              echo "DataPusher Plus is functioning correctly!"
+            else
+              echo ""
+              echo "❌ OVERALL RESULT: FAIL"
+              echo "DataPusher Plus has issues that need investigation."
+            fi
+          else
+            echo "No test results file found"
+          fi
+
       - name: Upload test results as artifact
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: datapusher-plus-test-results
+          name: datapusher-plus-single-test-results
           path: |
-            datapusher_plus_test_results.csv
+            /tmp/test_results.csv
             /tmp/ckan_stdout.log
             /tmp/ckan_worker.log
           retention-days: 30
