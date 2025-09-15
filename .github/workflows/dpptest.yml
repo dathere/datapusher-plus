@@ -527,6 +527,7 @@ jobs:
           echo "$TEST_FILES"
           
           # Create resources for each test file
+          resource_count=0
           for file_path in $TEST_FILES; do
             file_name=$(basename "$file_path")
             file_ext=$(echo "$file_name" | sed 's/.*\.//')
@@ -541,17 +542,14 @@ jobs:
               format="$(echo $file_ext | tr '[:lower:]' '[:upper:]')" \
               -c /srv/app/src/ckan/test-core.ini; then
               echo "Resource $file_name created successfully!"
+              resource_count=$((resource_count + 1))
             else
               echo "Resource creation failed for $file_name"
               ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini
             fi
           done
-            echo "Resource created successfully!"
-          else
-            echo "Resource creation failed"
-            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini  
-            exit 1
-          fi
+          
+          echo "Successfully created $resource_count resources from repository test files"
           
       - name: Display CKAN instance inventory
         run: |
