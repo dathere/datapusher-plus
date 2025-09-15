@@ -84,6 +84,28 @@ jobs:
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"  
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;"  
           echo "Database setup completed"
+      - name: Debug repository structure and test files
+        run: |
+          echo "=== Current working directory ==="
+          pwd
+          echo ""
+          echo "=== Repository structure ==="
+          find . -name "tests" -type d
+          echo ""
+          echo "=== Contents of tests directory ==="
+          if [ -d "./tests" ]; then
+            ls -la ./tests/
+          fi
+          echo ""
+          echo "=== Contents of tests/static ==="
+          if [ -d "./tests/static" ]; then
+            ls -la ./tests/static/
+            echo "File types in tests/static:"
+            find ./tests/static -type f -exec file {} \;
+          fi
+          echo ""
+          echo "=== All CSV/Excel files in repository ==="
+          find . -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" | head -10
       - name: Install requirements, ckanapi and datapusher-plus
         run: |
           set -eu
@@ -474,13 +496,30 @@ jobs:
           set -eu
           echo "Adding resources from repository test files..."
           
-          # Get list of test files
-          TEST_FILES=$(find /github/workspace/tests/static -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" 2>/dev/null || find . -name "tests/static" -type d -exec find {} -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" \;)
+          # Check if tests/static directory exists and list contents
+          if [ -d "./tests/static" ]; then
+            echo "Found tests/static directory, contents:"
+            ls -la ./tests/static/
+            
+            # Find test files with simpler approach
+            TEST_FILES=$(find ./tests/static -type f \( -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" -o -name "*.ods" \) 2>/dev/null)
+            
+            if [ -z "$TEST_FILES" ]; then
+              echo "No CSV/TSV/Excel files found in tests/static directory"
+              echo "Available files:"
+              find ./tests/static -type f
+              echo "Trying with any file extensions..."
+              TEST_FILES=$(find ./tests/static -type f 2>/dev/null)
+            fi
+          else
+            echo "tests/static directory not found"
+            echo "Current directory contents:"
+            ls -la
+            exit 1
+          fi
           
           if [ -z "$TEST_FILES" ]; then
-            echo "No test files found in tests/static, checking current directory structure..."
-            find . -name "tests" -type d
-            find . -name "static" -type d
+            echo "No test files found"
             exit 1
           fi
           
@@ -504,6 +543,7 @@ jobs:
               echo "Resource $file_name created successfully!"
             else
               echo "Resource creation failed for $file_name"
+              ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini
             fi
           done
             echo "Resource created successfully!"
@@ -633,11 +673,26 @@ jobs:
           
           # Create resource using ckanapi (same method that works in other steps)
           # Get test files from repository
+          # Get test files from repository
           echo "Finding test files in repository..."
-          TEST_FILES=$(find /github/workspace/tests/static -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" 2>/dev/null || find . -name "tests/static" -type d -exec find {} -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" \;)
+          
+          if [ -d "./tests/static" ]; then
+            echo "Found tests/static directory"
+            TEST_FILES=$(find ./tests/static -type f \( -name "*.csv" -o -name "*.tsv" -o -name "*.xlsx" -o -name "*.xls" \) 2>/dev/null)
+            
+            if [ -z "$TEST_FILES" ]; then
+              echo "No CSV/Excel files found, trying any files..."
+              TEST_FILES=$(find ./tests/static -type f 2>/dev/null)
+            fi
+          else
+            echo "tests/static directory not found"
+            exit 1
+          fi
           
           if [ -z "$TEST_FILES" ]; then
             echo "No test files found in tests/static"
+            echo "Directory contents:"
+            ls -la ./tests/static/
             exit 1
           fi
           
