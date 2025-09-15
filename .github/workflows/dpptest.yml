@@ -565,21 +565,33 @@ jobs:
             # Check final resource status
             echo "Checking final resource and datastore status..."
             if final_resource=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id"); then
-              if echo "$final_resource" | jq . >/dev/null 2>&1; then
-                datastore_active=$(echo "$final_resource" | jq -r '.result.datastore_active // false')
+              # Check for JSON structure without using jq
+              if echo "$final_resource" | grep -q '"datastore_active"'; then
+                # Extract datastore_active status without jq
+                if echo "$final_resource" | grep -q '"datastore_active"[[:space:]]*:[[:space:]]*true'; then
+                  datastore_active="true"
+                else
+                  datastore_active="false"
+                fi
                 echo "DataStore active: $datastore_active"
                 
                 # Get row count if datastore is active
                 if [ "$datastore_active" = "true" ]; then
                   echo "Getting row count from DataStore..."
                   if datastore_data=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1"); then
-                    if echo "$datastore_data" | jq . >/dev/null 2>&1; then
-                      rows_imported=$(echo "$datastore_data" | jq -r '.result.total // 0')
+                    # Check for JSON structure without using jq
+                    if echo "$datastore_data" | grep -q '"total"'; then
+                      # Extract total count without jq
+                      rows_imported=$(echo "$datastore_data" | grep -o '"total"[[:space:]]*:[[:space:]]*[0-9]*' | sed 's/.*"total"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/')
+                      
+                      if [ -z "$rows_imported" ]; then
+                        rows_imported="0"
+                      fi
                       echo "Rows imported: $rows_imported"
                       
-                      # Show sample data
-                      echo "Sample of imported data:"
-                      echo "$datastore_data" | jq -r '.result.records[0] // {}'
+                      # Show sample data (just show the first part of response)
+                      echo "Sample data preview:"
+                      echo "$datastore_data" | head -3
                     fi
                   fi
                 fi
