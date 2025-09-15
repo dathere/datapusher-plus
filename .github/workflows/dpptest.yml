@@ -436,7 +436,98 @@ jobs:
           else
             echo "Dataset might already exist, continuing..."
           fi
+      - name: Display CKAN instance inventory
+        run: |
+          set -eu
+          echo "=== CKAN Status (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/status_show" | python3 -m json.tool  
+          echo ""
+          echo "=== All Datasets (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/package_list" | python3 -m json.tool  
+          echo ""
+          echo "=== All Organizations (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/organization_list" | python3 -m json.tool  
+          echo ""
+          echo "=== All Users (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool  
+      - name: Test datastore functionality
+        run: |
+          set -eu
+          echo "Testing datastore functionality..."
+          
+          # Test 1: Check if datastore is accessible by querying table metadata
+          echo "=== Testing datastore read access ==="
+          metadata_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=_table_metadata")
+          echo "Table metadata response: $metadata_response"
+          
+          if echo "$metadata_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ Datastore read access working"
+          else
+            echo "✗ Datastore read access failed"
+            exit 1
+          fi
+          
+          # Test 2: Create a test datastore table
+          echo "=== Testing datastore write access ==="
+          test_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -d '{
+              "resource": {"package_id": "my-first-dataset"},
+              "fields": [{"id": "test_col", "type": "text"}, {"id": "value", "type": "int"}],
+              "records": [{"test_col": "hello", "value": 1}, {"test_col": "world", "value": 2}]
+            }' \
+            "http://localhost:5000/api/3/action/datastore_create")
+          
+          echo "Test table creation response: $test_response"
+          
+          if echo "$test_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ Datastore write access working"
+            
+            # Extract resource_id for cleanup
+            test_resource_id=$(echo "$test_response" | jq -r '.result.resource_id')
+            
+            # Test 3: Query the test table
+            echo "=== Testing datastore query ==="
+            query_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$test_resource_id")
+            echo "Query response: $query_response"
+            
+            # Cleanup: Delete test table
+            echo "=== Cleaning up test table ==="
+            curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $CKAN_API_KEY" \
+              -d "{\"resource_id\": \"$test_resource_id\"}" \
+              "http://localhost:5000/api/3/action/datastore_delete" >/dev/null
+            
+            echo "✓ Datastore functionality test completed successfully"
+          else
+            echo "✗ Datastore write access failed"
+          fi
 
+      - name: Verify DataPusher Plus configuration
+        run: |
+          set -eu
+          echo "=== Verifying DataPusher Plus Configuration ==="
+          
+          echo "Checking for API token in config:"
+          if grep -q "ckanext.datapusher_plus.api_token" /srv/app/src/ckan/test-core.ini; then
+            echo "✅ API token found in config file"
+            grep "ckanext.datapusher_plus.api_token" /srv/app/src/ckan/test-core.ini
+          else
+            echo "❌ API token NOT found in config file"
+            echo "This will cause the 'No API token found' error"
+            exit 1
+          fi
+          
+          echo ""
+          echo "Checking CKAN plugins:"
+          grep "ckan.plugins" /srv/app/src/ckan/test-core.ini
+          
+          echo ""
+          echo "Configuration verification complete"
+
+          
       # CRITICAL: Start the background job worker - this was the missing piece from local testing
       - name: Start CKAN background job worker
         run: |
