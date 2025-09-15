@@ -556,7 +556,28 @@ jobs:
           else
             echo "✗ Datastore write access failed"
           fi
+      - name: Start CKAN background job worker
+        run: |
+          set -eu
+          echo "Starting CKAN background job worker (CRITICAL for DataPusher Plus)..."
+          nohup ckan -c /srv/app/src/ckan/test-core.ini jobs worker > /tmp/ckan_worker.log 2>&1 &
+          WORKER_PID=$!
+          echo "CKAN Worker PID=$WORKER_PID"
+          echo "CKAN_WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
           
+          # Give worker a moment to start up
+          sleep 5
+          
+          # Verify worker is running
+          if kill -0 "$WORKER_PID" >/dev/null 2>&1; then
+            echo "Background job worker started successfully"
+            echo "Worker logs:"
+            head -n 20 /tmp/ckan_worker.log || echo "No worker logs yet"
+          else
+            echo "Worker failed to start"
+            cat /tmp/ckan_worker.log
+            exit 1
+          fi
       - name: Test DataPusher Plus functionality
         run: |
           set -eu
