@@ -646,14 +646,14 @@ jobs:
                   
                   if echo "$dp_status_response" | grep -q '"success"'; then
                     if echo "$dp_status_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
-                      datapusher_status=$(echo "$dp_status_response" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+                      datapusher_status=$(echo "$dp_status_response" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
                       
                       if [ -z "$datapusher_status" ]; then
                         datapusher_status="unknown"
                       fi
                       
                       echo "Attempt $attempt: DataPusher status = $datapusher_status"
-                      datapusher_status=$(echo "$datapusher_status" | tr -d '\n\r\t ')
+                      datapusher_status=$(echo "$datapusher_status" | cut -c1-8 | tr -d '\n\r\t ')
 
                       if [ "$datapusher_status" = "complete" ]; then
                         echo "DataPusher processing completed!"
