@@ -887,3 +887,343 @@ def get_column_stats(context, column_name, stat_name=None):
             return field_stats.get(stat_name, 0)
     else:
         return field_stats
+
+
+def _find_best_date_field(dpp, dpps):
+    """Helper function to find the date field with the widest range.
+    
+    Args:
+        dpp: Dictionary containing date field lists
+        dpps: Dictionary containing field statistics
+        
+    Returns:
+        str: Name of the date field with the widest range, or None if no valid fields found
+    """
+    # Get available date and datetime fields
+    date_fields = dpp.get("DATE_FIELDS", [])
+    datetime_fields = dpp.get("DATETIME_FIELDS", [])
+    
+    # Combine all date fields
+    all_date_fields = datetime_fields + date_fields
+    
+    if not all_date_fields:
+        return None
+    
+    # Find the date field with the widest range (earliest min, latest max)
+    best_field = None
+    earliest_min = None
+    latest_max = None
+    
+    for field in all_date_fields:
+        field_stats = dpps.get(field, {}).get("stats", {})
+        if not field_stats:
+            continue
+            
+        min_date_str = field_stats.get("min")
+        max_date_str = field_stats.get("max")
+        
+        if not min_date_str or not max_date_str:
+            continue
+            
+        try:
+            # Parse dates for comparison
+            if isinstance(min_date_str, str):
+                min_date = datetime.fromisoformat(min_date_str.replace('Z', '+00:00'))
+            else:
+                min_date = min_date_str
+                
+            if isinstance(max_date_str, str):
+                max_date = datetime.fromisoformat(max_date_str.replace('Z', '+00:00'))
+            else:
+                max_date = max_date_str
+            
+            # Check if this field has a wider range
+            if (earliest_min is None or min_date < earliest_min) or \
+               (latest_max is None or max_date > latest_max):
+                best_field = field
+                if earliest_min is None or min_date < earliest_min:
+                    earliest_min = min_date
+                if latest_max is None or max_date > latest_max:
+                    latest_max = max_date
+                    
+        except (ValueError, AttributeError):
+            # Skip fields with invalid dates
+            continue
+    
+    return best_field
+
+
+@jinja2_global
+@pass_context
+def get_all_date_field_options(context, format="%Y-%m-%d"):
+    """Get all available date fields with their min/max dates for radio button options.
+
+    Args:
+        context (dict): The Jinja2 template context containing resource info and stats
+        format (str, optional): Date format string for output (default: "%Y-%m-%d")
+
+    Returns:
+        list: List of dictionaries containing date field information:
+              [{"field_name": "date_field", "min_date": "2020-01-01", "max_date": "2024-12-31"}]
+              or empty list if no date fields are found.
+    """
+    dpp = context.get("dpp", {})
+    dpps = context.get("dpps", {})
+    
+    # Get available date and datetime fields
+    date_fields = dpp.get("DATE_FIELDS", [])
+    datetime_fields = dpp.get("DATETIME_FIELDS", [])
+    
+    # Combine all date fields
+    all_date_fields = datetime_fields + date_fields
+    
+    if not all_date_fields:
+        return []
+    
+    date_options = []
+    
+    for field in all_date_fields:
+        field_stats = dpps.get(field, {}).get("stats", {})
+        if not field_stats:
+            continue
+            
+        min_date_str = field_stats.get("min")
+        max_date_str = field_stats.get("max")
+        
+        if not min_date_str or not max_date_str:
+            continue
+            
+        try:
+            # Parse dates for formatting
+            if isinstance(min_date_str, str):
+                min_date = datetime.fromisoformat(min_date_str.replace('Z', '+00:00'))
+            else:
+                min_date = min_date_str
+                
+            if isinstance(max_date_str, str):
+                max_date = datetime.fromisoformat(max_date_str.replace('Z', '+00:00'))
+            else:
+                max_date = max_date_str
+            
+            # Add this field to options
+            date_options.append({
+                "field_name": field,
+                "min_date": min_date.strftime(format),
+                "max_date": max_date.strftime(format)
+            })
+                    
+        except (ValueError, AttributeError):
+            # Skip fields with invalid dates
+            continue
+    
+    return date_options
+
+
+@jinja2_global
+@pass_context
+def suggest_date_range(context, date_field=None, format="%Y-%m-%d"):
+    """Suggest a date range for the dataset based on date/datetime fields in the resource.
+
+    This function analyzes date or datetime fields in the resource to determine
+    the minimum and maximum dates, then returns a formatted date range string
+    that can be used to populate the date_range field.
+
+    Args:
+        context (dict): The Jinja2 template context containing resource info and stats
+        date_field (str, optional): Name of the specific date field to analyze. 
+            If not provided, uses the date field with the widest range (earliest min, latest max).
+        format (str, optional): Date format string for output (default: "%Y-%m-%d")
+
+    Returns:
+        str: Formatted date range string in "YYYY-MM-DD - YYYY-MM-DD" format,
+             or None if no date fields are found or no valid dates exist.
+
+    Example:
+        {{ suggest_date_range() }} -> "2020-01-01 - 2024-12-31"
+        {{ suggest_date_range("created_date") }} -> "2022-06-15 - 2024-09-15"
+        {{ suggest_date_range("updated_date", "%B %d, %Y") }} -> "January 01, 2020 - December 31, 2024"
+    """
+    dpp = context.get("dpp", {})
+    dpps = context.get("dpps", {})
+    
+    # Check if there are multiple date fields - if so, return options for radio buttons
+    date_options = get_all_date_field_options(context, format)
+    if len(date_options) > 1:
+        # Return JSON string with all options for radio button display
+        import json
+        return json.dumps(date_options)
+    
+    # Determine which date field to use (single field or best field)
+    if not date_field:
+        date_field = _find_best_date_field(dpp, dpps)
+        if not date_field:
+            return None
+    
+    # Get statistics for the selected date field
+    field_stats = dpps.get(date_field, {}).get("stats", {})
+    if not field_stats:
+        return None
+    
+    min_date = field_stats.get("min")
+    max_date = field_stats.get("max")
+    
+    if not min_date or not max_date:
+        return None
+    
+    try:
+        # Parse the dates - they should be in ISO format from qsv stats
+        if isinstance(min_date, str):
+            min_dt = datetime.fromisoformat(min_date.replace('Z', '+00:00'))
+        else:
+            min_dt = min_date
+            
+        if isinstance(max_date, str):
+            max_dt = datetime.fromisoformat(max_date.replace('Z', '+00:00'))
+        else:
+            max_dt = max_date
+        
+        # Format the dates and return as range string
+        min_formatted = min_dt.strftime(format)
+        max_formatted = max_dt.strftime(format)
+        
+        return f"{min_formatted} - {max_formatted}"
+        
+    except (ValueError, AttributeError) as e:
+        # If date parsing fails, return None
+        return None
+
+
+@jinja2_global
+@pass_context
+def suggest_from_date(context, date_field=None, format="%Y-%m-%d"):
+    """Suggest the start date for the dataset based on date/datetime fields in the resource.
+
+    This function analyzes date or datetime fields in the resource to determine
+    the minimum date, which can be used to populate the from_date field.
+
+    Args:
+        context (dict): The Jinja2 template context containing resource info and stats
+        date_field (str, optional): Name of the specific date field to analyze. 
+            If not provided, uses the date field with the widest range (earliest min, latest max).
+        format (str, optional): Date format string for output (default: "%Y-%m-%d")
+
+    Returns:
+        str: Formatted date string, JSON string with options for multiple fields, or None if no valid dates exist.
+
+    Example:
+        {{ suggest_from_date() }} -> "2020-01-01"
+        {{ suggest_from_date("created_date") }} -> "2022-06-15"
+    """
+    dpp = context.get("dpp", {})
+    dpps = context.get("dpps", {})
+    
+    # Check if there are multiple date fields - if so, return options for radio buttons
+    date_options = get_all_date_field_options(context, format)
+    if len(date_options) > 1:
+        # Return JSON string with from_date options for radio button display
+        import json
+        from_date_options = []
+        for option in date_options:
+            from_date_options.append({
+                "field_name": option["field_name"],
+                "date": option["min_date"]
+            })
+        return json.dumps(from_date_options)
+    
+    # Determine which date field to use (single field or best field)
+    if not date_field:
+        date_field = _find_best_date_field(dpp, dpps)
+        if not date_field:
+            return None
+    
+    # Get statistics for the selected date field
+    field_stats = dpps.get(date_field, {}).get("stats", {})
+    if not field_stats:
+        return None
+    
+    min_date = field_stats.get("min")
+    
+    if not min_date:
+        return None
+    
+    try:
+        # Parse the date - should be in ISO format from qsv stats
+        if isinstance(min_date, str):
+            min_dt = datetime.fromisoformat(min_date.replace('Z', '+00:00'))
+        else:
+            min_dt = min_date
+        
+        # Format the date and return
+        return min_dt.strftime(format)
+        
+    except (ValueError, AttributeError) as e:
+        # If date parsing fails, return None
+        return None
+
+
+@jinja2_global
+@pass_context
+def suggest_to_date(context, date_field=None, format="%Y-%m-%d"):
+    """Suggest the end date for the dataset based on date/datetime fields in the resource.
+
+    This function analyzes date or datetime fields in the resource to determine
+    the maximum date, which can be used to populate the to_date field.
+
+    Args:
+        context (dict): The Jinja2 template context containing resource info and stats
+        date_field (str, optional): Name of the specific date field to analyze. 
+            If not provided, uses the date field with the widest range (earliest min, latest max).
+        format (str, optional): Date format string for output (default: "%Y-%m-%d")
+
+    Returns:
+        str: Formatted date string, JSON string with options for multiple fields, or None if no valid dates exist.
+
+    Example:
+        {{ suggest_to_date() }} -> "2024-12-31"
+        {{ suggest_to_date("created_date") }} -> "2024-09-15"
+    """
+    dpp = context.get("dpp", {})
+    dpps = context.get("dpps", {})
+    
+    # Check if there are multiple date fields - if so, return options for radio buttons
+    date_options = get_all_date_field_options(context, format)
+    if len(date_options) > 1:
+        # Return JSON string with to_date options for radio button display
+        import json
+        to_date_options = []
+        for option in date_options:
+            to_date_options.append({
+                "field_name": option["field_name"],
+                "date": option["max_date"]
+            })
+        return json.dumps(to_date_options)
+    
+    # Determine which date field to use (single field or best field)
+    if not date_field:
+        date_field = _find_best_date_field(dpp, dpps)
+        if not date_field:
+            return None
+    
+    # Get statistics for the selected date field
+    field_stats = dpps.get(date_field, {}).get("stats", {})
+    if not field_stats:
+        return None
+    
+    max_date = field_stats.get("max")
+    
+    if not max_date:
+        return None
+    
+    try:
+        # Parse the date - should be in ISO format from qsv stats
+        if isinstance(max_date, str):
+            max_dt = datetime.fromisoformat(max_date.replace('Z', '+00:00'))
+        else:
+            max_dt = max_date
+        
+        # Format the date and return
+        return max_dt.strftime(format)
+        
+    except (ValueError, AttributeError) as e:
+        # If date parsing fails, return None
+        return None

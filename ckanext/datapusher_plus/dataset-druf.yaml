@@ -39,7 +39,7 @@ dataset_fields:
     label: Spatial Extent
     validators: scheming_required
     form_snippet: markdown.html
-    suggestion_formula: '{{ spatial_extent_wkt() }}'
+
 
   - field_name: owner_org
     label: Organization
@@ -75,6 +75,25 @@ dataset_fields:
   - field_name: next_update
     label: Next Update
     form_snippet: date.html
+
+  - field_name: date_range
+    label: Date Range
+    required: False
+    form_snippet: date_range_optional.html
+    validators: ignore_missing parse_date_range_optional
+    suggestion_formula: '{{ suggest_date_range() }}'
+    help_text: The Date Range field represents the current date range the dataset covers. If this dataset has an Update Type of Automatic, the end date on this date range will be automatically incremented with the passage of time.
+    help_inline: true
+
+  - field_name: from_date
+    label: From Date
+    form_snippet: null
+    suggestion_formula: '{{ suggest_from_date() }}'
+
+  - field_name: to_date
+    label: To Date
+    form_snippet: null
+    suggestion_formula: '{{ suggest_to_date() }}'
 
 
   - field_name: dpp_suggestions

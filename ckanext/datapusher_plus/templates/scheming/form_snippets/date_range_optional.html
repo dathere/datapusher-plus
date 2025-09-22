@@ -1,0 +1,258 @@
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+{% include 'scheming/snippets/suggestions_asset.html' %}
+
+{%- set schema = h.scheming_get_dataset_schema("dataset") -%}
+{% set cb = h.scheming_field_by_name(schema.dataset_fields, 'date_range_cb') %}
+
+{% if data.get('id') == None %}
+  {# Creating a new dataset #}
+  {% set new = True %}
+  {% if request.form.getlist('{}_cb'.format(field.field_name)) %}
+    {% set no_date_is_checked = True %}
+  {% else %}
+    {% set no_date_is_checked = False %}
+  {% endif %}
+{% else %}
+  {# Editing an existing dataset #}
+  {% set new = False %}
+  {% if request.form.getlist('{}_cb'.format(field.field_name)) %}
+    {% set no_date_is_checked = True %}
+  {% elif data.get(field.field_name) == None %}
+    {% set no_date_is_checked = True %}
+  {% else %}
+    {% set no_date_is_checked = False %}
+  {% endif %}
+{% endif %}
+
+<div class="form-group control-medium">
+
+  <div id="date_range_container">
+    <label class="control-label">Date Range</label>
+    <div class="row">
+      <div class="col-sm-6 col-lg-5 mb-3 mb-sm-0">
+        <input 
+          id="{{ field.field_name }}" 
+          name="{{ field.field_name }}" 
+          class="form-control" 
+          type="hidden" 
+          value="{{data.get(field.field_name)}}"
+          data-scheming-field-name="{{ field.field_name }}"
+        >
+
+        {# Get from_date field from schema for suggestion button #}
+        {% set from_date_field = h.scheming_field_by_name(schema.dataset_fields, 'from_date') %}
+        {% set from_date_suggestion = h.scheming_field_suggestion(from_date_field) if from_date_field else none %}
+        
+        <div class="control-group {% if from_date_suggestion %}has-suggestion{% endif %}">
+          {% if from_date_suggestion %}
+            <label for="field-from_date" class="control-label">
+              <span class="form-label">From</span>
+              {%- snippet 'scheming/snippets/suggestion_button.html', field=from_date_field, data=data -%}
+            </label>
+          {% else %}
+            <label for="field-from_date" class="control-label">From</label>
+          {% endif %}
+          <input 
+            id="field-from_date" 
+            name="from_date" 
+            class="form-control" 
+            type="date" 
+            placeholder="Start Date"
+            value="{{data.get('from_date')}}"
+            data-scheming-field-name="from_date"
+          >
+        </div>
+      </div>
+      <div class="col-sm-6 col-lg-5">
+        {# Get to_date field from schema for suggestion button #}
+        {% set to_date_field = h.scheming_field_by_name(schema.dataset_fields, 'to_date') %}
+        {% set to_date_suggestion = h.scheming_field_suggestion(to_date_field) if to_date_field else none %}
+        
+        <div class="control-group {% if to_date_suggestion %}has-suggestion{% endif %}">
+          {% if to_date_suggestion %}
+            <label for="field-to_date" class="control-label">
+              <span class="form-label">To</span>
+              {%- snippet 'scheming/snippets/suggestion_button.html', field=to_date_field, data=data -%}
+            </label>
+          {% else %}
+            <label for="field-to_date" class="control-label">To</label>
+          {% endif %}
+          <input 
+            id="field-to_date" 
+            name="to_date" 
+            class="form-control" 
+            type="date" 
+            placeholder="End Date" 
+            value="{{data.get('to_date')}}"
+            data-scheming-field-name="to_date"
+          >
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="no_field_date_range mt-2" style="display: flex;">
+    <input type="checkbox" style="width: 2%; " id="date_range_cb" name="date_range_cb" value="on" {% if no_date_is_checked %} checked="" {% endif %}/> 
+    <label  style="margin-left: 1%;" for="date_range_cb">This dataset does not have a date range</label>
+  </div>
+
+  {% set error = errors[field.field_name] %}
+  {% if error and error is iterable %}
+  <span class="error-block">{{ error | join(', ') }}</span>
+  {% endif %}
+  {%- snippet 'scheming/form_snippets/help_text.html', field=field -%}
+</div>
+
+<script>
+  // Function to update the hidden date_range field
+  function updateDateRangeField() {
+    var fromDate = $('#field-from_date').val();
+    var toDate = $('#field-to_date').val();
+    
+    if (fromDate && toDate) {
+      var dateRangeValue = fromDate + ' - ' + toDate;
+      $('#{{ field.field_name }}').val(dateRangeValue);
+    } else {
+      $('#{{ field.field_name }}').val('');
+    }
+  }
+
+  // Initialize date range field on page load
+  if( $('#field-from_date').val() == '' ) {
+    $('#field-to_date').prop('disabled', true);
+  } else {
+    updateDateRangeField();
+  }
+
+  // Handle from_date changes
+  $('#field-from_date').on('change input', function () {
+    var fromDate = $(this).val();
+    var toDate = $('#field-to_date').val();
+
+    if (fromDate) {
+      $('#field-to_date').prop('disabled', false);
+      $('#field-to_date').attr('min', fromDate);  // Prevent selecting a date before 'from_date'
+      
+      // Only update 'to_date' if it's empty or earlier than 'from_date'
+      if (!toDate || new Date(toDate) < new Date(fromDate)) {
+        $('#field-to_date').val(fromDate);  
+      }
+    } else {
+      $('#field-to_date').val('').prop('disabled', true);
+    }
+    updateDateRangeField();
+  });
+
+  // Handle to_date changes
+  $('#field-to_date').on('change input', function () {
+    updateDateRangeField();
+  });
+
+  // Handle checkbox changes (keeping your styling)
+  $('#date_range_cb').on('change', function () {
+    if ($(this).is(':checked')) {
+      $('#date_range_container').hide();  
+      $('#field-from_date, #field-to_date').val('');  
+      $('#field-to_date').val('').prop('disabled', true);
+      $('#{{ field.field_name }}').val(''); // Clear the main field too
+    } else {
+      $('#date_range_container').show();  
+    }
+  }).trigger('change');
+
+  // Listen for programmatic value changes (from suggestion apply buttons)
+  // This creates a MutationObserver to watch for value changes
+  $(document).ready(function() {
+    var fromDateInput = document.getElementById('field-from_date');
+    var toDateInput = document.getElementById('field-to_date');
+    
+    // Function to handle suggestion updates
+    function handleSuggestionUpdate(input) {
+      setTimeout(function() {
+        // If suggestions populated the fields, uncheck the "no date range" checkbox
+        var fromDate = $('#field-from_date').val();
+        var toDate = $('#field-to_date').val();
+        
+        if (fromDate || toDate) {
+          $('#date_range_cb').prop('checked', false);
+          $('#date_range_container').show();
+          
+          // Ensure the to_date field is enabled if from_date has a value
+          if (fromDate) {
+            $('#field-to_date').prop('disabled', false);
+            $('#field-to_date').attr('min', fromDate);
+          }
+        }
+        
+        // Trigger the change event to update logic
+        $(input).trigger('change');
+        
+        // Force update the date range field
+        updateDateRangeField();
+      }, 10);
+    }
+    
+    if (fromDateInput) {
+      // Watch for value property changes (not just attributes)
+      var fromObserver = new MutationObserver(function(mutations) {
+        handleSuggestionUpdate(fromDateInput);
+      });
+      
+      // Also listen for input events from suggestions
+      $(fromDateInput).on('input', function() {
+        handleSuggestionUpdate(this);
+      });
+      
+      fromObserver.observe(fromDateInput, {
+        attributes: true,
+        attributeFilter: ['value']
+      });
+    }
+    
+    if (toDateInput) {
+      var toObserver = new MutationObserver(function(mutations) {
+        handleSuggestionUpdate(toDateInput);
+      });
+      
+      // Also listen for input events from suggestions  
+      $(toDateInput).on('input', function() {
+        handleSuggestionUpdate(this);
+      });
+      
+      toObserver.observe(toDateInput, {
+        attributes: true,
+        attributeFilter: ['value']
+      });
+    }
+
+    // Additional fallback: Watch for any changes in the form
+    var lastFromDate = '';
+    var lastToDate = '';
+    
+    setInterval(function() {
+      var currentFromDate = $('#field-from_date').val();
+      var currentToDate = $('#field-to_date').val();
+      
+      // Check if values changed from suggestion system
+      if (lastFromDate !== currentFromDate) {
+        lastFromDate = currentFromDate;
+        
+        // If we have a from date, enable the to date field
+        if (currentFromDate) {
+          $('#field-to_date').prop('disabled', false);
+          $('#field-to_date').attr('min', currentFromDate);
+          $('#date_range_cb').prop('checked', false);
+          $('#date_range_container').show();
+        }
+        
+        handleSuggestionUpdate(document.getElementById('field-from_date'));
+      }
+      
+      if (lastToDate !== currentToDate) {
+        lastToDate = currentToDate;
+        handleSuggestionUpdate(document.getElementById('field-to_date'));
+      }
+    }, 100);
+  });
+
+</script>

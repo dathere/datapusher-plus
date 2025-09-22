@@ -450,49 +450,110 @@ ckan.module('scheming-suggestions', function($) {
                 }
             });
         },
-        _populatePopoverContent: function($buttonEl, $popoverDiv, suggestionData) {
-            var popoverContentHtml = `
-                <div class='suggestion-popover-content ${suggestionData.is_error ? "suggestion-popover-error" : ""}'>
-                    <strong>${esc(suggestionData.label)}</strong>
-                    ${suggestionData.is_error ? `
-                        <div class='suggestion-error-text'>
-                            <svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
-                                <circle cx='12' cy='12' r='10'></circle><line x1='12' y1='8' x2='12' y2='12'></line><line x1='12' y1='16' x2='12.01' y2='16'></line>
-                            </svg>
-                            <span>The suggestion could not be generated correctly:</span>
-                        </div>` : ''}
-                    ${suggestionData.is_select && !suggestionData.is_valid && !suggestionData.is_error ? `
-                        <div class='suggestion-warning'>
-                            <svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
-                                <circle cx='12' cy='12' r='10'></circle><line x1='12' y1='8' x2='12' y2='12'></line><line x1='12' y1='16' x2='12.01' y2='16'></line>
-                            </svg>
-                            <span>This value is not a valid choice for this field.</span>
-                        </div>` : ''}
-                    <div class='suggestion-value ${suggestionData.is_error ? "suggestion-value-error" : ""}'>${esc(suggestionData.value)}</div>
-                    ${!suggestionData.is_error ? `
-                        <div class='formula-toggle'>
-                            <button class='formula-toggle-btn' type='button'>
-                                <span class='formula-toggle-icon'>&#9660;</span>
-                                <span class='formula-toggle-text'>Show formula</span>
-                            </button>
+                _populatePopoverContent: function($buttonEl, $popoverDiv, suggestionData) {
+            var self = this;
+            
+            // Check if this is a multiple date column suggestion by trying to parse as JSON
+            var multipleDateOptions = null;
+            try {
+                var parsed = JSON.parse(suggestionData.value);
+                if (Array.isArray(parsed) && parsed.length > 1 && parsed[0].field_name && parsed[0].date) {
+                    multipleDateOptions = parsed;
+                }
+            } catch (e) {
+                // Not JSON or not the expected format, proceed normally
+            }
+            
+            if (multipleDateOptions) {
+                // Generate radio button interface for multiple date columns
+                var radioOptionsHtml = multipleDateOptions.map(function(option, index) {
+                    var radioId = 'date-option-' + suggestionData.field_name + '-' + index;
+                    return `
+                        <div class='date-option-row'>
+                            <input type='radio' id='${radioId}' name='date-options-${suggestionData.field_name}' 
+                                   value='${esc(option.date)}' data-field='${esc(option.field_name)}' 
+                                   ${index === 0 ? 'checked' : ''}>
+                            <label for='${radioId}'>
+                                <strong>${esc(option.field_name)}:</strong> ${esc(option.date)}
+                            </label>
+                        </div>`;
+                }).join('');
+                
+                var popoverContentHtml = `
+                    <div class='suggestion-popover-content'>
+                        <strong>${esc(suggestionData.label)} - Multiple Date Columns Found</strong>
+                        <div class='multiple-date-options'>
+                            <p>Select the date column to use for this field:</p>
+                            ${radioOptionsHtml}
                         </div>
-                        <div class='suggestion-formula' style='display:none;'>
-                            <div class='formula-header'>
-                                <span>Formula:</span>
-                                <button class='copy-formula-btn' type='button' data-formula='${esc(suggestionData.formula)}' title="Copy formula">
-                                    <svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24'><path fill='currentColor' d='M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z'/></svg>
+                        ${!suggestionData.is_error ? `
+                            <div class='formula-toggle'>
+                                <button class='formula-toggle-btn' type='button'>
+                                    <span class='formula-toggle-icon'>&#9660;</span>
+                                    <span class='formula-toggle-text'>Show formula</span>
                                 </button>
                             </div>
-                            <code>${esc(suggestionData.formula)}</code>
-                        </div>` : ''}
-                    <button class='suggestion-apply-btn ${(!suggestionData.is_valid || suggestionData.is_error) ? "suggestion-apply-btn-disabled" : ""}'
-                            data-target='field-${suggestionData.field_name}'
-                            data-value='${String(suggestionData.value).replace(/'/g, "&apos;").replace(/"/g, "&quot;")}'
-                            data-is-select='${suggestionData.is_select}'
-                            data-is-valid='${suggestionData.is_valid}'>
-                        ${suggestionData.is_error ? 'Error in Suggestion' : 'Apply suggestion'}
-                    </button>
-                </div>`;
+                            <div class='suggestion-formula' style='display:none;'>
+                                <div class='formula-header'>
+                                    <span>Formula:</span>
+                                    <button class='copy-formula-btn' type='button' data-formula='${esc(suggestionData.formula)}' title="Copy formula">
+                                        <svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24'><path fill='currentColor' d='M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z'/></svg>
+                                    </button>
+                                </div>
+                                <code>${esc(suggestionData.formula)}</code>
+                            </div>` : ''}
+                        <button class='suggestion-apply-btn'
+                                data-target='field-${suggestionData.field_name}'
+                                data-multiple-options='true'>
+                            Apply Selected Date
+                        </button>
+                    </div>`;
+            } else {
+                // Original single value suggestion interface
+                var popoverContentHtml = `
+                    <div class='suggestion-popover-content ${suggestionData.is_error ? "suggestion-popover-error" : ""}'>
+                        <strong>${esc(suggestionData.label)}</strong>
+                        ${suggestionData.is_error ? `
+                            <div class='suggestion-error-text'>
+                                <svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+                                    <circle cx='12' cy='12' r='10'></circle><line x1='12' y1='8' x2='12' y2='12'></line><line x1='12' y1='16' x2='12.01' y2='16'></line>
+                                </svg>
+                                <span>The suggestion could not be generated correctly:</span>
+                            </div>` : ''}
+                        ${suggestionData.is_select && !suggestionData.is_valid && !suggestionData.is_error ? `
+                            <div class='suggestion-warning'>
+                                <svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>
+                                    <circle cx='12' cy='12' r='10'></circle><line x1='12' y1='8' x2='12' y2='12'></line><line x1='12' y1='16' x2='12.01' y2='16'></line>
+                                </svg>
+                                <span>This value is not a valid choice for this field.</span>
+                            </div>` : ''}
+                        <div class='suggestion-value ${suggestionData.is_error ? "suggestion-value-error" : ""}'>${esc(suggestionData.value)}</div>
+                        ${!suggestionData.is_error ? `
+                            <div class='formula-toggle'>
+                                <button class='formula-toggle-btn' type='button'>
+                                    <span class='formula-toggle-icon'>&#9660;</span>
+                                    <span class='formula-toggle-text'>Show formula</span>
+                                </button>
+                            </div>
+                            <div class='suggestion-formula' style='display:none;'>
+                                <div class='formula-header'>
+                                    <span>Formula:</span>
+                                    <button class='copy-formula-btn' type='button' data-formula='${esc(suggestionData.formula)}' title="Copy formula">
+                                        <svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24'><path fill='currentColor' d='M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z'/></svg>
+                                    </button>
+                                </div>
+                                <code>${esc(suggestionData.formula)}</code>
+                            </div>` : ''}
+                        <button class='suggestion-apply-btn ${(!suggestionData.is_valid || suggestionData.is_error) ? "suggestion-apply-btn-disabled" : ""}'
+                                data-target='field-${suggestionData.field_name}'
+                                data-value='${String(suggestionData.value).replace(/'/g, "&apos;").replace(/"/g, "&quot;")}'
+                                data-is-select='${suggestionData.is_select}'
+                                data-is-valid='${suggestionData.is_valid}'>
+                            ${suggestionData.is_error ? 'Error in Suggestion' : 'Apply suggestion'}
+                        </button>
+                    </div>`;
+            }
+            
             $popoverDiv.html(popoverContentHtml);
             this._attachActionHandlers($popoverDiv, suggestionData.field_name);
         },
@@ -554,13 +615,31 @@ ckan.module('scheming-suggestions', function($) {
                 e.preventDefault(); e.stopPropagation();
                 if ($(this).hasClass('suggestion-apply-btn-disabled')) return;
                 var targetId = $(this).data('target');
-                var suggestionValue = $(this).data('value');
-                var isValid = $(this).data('is-valid') !== false;
+                var isMultipleOptions = $(this).data('multiple-options');
                 var $target = $('#' + targetId);
 
                 if (!$target.length) { console.error("Scheming Popover Apply: Target not found:", targetId); return; }
 
                 var applySuccess = false;
+                var suggestionValue;
+                
+                if (isMultipleOptions) {
+                    // Handle multiple date column options - get selected radio button value
+                    var $selectedRadio = $popoverDiv.find('input[name="date-options-' + fieldName + '"]:checked');
+                    if ($selectedRadio.length) {
+                        suggestionValue = $selectedRadio.val();
+                        var selectedField = $selectedRadio.data('field');
+                        console.log("Selected date field:", selectedField, "with value:", suggestionValue);
+                    } else {
+                        self._showTemporaryMessage($target, "Please select a date column option.", 'suggestion-warning-message', '#e67e22');
+                        return;
+                    }
+                } else {
+                    // Handle single suggestion value
+                    suggestionValue = $(this).data('value');
+                    var isValid = $(this).data('is-valid') !== false;
+                }
+
                 if (self._setFieldValue($target, suggestionValue, targetId.substring(6))) {
                     applySuccess = true;
                 } else if (!$target.is('select')) {
@@ -571,7 +650,7 @@ ckan.module('scheming-suggestions', function($) {
                     $target.addClass('suggestion-applied');
                     setTimeout(function() { $target.removeClass('suggestion-applied'); }, 1200);
                     self._showTemporaryMessage($target, "Suggestion applied!", 'suggestion-success-message', 'rgba(40, 167, 69, 0.95)');
-                } else if ($target.is('select') && !isValid) {
+                } else if (!isMultipleOptions && $target.is('select') && !isValid) {
                      self._showTemporaryMessage($target, "The suggested value is not a valid option.", 'suggestion-warning-message', '#e67e22');
                      $target.addClass('suggestion-invalid');
                      setTimeout(function() { $target.removeClass('suggestion-invalid'); }, 3000);
