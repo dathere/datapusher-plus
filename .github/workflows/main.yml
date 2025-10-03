@@ -1,6 +1,5 @@
 name: Automated DataPusher+ Testing Run
 on:
-  push:
   workflow_dispatch:
 env:
   FILES_DIR: "custom"
