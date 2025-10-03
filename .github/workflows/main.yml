@@ -1,0 +1,35 @@
+name: Automated DataPusher+ Testing Run
+on:
+  push:
+  workflow_dispatch:
+env:
+  FILES_DIR: "custom"
+  DATAPUSHER_BRANCH: "main"
+  CKAN_VERSION: "2.11"
+  POSTGRES_PASSWORD: postgres
+  CKAN_DB_PASSWORD: pass
+  CKAN_SITE_URL: http://localhost:5000
+  CKAN_SITE_ID: default
+  CKAN_SITE_TITLE: "CKAN Test Instance"
+  QSV_VER : "7.1.0"
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    container:
+      image: ckan/ckan-dev:2.11
+      options: --user root
+    services:
+      solr:
+        image: ckan/ckan-solr:2.11-solr9
+        ports: ["8983:8983"]
+      postgres:
+        image: ckan/ckan-postgres-dev:2.11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:3
+        ports: ["6379:6379"]
+    # Job-specific environmen
