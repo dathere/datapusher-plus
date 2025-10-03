@@ -1,0 +1,4 @@
+file_name,file_url,file_format,file_mimetype,file_description
+sample-100kb,https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv,CSV,text/csv,100KB CSV test file
+sample-1mb,https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/1mb.csv,CSV,text/csv,1MB CSV test file
+sample-1mb,https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/1mb.csv,CSV,text/csv,1MB CSV test file
