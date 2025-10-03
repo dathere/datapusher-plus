@@ -221,6 +221,8 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
             "scheming_get_suggestion_value": dph.scheming_get_suggestion_value,
             "scheming_is_valid_suggestion": dph.scheming_is_valid_suggestion,
             "is_preformulated_field": dph.is_preformulated_field,
+            "get_primary_key_candidates": dph.get_primary_key_candidates,
+            "get_datastore_fields_with_cardinality": dph.get_datastore_fields_with_cardinality,
         }
 
     # IBlueprint

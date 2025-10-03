@@ -591,3 +591,97 @@ def is_preformulated_field(field):
     This helper returns True only if the field has a 'formula' key with a non-empty value
     """
     return bool(field.get('formula', False))
+ 
+
+def get_primary_key_candidates(resource_id):
+    """
+    Get primary key candidates for a resource from dpp_suggestions.
+    
+    Returns list of column names that are potential primary keys based on:
+    - Cardinality equals record count (all values unique)
+    - No null values
+    
+    Args:
+        resource_id: ID of the resource to get primary key candidates for
+        
+    Returns:
+        list: List of column names that are primary key candidates
+    """
+    try:
+        # Get the resource information
+        resource = toolkit.get_action('resource_show')({}, {'id': resource_id})
+        
+        # Get the package to access dpp_suggestions
+        package_id = resource.get('package_id')
+        if not package_id:
+            return []
+            
+        package = toolkit.get_action('package_show')({}, {'id': package_id})
+        
+        # Check if dpp_suggestions exists and has primary key candidates
+        dpp_suggestions = package.get('dpp_suggestions', {})
+        if isinstance(dpp_suggestions, dict):
+            # Look for primary key candidates in the suggestions
+            primary_key_candidates = dpp_suggestions.get('PRIMARY_KEY_CANDIDATES', [])
+            if primary_key_candidates:
+                logger.debug(f"Found primary key candidates for resource {resource_id}: {primary_key_candidates}")
+                return primary_key_candidates
+                
+        # Fallback: if no candidates found in suggestions, return empty list
+        logger.debug(f"No primary key candidates found for resource {resource_id}")
+        return []
+        
+    except (toolkit.ObjectNotFound, toolkit.NotAuthorized, KeyError, TypeError) as e:
+        # If we can't get the data, return empty list
+        logger.warning(f"Error getting primary key candidates for resource {resource_id}: {e}")
+        return []
+
+
+def get_datastore_fields_with_cardinality(resource_id):
+    """
+    Get datastore fields along with their cardinality information from dpp_suggestions.
+    
+    Args:
+        resource_id: ID of the resource
+        
+    Returns:
+        list: List of dicts with field info and cardinality, or fallback to basic datastore dictionary
+    """
+    try:
+        # Get the resource information
+        resource = toolkit.get_action('resource_show')({}, {'id': resource_id})
+        
+        # Get the package to access dpp_suggestions
+        package_id = resource.get('package_id')
+        if not package_id:
+            # Fallback to basic datastore dictionary
+            return toolkit.h.datastore_dictionary(resource_id)
+            
+        package = toolkit.get_action('package_show')({}, {'id': package_id})
+        
+        # Get basic datastore dictionary
+        basic_fields = toolkit.h.datastore_dictionary(resource_id)
+        
+        # Enhance with cardinality information from dpp_suggestions
+        dpp_suggestions = package.get('dpp_suggestions', {})
+        cardinality_info = {}
+        
+        if isinstance(dpp_suggestions, dict):
+            cardinality_info = dpp_suggestions.get('CARDINALITY', {})
+            
+        # Add cardinality to field information
+        enhanced_fields = []
+        for field in basic_fields:
+            field_copy = field.copy()
+            field_name = field['id']
+            field_copy['cardinality'] = cardinality_info.get(field_name, 0)
+            enhanced_fields.append(field_copy)
+            
+        return enhanced_fields
+        
+    except (toolkit.ObjectNotFound, toolkit.NotAuthorized, KeyError, TypeError):
+        # Fallback to basic datastore dictionary
+        try:
+            return toolkit.h.datastore_dictionary(resource_id)
+        except:
+            return []

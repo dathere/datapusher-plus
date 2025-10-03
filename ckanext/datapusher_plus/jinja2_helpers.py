@@ -138,6 +138,26 @@ class FormulaProcessor:
         # add dataset_stats to dpp
         dpp["dataset_stats"] = dataset_stats
 
+        # add cardinality information and identify primary key candidates
+        dpp["CARDINALITY"] = {}
+        dpp["PRIMARY_KEY_CANDIDATES"] = []
+        
+        # Get record count from dataset_stats 
+        record_count = dataset_stats.get("RECORD_COUNT", 0)
+        
+        for field_name, field_data in resource_fields_stats.items():
+            if field_data and "stats" in field_data:
+                stats = field_data["stats"]
+                cardinality = int(stats.get("cardinality", 0))
+                dpp["CARDINALITY"][field_name] = cardinality
+                
+                # A field is a primary key candidate if:
+                # 1. Its cardinality equals the record count (all values are unique)
+                # 2. It has no null values (nullcount is 0)
+                nullcount = int(stats.get("nullcount", 0))
+                if cardinality == record_count and nullcount == 0 and record_count > 0:
+                    dpp["PRIMARY_KEY_CANDIDATES"].append(field_name)
+
         self.scheming_yaml = scheming_yaml
         self.package = package
         self.resource = resource
@@ -1227,3 +1247,62 @@ def suggest_to_date(context, date_field=None, format="%Y-%m-%d"):
     except (ValueError, AttributeError) as e:
         # If date parsing fails, return None
         return None
+
+
+@jinja2_global
+@pass_context
+def get_primary_key_candidates_list(context):
+    """Get list of primary key candidates for the current resource.
+    
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+    
+    Returns:
+        list: List of column names that are primary key candidates
+        
+    Example:
+        {{ get_primary_key_candidates_list() }} -> ["id", "uuid", "record_number"]
+    """
+    dpp = context.get("dpp", {})
+    return dpp.get("PRIMARY_KEY_CANDIDATES", [])
+
+
+@jinja2_global
+@pass_context
+def get_field_cardinality(context, field_name):
+    """Get cardinality (unique value count) for a specific field.
+    
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+        field_name: Name of the field to get cardinality for
+    
+    Returns:
+        int: Number of unique values in the field, or 0 if not found
+        
+    Example:
+        {{ get_field_cardinality("department") }} -> 25
+    """
+    dpp = context.get("dpp", {})
+    cardinality_info = dpp.get("CARDINALITY", {})
+    return cardinality_info.get(field_name, 0)
+
+
+@jinja2_global
+@pass_context
+def get_all_field_cardinalities(context):
+    """Get cardinality information for all fields.
+    
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+    
+    Returns:
+        dict: Dictionary mapping field names to their cardinality values
+        
+    Example:
+        {{ get_all_field_cardinalities() }} -> {"id": 1000, "name": 950, "department": 25}
+    """
+    dpp = context.get("dpp", {})
+    return dpp.get("CARDINALITY", {})

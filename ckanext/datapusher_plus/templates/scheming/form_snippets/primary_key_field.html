@@ -1,0 +1,64 @@
+{% import 'macros/form.html' as form %}
+
+{# Build options from the primary resource's datastore dictionary #}
+{% set options = [] %}
+{% set selected_value = data.get(field.field_name, '') %}
+{% if data.num_resources > 0 %}
+{% set primary_resource_id = data.resources[0].get('id') %}
+
+{# First, try to get primary key candidates from DP+ suggestions #}
+{% set primary_key_candidates = h.get_primary_key_candidates(primary_resource_id) %}
+
+{% if primary_key_candidates %}
+    {# Use only primary key candidates if available #}
+    {% for candidate in primary_key_candidates %}
+    {% set _ = options.append({'name': candidate + ' (PK candidate)', 'value': candidate}) %}
+    {% endfor %}
+{% else %}
+    {# Fallback to all datastore fields if no candidates found #}
+    {% set ddict = h.datastore_dictionary(primary_resource_id) or [] %}
+    {% for f in ddict %}
+    {# Each datastore field has an id; use it for both name & value #}
+    {% set _ = options.append({'name': f['id'], 'value': f['id']}) %}
+    {% endfor %}
+{% endif %}
+{% endif %}
+
+{% call form.input_block(
+'field-' ~ field.field_name,
+label=h.scheming_language_text(field.label),
+error=errors[field.field_name],
+is_required=field.get('required', False),
+classes=field.get('classes', ['form-group', 'control-medium'])
+) %}
+
+{% if options|length > 0 %}
+<select id="field-{{ field.field_name }}" name="{{ field.field_name }}" data-module="autocomplete" class="control-full">
+    {# Optional blank choice / placeholder #}
+    {% if field.get('form_include_blank_choice', true) %}
+    {% if primary_key_candidates %}
+    <option value="">{{ _('Select a primary key candidate') }}</option>
+    {% else %}
+    <option value="">{{ _('Select a field') }}</option>
+    {% endif %}
+    {% endif %}
+
+    {% for opt in options %}
+    <option value="{{ opt.value }}" {% if opt.value==selected_value %}selected{% endif %}>
+        {{ opt.name }}
+    </option>
+    {% endfor %}
+</select>
+{% else %}
+<select id="field-{{ field.field_name }}" name="{{ field.field_name }}" class="control-full" disabled>
+    {% if data.num_resources > 0 %}
+    <option>{{ _('No primary key candidates found — process resource with DataPusher+ first') }}</option>
+    {% else %}
+    <option>{{ _('No fields available — add a DataStore-backed resource') }}</option>
+    {% endif %}
+</select>
+{% endif %}
+
+{%- snippet 'scheming/form_snippets/help_text.html', field=field -%}
+
+{% endcall %}

@@ -95,6 +95,13 @@ dataset_fields:
     form_snippet: null
     suggestion_formula: '{{ suggest_to_date() }}'
 
+  - field_name: primary_key_field
+    label: Primary Key Field
+    form_placeholder: Select primary key field with unique record identifier
+    review_snippet: text.html
+    form_snippet: primary_key_field.html
+    validators: ignore_missing
+    form_include_blank_choice: true
 
   - field_name: dpp_suggestions
     label: DPP Suggestions

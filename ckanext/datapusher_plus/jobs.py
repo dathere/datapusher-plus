@@ -1336,6 +1336,11 @@ def _push_to_datastore(
     if package_suggestions:
         logger.trace(f"package_suggestions: {package_suggestions}")
         revise_update_content = {"package": package_suggestions}
+        
+        # Add cardinality and primary key candidate information to suggestions
+        revise_update_content["PRIMARY_KEY_CANDIDATES"] = formula_processor.dpp.get("PRIMARY_KEY_CANDIDATES", [])
+        revise_update_content["CARDINALITY"] = formula_processor.dpp.get("CARDINALITY", {})
+        
         try:
             status_msg = "PACKAGE suggestion formulae processed..."
             revise_update_content["STATUS"] = status_msg
@@ -1347,6 +1352,22 @@ def _push_to_datastore(
             logger.info(status_msg)
         except Exception as e:
             logger.error(f"Error revising package: {str(e)}")
+    else:
+        # Even if there are no package suggestions, store cardinality and primary key candidate info
+        try:
+            revise_update_content = {
+                "PRIMARY_KEY_CANDIDATES": formula_processor.dpp.get("PRIMARY_KEY_CANDIDATES", []),
+                "CARDINALITY": formula_processor.dpp.get("CARDINALITY", {}),
+                "STATUS": "DP+ metadata processed..."
+            }
+            revised_package = dsu.revise_package(
+                package_id, update={"dpp_suggestions": revise_update_content}
+            )
+            logger.trace(f"Package after revising with metadata: {revised_package}")
+            package = revised_package
+            logger.info("DP+ metadata processed and saved...")
+        except Exception as e:
+            logger.error(f"Error saving DP+ metadata: {str(e)}")
 
     # Process resource suggestion formulae
     # Note how we still update the PACKAGE dpp_suggestions field
