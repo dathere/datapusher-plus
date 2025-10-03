@@ -596,12 +596,12 @@ jobs:
           echo "file_name,reason_skipped" > /tmp/skipped_files.csv
           
           # Set path for CSV input file
-          CSV_INPUT_FILE="${GITHUB_WORKSPACE}/tests/$FILES_DIR/test_files.csv"
+          CSV_INPUT_FILE="${GITHUB_WORKSPACE}/tests/$FILES_DIR/base_files.csv"
           
           # Check if CSV input file exists
           if [ ! -f "$CSV_INPUT_FILE" ]; then
             echo "ERROR: CSV input file not found: $CSV_INPUT_FILE"
-            echo "Please ensure the tests/$FILES_DIR/test_files.csv file exists in your repository"
+            echo "Please ensure the tests/$FILES_DIR/base_files.csv file exists in your repository"
             echo "Expected CSV format: file_name,file_url,file_format,file_mimetype,file_description"
             exit 1
           fi
