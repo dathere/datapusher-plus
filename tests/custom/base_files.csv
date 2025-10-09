@@ -1,0 +1,24 @@
+file_name,file_url,file_format,file_mimetype,file_description
+sample-100kb,https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv,CSV,text/csv,100KB CSV test file
+sample-1mb,https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/1mb.csv,CSV,text/csv,1MB CSV test file
+sample-1mb,https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/1mb.csv,CSV,text/csv,1MB CSV test file
+precipsummer,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/static/PrecipSummer.csv,CSV,,
+all_month,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/all_month.csv,CSV,text/csv,Earthquake and seismic event data with location and magnitude information
+duplicate_headers,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/duplicate_headers.csv,CSV,text/csv,CSV file with duplicate column headers for testing
+excel_binary,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/excel_binary.xlsb,XLSB,application/vnd.ms-excel.sheet.binary.macroEnabled.12,Excel binary workbook file
+gz_source_150,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/gz_source_150.csv.gz,CSV.GZ,application/gzip,Gzipped CSV file with 150 rows
+gz_source,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/gz_source.csv,CSV,text/csv,CSV source file for gzip compression testing
+leading_zeros,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/leading_zeros.csv,CSV,text/csv,CSV file containing numeric values with leading zeros
+missing_headers,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/missing_headers.csv,CSV,text/csv,CSV file with missing or incomplete headers
+nested_zip,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/nested_zip.zip,ZIP,application/zip,ZIP archive containing nested compressed files
+NYC311_Civil_Services,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/NYC311_Civil_Services.csv,CSV,text/csv,NYC civil service exam results and eligible lists data
+quoted_newlines,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/quoted_newlines.csv,CSV,text/csv,CSV file with newline characters within quoted fields
+ragged_rows_150,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/ragged_rows_150.csv,CSV,text/csv,CSV file with inconsistent column counts (ragged rows) across 150 rows
+sample_200,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/sample_200.jsonl,JSONL,application/jsonl,JSON Lines file with 200 sample records
+semicolon_eu_numbers_150,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/semicolon_eu_numbers_150.csv,CSV,text/csv,Semicolon-delimited CSV with European number formatting (150 rows)
+test1,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/test1.csv,CSV,text/csv,Basic test CSV file
+TX-wys-2020-2021,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/TX-wys-2020-2021.xlsx,XLSX,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,Texas WYS data for 2020-2021 period
+TX-wys-2021-2022,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/TX-wys-2021-2022.xlsx,XLSX,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,Texas WYS data for 2021-2022 period
+unicode_emoji,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/unicode_emoji.tsv,TSV,text/tab-separated-values,Tab-separated values file containing Unicode emoji characters
+wide_120x120,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/wide_120x120.csv,CSV,text/csv,Wide CSV file with 120 columns and 120 rows
+zip_no_data_inside,https://raw.githubusercontent.com/dathere/datapusher-plus_testing/refs/heads/main/tests/dpp/zip_no_data_inside.zip,ZIP,application/zip,Empty ZIP archive or ZIP file with no data content
