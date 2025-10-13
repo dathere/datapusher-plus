@@ -1,0 +1,1242 @@
+name: Automated DataPusher+ Testing Run
+on:
+  workflow_dispatch:
+env:
+  FILES_DIR: "custom"
+  DATAPUSHER_BRANCH: "main"
+  CKAN_VERSION: "2.11"
+  POSTGRES_PASSWORD: postgres
+  CKAN_DB_PASSWORD: pass
+  CKAN_SITE_URL: http://localhost:5000
+  CKAN_SITE_ID: default
+  CKAN_SITE_TITLE: "CKAN Test Instance"
+  QSV_VER : "7.1.0"
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    container:
+      image: ckan/ckan-dev:2.11
+      options: --user root
+    services:
+      solr:
+        image: ckan/ckan-solr:2.11-solr9
+        ports: ["8983:8983"]
+      postgres:
+        image: ckan/ckan-postgres-dev:2.11
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
+      redis:
+        image: redis:3
+        ports: ["6379:6379"]
+    # Job-specific environment (these will be available inside the container)
+    env:
+      CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
+      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:pass@postgres/datastore_test
+      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:pass@postgres/datastore_test
+      CKAN_SOLR_URL: http://solr:8983/solr/ckan
+      CKAN_REDIS_URL: redis://redis:6379/1
+      CKAN_SITE_URL: http://localhost:5000
+    steps:
+      - name: Fix permissions and install essential tools
+        run: |
+          mkdir -p /__w/_temp
+          chmod -R 777 /__w/_temp  
+          chmod -R 777 /__w/  
+          apt-get update -y
+          apt-get install -y curl wget net-tools procps postgresql-client jq  
+          echo "Essential tools installed successfully"
+      - uses: actions/checkout@v4
+      - name: Wait for PostgreSQL to be ready
+        run: |
+          echo "Waiting for PostgreSQL to be ready..."
+          timeout=90
+          while [ $timeout -gt 0 ]; do
+            if PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "SELECT 1;" >/dev/null 2>&1; then
+              echo "PostgreSQL is ready!"
+              break
+            fi
+            echo "Postgres not ready yet ($timeout s left)..."
+            sleep 3
+            timeout=$((timeout-3))
+          done
+          if [ $timeout -le 0 ]; then
+            echo "Timeout waiting for PostgreSQL"
+            exit 1
+          fi
+      - name: Setup database users and permissions
+        run: |
+          set -eu 
+          echo "Creating database users (if not exist)..."
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='ckan_default'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='datastore_write'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_write WITH PASSWORD '$CKAN_DB_PASSWORD';"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='datastore_read'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER datastore_read WITH PASSWORD '$CKAN_DB_PASSWORD';"
+          echo "Creating databases (if not exist)..."
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='ckan_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='datastore_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;"
+          echo "Granting permissions (best-effort)..."
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"  
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"  
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;"  
+          echo "Database setup completed"
+      - name: Install requirements, ckanapi and datapusher-plus
+        run: |
+          set -eu
+          # Use pip from the container (image usually has Python/pip)
+          python3 -m pip install --upgrade pip setuptools wheel  
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt  
+          fi
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt  
+          fi
+          # install current repo editable if present
+          if [ -f setup.py ] || [ -f pyproject.toml ]; then
+            pip install -e .  
+          fi
+          # Ensure ckanapi and datapusher-plus are available
+          pip install --upgrade ckanapi
+          pip install datasize
+          apt install -y python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev uchardet unzip  
+          # Install datapusher-plus package (the pip package name is typically datapusher-plus)
+          echo "Installing datapusher-plus from branch: $DATAPUSHER_BRANCH"
+          pip install -e "git+https://github.com/dathere/datapusher-plus.git@$DATAPUSHER_BRANCH#egg=datapusher-plus"  
+          pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'  
+          echo "Installed ckanapi and datapusher-plus (best-effort)"
+      - name: Install qsv (musl static)
+        run: |
+          set -eu
+          echo "Attempting to download static qsv musl binary (best-effort)..."
+          QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
+          QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
+          mkdir -p /tmp/qsv && cd /tmp/qsv  
+          if wget -q --spider "$QSV_URL"; then
+            wget -q "$QSV_URL" -O "$QSV_ZIP"  
+            unzip -o "$QSV_ZIP"  
+            # try to find 'qsv' or 'qsvdp' binary
+            if [ -f qsvdp ]; then
+              mv qsvdp /usr/local/bin/qsvdp  
+              chmod +x /usr/local/bin/qsvdp  
+              echo "Installed qsvdp to /usr/local/bin/qsvdp"
+            elif [ -f qsv ]; then
+              mv qsv /usr/local/bin/qsv  
+              chmod +x /usr/local/bin/qsv  
+              echo "Installed qsv to /usr/local/bin/qsv"
+            else
+              echo "Downloaded archive but could not find qsv binary inside"
+            fi
+          else
+            echo "qsv release URL not reachable; skipping qsv install"
+          fi
+          /usr/local/bin/qsvdp --version >/dev/null 2>&1 || /usr/local/bin/qsv --version >/dev/null 2>&1 || echo "qsv not installed or not runnable (this is okay for plugin presence test)."
+      
+      - name: Setup CKAN configuration (/srv/app/src/ckan/test-core.ini)
+        run: |
+          set -eu
+          # Defensive URL substitutions (keep these)
+          sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}|g" /srv/app/src/ckan/test-core.ini  
+          sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL:-***postgres/datastore_test}|g" /srv/app/src/ckan/test-core.ini  
+          sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL:-***postgres/datastore_test}|g" /srv/app/src/ckan/test-core.ini  
+          if ! grep -q "^solr_url" /srv/app/src/ckan/test-core.ini; then
+            echo "solr_url = ${CKAN_SOLR_URL:-http://solr:8983/solr/ckan}" >> /srv/app/src/ckan/test-core.ini
+          fi
+          if ! grep -q "^ckan.redis.url" /srv/app/src/ckan/test-core.ini; then
+            echo "ckan.redis.url = ${CKAN_REDIS_URL:-redis://redis:6379/1}" >> /srv/app/src/ckan/test-core.ini
+          fi
+          # Desired values (use env vars when present, otherwise fall back)
+          CKAN_SITE_URL="${CKAN_SITE_URL:-http://localhost:5000}"
+          CKAN_SQLALCHEMY_URL="${CKAN_SQLALCHEMY_URL:-***postgres/ckan_test}"
+          CKAN_DATASTORE_WRITE_URL="${CKAN_DATASTORE_WRITE_URL:-***postgres/datastore_test}"
+          CKAN_DATASTORE_READ_URL="${CKAN_DATASTORE_READ_URL:-***postgres/datastore_test}"
+          CKAN_SOLR_URL="${CKAN_SOLR_URL:-http://solr:8983/solr/ckan}"
+          CKAN_REDIS_URL="${CKAN_REDIS_URL:-redis://redis:6379/1}"
+          # create temp files to hold lists (POSIX sh-safe)
+          REPLACE_FILE="$(mktemp)"
+          ADD_FILE="$(mktemp)"
+          MISSING_ADD_FILE="$(mktemp)"
+          : > "$REPLACE_FILE"
+          : > "$ADD_FILE"
+          : > "$MISSING_ADD_FILE"
+          # REPLACE_ENTRIES (key|value) - write expanded lines to REPLACE_FILE
+          printf '%s\n' \
+            "ckan.site_url|${CKAN_SITE_URL}" \
+            "sqlalchemy.url|${CKAN_SQLALCHEMY_URL}" \
+            "ckan.datastore.write_url|${CKAN_DATASTORE_WRITE_URL}" \
+            "ckan.datastore.read_url|${CKAN_DATASTORE_READ_URL}" \
+            "solr_url|${CKAN_SOLR_URL}" \
+            "ckan.redis.url|${CKAN_REDIS_URL}" \
+            > "$REPLACE_FILE"
+          # ADD_LINES content (one entry per line). Comments start with '#'
+          cat > "$ADD_FILE" <<'EOF'
+          ckan.site_id = default
+          ckan.site_title = CKAN Test
+          ckan.auth.create_default_api_keys = true
+          ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
+          scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
+          scheming.presets = ckanext.scheming:presets.json
+          scheming.dataset_fallback = false
+          ckanext.datapusher_plus.use_proxy = false
+          ckanext.datapusher_plus.download_proxy = 
+          ckanext.datapusher_plus.ssl_verify = false
+          # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
+          ckanext.datapusher_plus.upload_log_level = INFO
+          ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+          ckanext.datapusher_plus.pii_screening = false
+          ckanext.datapusher_plus.pii_found_abort = false
+          ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
+          ckanext.datapusher_plus.pii_show_candidates = false
+          ckanext.datapusher_plus.pii_quick_screen = false
+          ckanext.datapusher_plus.preview_rows = 100
+          ckanext.datapusher_plus.download_timeout = 300
+          ckanext.datapusher_plus.max_content_length = 1256000000000
+          ckanext.datapusher_plus.chunk_size = 16384
+          ckanext.datapusher_plus.default_excel_sheet = 0
+          ckanext.datapusher_plus.sort_and_dupe_check = true
+          ckanext.datapusher_plus.dedup = false
+          ckanext.datapusher_plus.unsafe_prefix = unsafe_
+          ckanext.datapusher_plus.reserved_colnames = _id
+          ckanext.datapusher_plus.prefer_dmy = false
+          ckanext.datapusher_plus.ignore_file_hash = true
+          ckanext.datapusher_plus.auto_index_threshold = 3
+          ckanext.datapusher_plus.auto_index_dates = true
+          ckanext.datapusher_plus.auto_unique_index = true
+          ckanext.datapusher_plus.summary_stats_options =
+          ckanext.datapusher_plus.add_summary_stats_resource = false
+          ckanext.datapusher_plus.summary_stats_with_preview = false
+          ckanext.datapusher_plus.qsv_stats_string_max_length = 32767
+          ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created
+          ckanext.datapusher_plus.qsv_freq_limit = 10
+          ckanext.datapusher_plus.auto_alias = true
+          ckanext.datapusher_plus.auto_alias_unique = false
+          ckanext.datapusher_plus.copy_readbuffer_size = 1048576
+          ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
+          ckanext.datapusher_plus.auto_spatial_simplication = true
+          ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+          ckanext.datapusher_plus.latitude_fields = latitude,lat
+          ckanext.datapusher_plus.longitude_fields = longitude,long,lon
+          ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+          ckanext.datapusher_plus.auto_unzip_one_file = true
+          EOF
+          if [ -f /srv/app/src/ckan/test-core.ini ]; then
+            echo "Patching selective keys in /srv/app/src/ckan/test-core.ini (only the keys you listed)..."
+            # Ensure single debug = true under [DEFAULT]: remove existing debug lines in DEFAULT then add one
+            awk 'BEGIN{in=0}
+              /^\[DEFAULT\]/{ print; in=1; next }
+              /^\[.*\]/{ if(in){ print "debug = true"; in=0 } }
+              {
+                if(in){
+                  if($1 == "debug") next
+                  print
+                } else {
+                  print
+                }
+              }
+              END { if(in) print "debug = true" }' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.tmp && mv /srv/app/src/ckan/test-core.ini.tmp /srv/app/src/ckan/test-core.ini
+            # Process REPLACE_FILE: replace if present, otherwise write to missing file
+            while IFS= read -r entry || [ -n "$entry" ]; do
+              key="$(printf '%s' "$entry" | cut -d'|' -f1)"
+              value="$(printf '%s' "$entry" | cut -d'|' -f2-)"
+              # escape backslashes and ampersands for sed replacement
+              esc_value="$(printf '%s' "$value" | sed -e 's/[\/&]/\\&/g')"
+              if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /srv/app/src/ckan/test-core.ini; then
+                sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /srv/app/src/ckan/test-core.ini  
+              else
+                printf '%s\n' "${key} = ${value}" >> "$MISSING_ADD_FILE"
+              fi
+            done < "$REPLACE_FILE"
+            # Process ADD_FILE: replace if present, otherwise collect to missing file
+            while IFS= read -r ln || [ -n "$ln" ]; do
+              # comment lines - check if exact comment exists
+              case "$ln" in
+                \#*)
+                  if ! grep -Fq "$ln" /srv/app/src/ckan/test-core.ini; then
+                    printf '%s\n' "$ln" >> "$MISSING_ADD_FILE"
+                  fi
+                  ;;
+                *)
+                  key="$(printf '%s' "$ln" | cut -d'=' -f1 | sed 's/[[:space:]]*$//')"
+                  value="$(printf '%s' "$ln" | cut -d'=' -f2- | sed 's/^[[:space:]]*//')"
+                  esc_value="$(printf '%s' "$value" | sed -e 's/[\/&]/\\&/g')"
+                  if grep -q -E "^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=" /srv/app/src/ckan/test-core.ini; then
+                    sed -i -E "s|^[[:space:]]*$(printf '%s' "$key" | sed 's/[][^$.*/]/\\&/g')[[:space:]]*=.*|${key} = ${esc_value}|g" /srv/app/src/ckan/test-core.ini  
+                  else
+                    printf '%s\n' "${key} = ${value}" >> "$MISSING_ADD_FILE"
+                  fi
+                  ;;
+              esac
+            done < "$ADD_FILE"
+            # If there are missing lines, insert them after the first [app:main] header, or append the section
+            if [ -s "$MISSING_ADD_FILE" ]; then
+              awk -v addfile="$MISSING_ADD_FILE" '
+                BEGIN{
+                  inserted=0
+                  while ((getline line < addfile) > 0) { add[++na]=line }
+                  close(addfile)
+                }
+                {
+                  print
+                  if(!inserted && $0=="[app:main]") {
+                    for(i=1;i<=na;i++) print add[i]
+                    inserted=1
+                  }
+                }
+                END{
+                  if(!inserted){
+                    print "[app:main]"
+                    for(i=1;i<=na;i++) print add[i]
+                  }
+                }' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.new && mv /srv/app/src/ckan/test-core.ini.new /srv/app/src/ckan/test-core.ini
+            fi
+            # Final defensive catch: ensure sqlalchemy and datastore URLs reflect env (again)
+            sed -i "s|^sqlalchemy.url.*|sqlalchemy.url = ${CKAN_SQLALCHEMY_URL}|g" /srv/app/src/ckan/test-core.ini  
+            sed -i "s|^ckan.datastore.write_url.*|ckan.datastore.write_url = ${CKAN_DATASTORE_WRITE_URL}|g" /srv/app/src/ckan/test-core.ini  
+            sed -i "s|^ckan.datastore.read_url.*|ckan.datastore.read_url = ${CKAN_DATASTORE_READ_URL}|g" /srv/app/src/ckan/test-core.ini  
+          else
+            echo "/srv/app/src/ckan/test-core.ini not found — no selective patching performed."
+          fi
+          # Append datapusher plugin(s) to ckan.plugins if present; otherwise add a plugins line
+          REQUIRED_PLUGINS="datastore datapusher_plus scheming_datasets"
+          if grep -q "^ckan.plugins" /srv/app/src/ckan/test-core.ini; then
+            echo "Appending required plugins to existing ckan.plugins line"
+            current=$(grep "^ckan.plugins" /srv/app/src/ckan/test-core.ini | head -n1 | cut -d'=' -f2-)
+            for p in $REQUIRED_PLUGINS; do
+              echo "$current" | grep -qw "$p" || current="$current $p"
+            done
+            awk -v new="ckan.plugins = $current" 'BEGIN{done=0} {if(!done && $1=="ckan.plugins") {print new; done=1} else print $0}' /srv/app/src/ckan/test-core.ini > /srv/app/src/ckan/test-core.ini.new && mv /srv/app/src/ckan/test-core.ini.new /srv/app/src/ckan/test-core.ini
+          else
+            echo "ckan.plugins = $REQUIRED_PLUGINS" >> /srv/app/src/ckan/test-core.ini
+            echo "Added ckan.plugins line with required plugins."
+          fi
+          echo "---- /srv/app/src/ckan/test-core.ini (cat) ----"
+          cat /srv/app/src/ckan/test-core.ini  
+          echo "---- end ----"
+      - name: Initialize CKAN database
+        run: |
+          
+          echo "Testing connectivity with CKAN DB user..."
+          if ! PGPASSWORD=$CKAN_DB_PASSWORD psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
+            echo "Cannot connect as ckan_default. Attempting to create database owner and db..."
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER IF NOT EXISTS ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';"  
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE IF NOT EXISTS ckan_test OWNER ckan_default;"  
+          fi
+          echo "Running ckan db init (may be idempotent)..."
+          if ckan -c /srv/app/src/ckan/test-core.ini db init; then
+            echo "CKAN DB initialized."
+          else
+            echo "ckan db init returned non-zero; continuing (may already be initialized)."
+          fi
+          echo "Setting datastore permissions..."
+          if ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
+            echo "Datastore permissions set."
+          else
+            echo "Datastore permission step returned non-zero; continuing."
+          fi
+      - name: Start CKAN server
+        run: |
+          set -eu
+          echo "Starting CKAN server in background..."
+          # Use nohup to keep it running in background
+          nohup ckan -c /srv/app/src/ckan/test-core.ini run --host 0.0.0.0 --port 5000 --disable-reloader > /tmp/ckan_stdout.log 2>&1 &
+          CKAN_PID=$!
+          echo "CKAN PID=$CKAN_PID"
+          # wait for port / API
+          timeout=120
+          while [ $timeout -gt 0 ]; do
+            if ! kill -0 "$CKAN_PID" >/dev/null 2>&1; then
+              echo "CKAN process died. Showing last lines of log:"
+              tail -n 200 /tmp/ckan_stdout.log  
+              exit 1
+            fi
+            if curl -fsS "${CKAN_SITE_URL}/api/3/action/status_show" >/dev/null 2>&1; then
+              echo "CKAN API responding"
+              break
+            fi
+            echo "Waiting for CKAN API... ($timeout s left)"
+            sleep 3
+            timeout=$((timeout-3))
+          done
+          if [ $timeout -le 0 ]; then
+            echo "Timeout waiting for CKAN to start. Dumping logs..."
+            tail -n 200 /tmp/ckan_stdout.log  
+            ss -tlnp || netstat -tlnp  
+            exit 1
+          fi
+          echo "CKAN started successfully"
+          
+      - name: Create sysadmin user admin_ckan and get apikey
+        run: |
+          set -eu
+          echo "Creating user admin_ckan..."
+          
+          user_response=$(ckanapi action user_create --config /srv/app/src/ckan/test-core.ini \
+            name=admin_ckan \
+            email=admins@example.com \
+            password=test1234 \
+            fullname="CKAN Administrator" \
+            with_apitoken=true \
+            about="Created by GitHub Actions test" 2>/dev/null) || echo "user_create returned non-zero (user may already exist)"
+          
+          echo "User creation response: $user_response"
+          echo "Converting admin_ckan user to sysadmin..."
+          ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin_ckan
+          echo "User admin_ckan promoted to sysadmin"
+          
+          # Extract only the JSON part (everything from { to })
+          json_response=$(echo "$user_response" | sed -n '/{/,/}/p')
+          
+          # Extract API key from the JSON
+          api_key=$(echo "$json_response" | jq -r '.token // empty')
+          
+          if [ -n "$api_key" ] && [ "$api_key" != "null" ] && [ "$api_key" != "empty" ]; then
+            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+            echo "API key saved: $api_key"
+          else
+            echo "No API key found in response"
+          fi
+          
+          echo "User admin_ckan creation completed"
+           
+      - name: Create API token for datapusher-plus and add to config
+        run: |
+          set -eu
+          echo "Creating API token for datapusher-plus service account..."
+          
+          # Create API token for admin_ckan user specifically for datapusher-plus
+          echo "Running: ckan user token add admin_ckan dpplus"
+          dp_token_output=$(ckan -c /srv/app/src/ckan/test-core.ini user token add admin_ckan dpplus 2>&1)
+          echo "Full token creation output:"
+          echo "$dp_token_output"
+          
+          dp_token=$(echo "$dp_token_output" | tail -n 1 | tr -d '\t')
+          echo "Extracted token: '$dp_token'"
+          
+          if [ -n "$dp_token" ] && [ "$dp_token" != "null" ]; then
+            echo "Created datapusher-plus API token: $dp_token"
+            
+            # Add the token to the CKAN configuration file
+            ckan config-tool /srv/app/src/ckan/test-core.ini "ckanext.datapusher_plus.api_token=$dp_token"
+            
+            # Verify it was added
+            echo "Verifying token was added to config:"
+            grep "ckanext.datapusher_plus.api_token" /srv/app/src/ckan/test-core.ini || echo "Token not found in config!"
+            
+            # Also set in environment for potential use in other steps
+            echo "DATAPUSHER_PLUS_API_TOKEN=$dp_token" >> $GITHUB_ENV
+            
+            echo "API token added to CKAN configuration successfully"
+          else
+            echo "Failed to create API token for datapusher-plus"
+            echo "Using main CKAN API key as fallback..."
+            ckan config-tool /srv/app/src/ckan/test-core.ini "ckanext.datapusher_plus.api_token=$CKAN_API_KEY"
+          fi
+      - name: Create organization with ckanapi
+        run: |
+          set -eu
+          echo "Creating organization demo-organization (idempotent)..."
+          ckanapi action organization_create --config /srv/app/src/ckan/test-core.ini \
+            name=demo-organization \
+            title="Demo Data Publishing Organization" \
+            description="Demo org created by GitHub Actions for datapusher-plus testing." || echo "organization_create returned non-zero (may already exist)"
+          echo "Add admin_ckan as admin to the organization"
+          ckanapi action organization_member_create --config /srv/app/src/ckan/test-core.ini \
+            id=demo-organization username=admin_ckan role=admin || echo "organization_member_create returned non-zero (may already be member)"
+      
+      - name: Create dataset with ckanapi
+        run: |
+          set -eu
+          echo "Creating dataset my-first-dataset (idempotent)..."
+          if ckanapi action package_create \
+            name=my-first-dataset \
+            title="My First Comprehensive Dataset" \
+            notes="This is a comprehensive demo dataset created via ckanapi and GitHub Actions for testing CKAN functionality and datapusher-plus integration." \
+            owner_org=demo-organization \
+            license_id=cc-by \
+            version=1.0.0 \
+            author="GitHub Actions Automation" \
+            author_email=noreply@example.com \
+            maintainer="CKAN Admin" \
+            maintainer_email=admin@example.com \
+            url=https://github.com/your-repo/your-project \
+            private:false \
+            state=active \
+            'tags:[{"name":"demo"},{"name":"test"},{"name":"github-actions"},{"name":"automation"},{"name":"csv-data"},{"name":"datapusher-plus"}]' \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Dataset created successfully!"
+          else
+            echo "Dataset might already exist, continuing..."
+          fi
+      - name: Add resource to dataset with ckanapi
+        run: |
+          set -eu
+          echo "Adding resource to my-first-dataset..."
+          if ckanapi action resource_create \
+            package_id=my-first-dataset \
+            url="https://raw.githubusercontent.com/frictionlessdata/test-data/master/files/csv/100kb.csv" \
+            name="Sample CSV Data - 100KB Test File" \
+            description="Test CSV resource for datapusher-plus pipeline." \
+            format=CSV \
+            mimetype="text/csv" \
+            -c /srv/app/src/ckan/test-core.ini; then
+            echo "Resource created successfully!"
+          else
+            echo "Resource creation failed"
+            ckanapi action package_show id=my-first-dataset -c /srv/app/src/ckan/test-core.ini  
+            exit 1
+          fi
+          
+      - name: Display CKAN instance inventory
+        run: |
+          set -eu
+          echo "=== CKAN Status (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/status_show" | python3 -m json.tool  
+          echo ""
+          echo "=== All Datasets (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/package_list" | python3 -m json.tool  
+          echo ""
+          echo "=== All Organizations (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/organization_list" | python3 -m json.tool  
+          echo ""
+          echo "=== All Users (HTTP API) ==="
+          curl -s "http://localhost:5000/api/3/action/user_list" | python3 -m json.tool  
+      - name: Test datastore functionality
+        run: |
+          set -eu
+          echo "Testing datastore functionality..."
+          
+          # Test 1: Check if datastore is accessible by querying table metadata
+          echo "=== Testing datastore read access ==="
+          metadata_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=_table_metadata")
+          echo "Table metadata response: $metadata_response"
+          
+          if echo "$metadata_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ Datastore read access working"
+          else
+            echo "✗ Datastore read access failed"
+            exit 1
+          fi
+          
+          # Test 2: Create a test datastore table
+          echo "=== Testing datastore write access ==="
+          test_response=$(curl -s -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: $CKAN_API_KEY" \
+            -d '{
+              "resource": {"package_id": "my-first-dataset"},
+              "fields": [{"id": "test_col", "type": "text"}, {"id": "value", "type": "int"}],
+              "records": [{"test_col": "hello", "value": 1}, {"test_col": "world", "value": 2}]
+            }' \
+            "http://localhost:5000/api/3/action/datastore_create")
+          
+          echo "Test table creation response: $test_response"
+          
+          if echo "$test_response" | jq -e '.success == true' >/dev/null 2>&1; then
+            echo "✓ Datastore write access working"
+            
+            # Extract resource_id for cleanup
+            test_resource_id=$(echo "$test_response" | jq -r '.result.resource_id')
+            
+            # Test 3: Query the test table
+            echo "=== Testing datastore query ==="
+            query_response=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$test_resource_id")
+            echo "Query response: $query_response"
+            
+            # Cleanup: Delete test table
+            echo "=== Cleaning up test table ==="
+            curl -s -X POST \
+              -H "Content-Type: application/json" \
+              -H "Authorization: $CKAN_API_KEY" \
+              -d "{\"resource_id\": \"$test_resource_id\"}" \
+              "http://localhost:5000/api/3/action/datastore_delete" >/dev/null
+            
+            echo "✓ Datastore functionality test completed successfully"
+          else
+            echo "✗ Datastore write access failed"
+          fi
+      - name: Start CKAN background job worker
+        run: |
+          set -eu
+          echo "Starting CKAN background job worker (CRITICAL for DataPusher Plus)..."
+          nohup ckan -c /srv/app/src/ckan/test-core.ini jobs worker > /tmp/ckan_worker.log 2>&1 &
+          WORKER_PID=$!
+          echo "CKAN Worker PID=$WORKER_PID"
+          echo "CKAN_WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
+          
+          # Give worker a moment to start up
+          sleep 5
+          
+          # Verify worker is running
+          if kill -0 "$WORKER_PID" >/dev/null 2>&1; then
+            echo "Background job worker started successfully"
+            echo "Worker logs:"
+            head -n 20 /tmp/ckan_worker.log || echo "No worker logs yet"
+          else
+            echo "Worker failed to start"
+            cat /tmp/ckan_worker.log
+            exit 1
+          fi
+
+
+          
+      - name: Test DataPusher Plus functionality - Remote Files (CSV Input)
+        run: |
+          set -eu
+          echo "=== Testing DataPusher Plus Functionality - Remote Files from CSV ==="
+          
+          # Initialize results tracking
+          echo "timestamp,file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message" > /tmp/test_results.csv
+          
+          # Initialize skipped files tracking
+          echo "file_name,reason_skipped" > /tmp/skipped_files.csv
+          
+          # Set path for CSV input file
+          CSV_INPUT_FILE="${GITHUB_WORKSPACE}/tests/$FILES_DIR/base_files.csv"
+          
+          # Check if CSV input file exists
+          if [ ! -f "$CSV_INPUT_FILE" ]; then
+            echo "ERROR: CSV input file not found: $CSV_INPUT_FILE"
+            echo "Please ensure the tests/$FILES_DIR/base_files.csv file exists in your repository"
+            echo "Expected CSV format: file_name,file_url,file_format,file_mimetype,file_description"
+            exit 1
+          fi
+          
+          echo "Using CSV input file: $CSV_INPUT_FILE"
+          echo "CSV file size: $(du -h "$CSV_INPUT_FILE" | cut -f1)"
+          echo ""
+          
+          # Validate CSV structure
+          echo "Validating CSV structure..."
+          header=$(head -n 1 "$CSV_INPUT_FILE")
+          echo "CSV Header: $header"
+          
+          # Check if header contains required columns
+          if ! echo "$header" | grep -qi "file_url"; then
+            echo "ERROR: CSV must contain 'file_url' column"
+            echo "Expected format: file_name,file_url,file_format,file_mimetype,file_description"
+            exit 1
+          fi
+          
+          # Count total entries in CSV
+          total_entries=$(tail -n +2 "$CSV_INPUT_FILE" | grep -v '^[[:space:]]*$' | wc -l)
+          echo "Total entries in CSV: $total_entries"
+          echo ""
+          
+          # Display first few entries for verification
+          echo "First 5 entries from CSV:"
+          head -n 6 "$CSV_INPUT_FILE"
+          echo ""
+          
+          # Create test dataset once
+          echo "Creating test dataset for DataPusher Plus..."
+          if ckanapi action package_create \
+            name=datapusher-plus-test-remote \
+            title="DataPusher Plus Remote Files Test Dataset" \
+            owner_org=demo-organization \
+            -c /srv/app/src/ckan/test-core.ini >/dev/null 2>&1; then
+            echo "Test dataset created"
+          else
+            echo "Test dataset might already exist, continuing..."
+          fi
+          
+          # Initialize counters
+          total_files=0
+          passed_files=0
+          failed_files=0
+          skipped_files=0
+          
+          # Process each line from CSV (skip header)
+          tail -n +2 "$CSV_INPUT_FILE" | while IFS=',' read -r file_name file_url file_format file_mimetype file_desc || [ -n "$file_name" ]; do
+            # Skip empty lines and comments
+            [ -z "$file_name" ] && continue
+            case "$file_name" in
+              '#'*) continue ;;
+              ''|*[[:space:]]*) 
+                # Skip lines with only whitespace
+                [ -z "$(echo "$file_name" | tr -d '[:space:]')" ] && continue
+                ;;
+            esac
+            
+            # Trim whitespace from all fields
+            file_name=$(echo "$file_name" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            file_url=$(echo "$file_url" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '"')
+            file_format=$(echo "$file_format" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            file_mimetype=$(echo "$file_mimetype" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            file_desc=$(echo "$file_desc" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            # Validate required fields
+            if [ -z "$file_url" ]; then
+              echo "SKIP: Missing URL for file: $file_name"
+              echo "$file_name,Missing file_url in CSV" >> /tmp/skipped_files.csv
+              skipped_files=$((skipped_files + 1))
+              continue
+            fi
+            
+            # Set defaults if fields are empty
+            [ -z "$file_name" ] && file_name=$(basename "$file_url")
+            [ -z "$file_format" ] && file_format="UNKNOWN"
+            [ -z "$file_mimetype" ] && file_mimetype="application/octet-stream"
+            [ -z "$file_desc" ] && file_desc="Remote file: $file_name"
+            
+            # Test if URL is accessible
+            echo "Testing accessibility of: $file_url"
+            if ! curl -s --head --max-time 10 "$file_url" > /dev/null 2>&1; then
+              echo "SKIP: File not accessible via HTTP: $file_url"
+              echo "$file_name,File not accessible or timed out" >> /tmp/skipped_files.csv
+              skipped_files=$((skipped_files + 1))
+              continue
+            fi
+            
+            total_files=$((total_files + 1))
+            echo ""
+            echo "=========================================="
+            echo "Testing File #${total_files}: $file_name"
+            echo "URL: $file_url"
+            echo "Format: $file_format"
+            echo "Description: $file_desc"
+            
+            # Try to get file size
+            file_size=$(curl -sI "$file_url" | grep -i content-length | cut -d' ' -f2 | tr -d '\r' || echo "unknown")
+            echo "File size: $file_size bytes"
+            echo "=========================================="
+            
+            # Initialize tracking variables for this file
+            start_time=$(date +%s)
+            upload_status="FAILED"
+            resource_id=""
+            datapusher_status="N/A"
+            datastore_active="false"
+            rows_imported="0"
+            error_message=""
+            
+            # Create resource with URL for this test file
+            echo "Creating resource with URL for $file_name..."
+            if resource_response=$(ckanapi action resource_create \
+              package_id=datapusher-plus-test-remote \
+              url="$file_url" \
+              name="Remote Test: $file_name" \
+              description="$file_desc" \
+              format="$file_format" \
+              mimetype="$file_mimetype" \
+              -c /srv/app/src/ckan/test-core.ini 2>&1); then
+              
+              echo "Resource created successfully for $file_name"
+              upload_status="SUCCESS"
+              
+              # Extract resource ID
+              resource_id=$(echo "$resource_response" | grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+              
+              if [ -z "$resource_id" ]; then
+                resource_id=$(echo "$resource_response" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([a-f0-9-]*\)".*/\1/p')
+              fi
+              
+              echo "Resource ID: $resource_id"
+              
+              if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
+                # Monitor DataPusher Plus processing
+                echo "Monitoring DataPusher Plus processing for $file_name..."
+                max_attempts=90  # 3 minutes max per file
+                
+                for attempt in $(seq 1 $max_attempts); do
+                  sleep 2
+                  
+                  # Check DataPusher status
+                  if dp_status_response=$(curl -s -H "Authorization: $CKAN_API_KEY" \
+                    "http://localhost:5000/api/3/action/datapusher_status?resource_id=$resource_id" 2>/dev/null); then
+                    
+                    if echo "$dp_status_response" | grep -q '"success"[[:space:]]*:[[:space:]]*true'; then
+                      datapusher_status=$(echo "$dp_status_response" | grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"status"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+                      
+                      if [ -z "$datapusher_status" ]; then
+                        datapusher_status="unknown"
+                      fi
+                      
+                      # Clean up status string
+                      datapusher_status=$(echo "$datapusher_status" | tr -d '\n\r\t ' | cut -c1-10)
+                      
+                      echo "  Attempt $attempt/$max_attempts: DataPusher status = $datapusher_status"
+                      
+                      if [ "$datapusher_status" = "complete" ]; then
+                        echo "  ✓ DataPusher processing completed for $file_name!"
+                        break
+                      elif [ "$datapusher_status" = "error" ]; then
+                        error_info=$(echo "$dp_status_response" | grep -o '"message"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"message"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' | head -1)
+                        if [ -z "$error_info" ]; then
+                          error_info="DataPusher processing error"
+                        fi
+                        error_message="DataPusher error: $error_info"
+                        echo "  ✗ DataPusher processing failed for $file_name: $error_message"
+                        break
+                      fi
+                    else
+                      # API returned success=false
+                      if [ $attempt -eq $max_attempts ]; then
+                        error_message="DataPusher status API returned success=false"
+                        echo "  ✗ DataPusher status API error for $file_name"
+                      fi
+                    fi
+                  else
+                    # Curl failed
+                    if [ $attempt -eq $max_attempts ]; then
+                      error_message="Failed to get DataPusher status"
+                      echo "  ✗ Cannot reach DataPusher status API for $file_name"
+                    fi
+                  fi
+                  
+                  # Progress indicator
+                  if [ $((attempt % 15)) -eq 0 ]; then
+                    echo "  Still processing $file_name... (${attempt}/${max_attempts})"
+                  fi
+                done
+                
+                # Check final resource status
+                echo "Checking final status for $file_name..."
+                if final_resource=$(curl -s "http://localhost:5000/api/3/action/resource_show?id=$resource_id" 2>/dev/null); then
+                  if echo "$final_resource" | grep -q '"datastore_active"[[:space:]]*:[[:space:]]*true'; then
+                    datastore_active="true"
+                    echo "  ✓ DataStore activated for $file_name"
+                    
+                    # Get row count
+                    if datastore_data=$(curl -s "http://localhost:5000/api/3/action/datastore_search?resource_id=$resource_id&limit=1" 2>/dev/null); then
+                      rows_imported=$(echo "$datastore_data" | grep -o '"total"[[:space:]]*:[[:space:]]*[0-9]*' | sed 's/.*"total"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/')
+                      if [ -z "$rows_imported" ]; then
+                        rows_imported="0"
+                      fi
+                      echo "  ✓ Rows imported for $file_name: $rows_imported"
+                    fi
+                  else
+                    datastore_active="false"
+                    echo "  ✗ DataStore not activated for $file_name"
+                  fi
+                else
+                  echo "  ✗ Cannot check final resource status for $file_name"
+                fi
+              else
+                error_message="No valid resource ID extracted for $file_name"
+                echo "  ✗ $error_message"
+              fi
+            else
+              echo "  ✗ Resource creation failed for $file_name"
+              error_message="Resource creation failed: $(echo "$resource_response" | head -1)"
+            fi
+            
+            # Calculate processing time
+            end_time=$(date +%s)
+            processing_time=$((end_time - start_time))
+            
+            # Log results for this file
+            timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+            echo "$timestamp,$file_name,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message\"" >> /tmp/test_results.csv
+            
+            # Update counters
+            if [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "true" ]; then
+              passed_files=$((passed_files + 1))
+              echo "  🎉 PASS: $file_name processed successfully"
+            else
+              failed_files=$((failed_files + 1))
+              echo "  ❌ FAIL: $file_name had issues"
+            fi
+            
+            echo "  Processing time: ${processing_time}s"
+            
+            # Brief pause between files to avoid overwhelming the system
+            echo "  Waiting 3 seconds before next file..."
+            sleep 3
+            
+          done
+          
+          # Count skipped files from CSV
+          if [ -f /tmp/skipped_files.csv ]; then
+            skipped_count=$(tail -n +2 /tmp/skipped_files.csv | wc -l)
+            skipped_files=$skipped_count
+          fi
+          
+          echo ""
+          echo "=========================================="
+          echo "=== FINAL TEST RESULTS SUMMARY ==="
+          echo "=========================================="
+          echo "Total files in CSV: $total_entries"
+          echo "Files tested: $total_files"
+          echo "Files skipped: $skipped_files"
+          echo "Passed: $passed_files"
+          echo "Failed: $failed_files"
+          
+          if [ $total_files -gt 0 ]; then
+            echo "Success rate (of tested files): $(( passed_files * 100 / total_files ))%"
+          else
+            echo "No files were tested"
+          fi
+          echo ""
+          
+          echo "=== Detailed Results ==="
+          echo "Results saved to: /tmp/test_results.csv"
+          cat /tmp/test_results.csv
+          echo ""
+          
+          if [ $skipped_files -gt 0 ]; then
+            echo "=== Skipped Files ==="
+            echo "Skipped files saved to: /tmp/skipped_files.csv"
+            cat /tmp/skipped_files.csv
+            echo ""
+          fi
+          
+          # Determine overall result
+          if [ $total_files -eq 0 ] && [ $skipped_files -gt 0 ]; then
+            echo ""
+            echo "⚠ OVERALL RESULT: NO TESTABLE FILES"
+            echo "All files in CSV were skipped - check URLs and accessibility"
+          elif [ $total_files -eq 0 ]; then
+            echo ""
+            echo "⚠ OVERALL RESULT: NO FILES TESTED"
+            echo "No valid entries found in CSV file"
+          elif [ $failed_files -eq 0 ] && [ $passed_files -gt 0 ]; then
+            echo ""
+            echo "🎉 OVERALL RESULT: ALL TESTED FILES PASSED"
+            echo "DataPusher Plus is working correctly with all testable remote files"
+          elif [ $passed_files -gt 0 ]; then
+            echo ""
+            echo "⚠ OVERALL RESULT: PARTIAL SUCCESS"
+            echo "DataPusher Plus works with some remote files but has issues with others"
+          else
+            echo ""
+            echo "❌ OVERALL RESULT: ALL TESTED FILES FAILED"
+            echo "DataPusher Plus is not working correctly with remote files"
+          fi
+          
+          echo ""
+          echo "Test completed at: $(date)"
+
+      - name: Generate Combined Test Results and Worker Analysis
+        if: always()
+        run: |
+          set -eu
+          echo "=== Generating Combined Test Results and Worker Analysis ==="
+          
+          # First, process worker logs if they exist
+          echo "=== Processing DataPusher Plus Worker Logs ==="
+          
+          # Check if worker log exists
+          if [ ! -f /tmp/ckan_worker.log ]; then
+            echo "No worker log file found at /tmp/ckan_worker.log"
+            # Create comprehensive header structure with all new fields including enhanced analytics
+            echo "timestamp,job_id,file_name,status,qsv_version,file_format,encoding,normalized,valid_csv,sorted,db_safe_headers,analysis,records,total_time,download_time,analysis_time,copying_time,indexing_time,formulae_time,metadata_time,rows_copied,columns_indexed,error_type,error_message,data_quality_score,processing_efficiency" > /tmp/worker_analysis.csv
+          else
+            echo "Worker log file size: $(du -h /tmp/ckan_worker.log | cut -f1)"
+            echo "Running enhanced Python log analyzer..."
+            
+            # Run the Python script to analyze logs
+            python3 ${GITHUB_WORKSPACE}/tests/log_analyzer.py analyze /tmp/ckan_worker.log /tmp/worker_analysis.csv
+          fi
+          
+          # Now check if both results files exist
+          if [ ! -f /tmp/test_results.csv ] && [ ! -f /tmp/worker_analysis.csv ]; then
+            echo "No test results or worker analysis files found"
+            echo "# DataPusher Plus Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "No test data available to analyze" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          
+          # Initialize counters for test results
+          total_tests=0
+          skipped_count=0
+          total_files_in_dir=0
+          passed=0
+          failed=0
+          error_count=0
+          tested_success_rate=0
+          overall_success_rate=0
+          
+          # Process test results if available
+          if [ -f /tmp/test_results.csv ]; then
+            # Count total results
+            total_lines=$(wc -l < /tmp/test_results.csv)
+            total_tests=$((total_lines - 1))  # Subtract header line
+            
+            # Count skipped files
+            if [ -f /tmp/skipped_files.csv ]; then
+              skipped_lines=$(wc -l < /tmp/skipped_files.csv)
+              skipped_count=$((skipped_lines - 1))  # Subtract header line
+            fi
+            
+            total_files_in_dir=$((total_tests + skipped_count))
+            
+            if [ $total_tests -gt 0 ]; then
+              # Count results by status
+              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
+              failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
+              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
+              error_count=$(echo "$error_count" | tr -d '\n')
+              
+              # Calculate success rates
+              tested_success_rate=$(( passed * 100 / total_tests ))
+              if [ $total_files_in_dir -gt 0 ]; then
+                overall_success_rate=$(( passed * 100 / total_files_in_dir ))
+              fi
+            fi
+          fi
+          
+          # Check if worker analysis is available
+          worker_analysis_available=false
+          if [ -f /tmp/worker_analysis.csv ]; then
+            worker_analysis_available=true
+          fi
+          
+          # Start building the combined summary
+          {
+            echo "# DataPusher Plus Test Results"
+            echo ""
+            echo "## Summary"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|--------|-------|"
+            echo "| Total Files in Directory | $total_files_in_dir |"
+            echo "| Files Tested | $total_tests |"
+            echo "| Files Skipped | $skipped_count |"
+            echo "| Passed | $passed |"
+            echo "| Failed | $failed |"
+            echo "| Errors | $error_count |"
+            echo "| Success Rate (Tested Files) | ${tested_success_rate}% |"
+            echo "| Success Rate (All Files) | ${overall_success_rate}% |"
+            echo ""
+            
+            # Show skipped files section if any exist
+            if [ $skipped_count -gt 0 ]; then
+              echo "## Skipped Files"
+              echo ""
+              echo "| File Name | Reason Skipped |"
+              echo "|-----------|----------------|"
+              
+              if [ -f /tmp/skipped_files.csv ]; then
+                tail -n +2 /tmp/skipped_files.csv | while IFS=',' read -r file_name reason; do
+                  echo "| $file_name | $reason |"
+                done
+              fi
+              echo ""
+            fi
+            
+            # Show worker analysis table if available
+            if [ "$worker_analysis_available" = true ]; then
+              total_jobs=$(tail -n +2 /tmp/worker_analysis.csv | wc -l)
+              if [ $total_jobs -gt 0 ]; then
+                echo "## Complete Job Analysis"
+                echo ""
+                echo "| # | File Name | Status | Records | Columns | Time (s) | Valid CSV | Headers Safe | Error Type | Quality Score |"
+                echo "|---|-----------|--------|---------|---------|----------|-----------|--------------|------------|---------------|"
+                
+                counter=1
+                tail -n +2 /tmp/worker_analysis.csv | while IFS=',' read timestamp job_id file_name status qsv_version file_format encoding normalized valid_csv sorted db_safe_headers analysis records total_time download_time analysis_time copying_time indexing_time formulae_time metadata_time rows_copied columns_indexed error_type error_message data_quality_score processing_efficiency; do
+                  # Don't truncate values - allow full content with horizontal scroll
+                  full_file_name=$(echo "$file_name" | sed 's/\.\.\.//')
+                  full_error_type="$error_type"
+                  full_headers="$db_safe_headers"
+                  
+                  # Handle empty values
+                  [ -z "$records" ] && records="0"
+                  [ -z "$columns_indexed" ] && columns_indexed="0"
+                  [ -z "$total_time" ] && total_time="0"
+                  [ -z "$data_quality_score" ] && data_quality_score="-"
+                  [ -z "$full_error_type" ] && full_error_type="-"
+                  
+                  # Add status emoji
+                  case "$status" in
+                    "SUCCESS") status_display="✅ SUCCESS" ;;
+                    "ERROR") status_display="❌ ERROR" ;;
+                    "INCOMPLETE") status_display="⏸️ INCOMPLETE" ;;
+                    *) status_display="❓ $status" ;;
+                  esac
+                  
+                  echo "| $counter | $full_file_name | $status_display | $records | $columns_indexed | $total_time | $valid_csv | $full_headers | $full_error_type | $data_quality_score |"
+                  counter=$((counter + 1))
+                done
+                echo ""
+                
+                # Add worker analysis sections
+                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
+                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
+                
+                # File Analysis
+                echo "## File Analysis"
+                echo ""
+                
+                if [ $success_jobs -gt 0 ]; then
+                  # File formats processed
+                  echo "### File Formats Processed"
+                  echo ""
+                  formats=$(tail -n +2 /tmp/worker_analysis.csv | grep ",SUCCESS," | cut -d',' -f6 | sort | uniq -c)
+                  if [ -n "$formats" ]; then
+                    echo "| Format | Files | Percentage |"
+                    echo "|--------|-------|------------|"
+                    echo "$formats" | while read count format; do
+                      percentage=$((count * 100 / success_jobs))
+                      # Add format icon
+                      case "$format" in
+                        "CSV") format_icon="📊" ;;
+                        "XLSX"|"XLS") format_icon="📈" ;;
+                        "JSON") format_icon="🔧" ;;
+                        "TXT") format_icon="📝" ;;
+                        *) format_icon="📄" ;;
+                      esac
+                      echo "| $format_icon $format | $count | $percentage% |"
+                    done
+                  else
+                    echo "❌ No format data available"
+                  fi
+                  echo ""
+                  
+                  # Encoding types
+                  echo "### Encoding Distribution"
+                  echo ""
+                  encodings=$(tail -n +2 /tmp/worker_analysis.csv | grep ",SUCCESS," | cut -d',' -f7 | sort | uniq -c)
+                  if [ -n "$encodings" ]; then
+                    echo "| Encoding | Files | Status |"
+                    echo "|----------|-------|--------|"
+                    echo "$encodings" | while read count encoding; do
+                      if [ -n "$encoding" ]; then
+                        if [ "$encoding" = "UTF-8" ] || [ "$encoding" = "UTF" ]; then
+                          status_icon="✅"
+                        else
+                          status_icon="⚠️"
+                        fi
+                        echo "| $status_icon $encoding | $count | Compatible |"
+                      else
+                        echo "| ❓ Unknown | $count | Needs Review |"
+                      fi
+                    done
+                  else
+                    echo "❌ No encoding data available"
+                  fi
+                  echo ""
+                fi
+                
+                # Error Analysis
+                echo "## Error Analysis"
+                echo ""
+                if [ $error_jobs -gt 0 ]; then
+                  echo "### Failed Files Details"
+                  echo ""
+                  echo ""
+                  echo "| File | Error Type | Error Message |"
+                  echo "|------|------------|---------------|"
+                  tail -n +2 /tmp/worker_analysis.csv | grep ",ERROR," | cut -d',' -f3,23,24 | while IFS=',' read file error_type error_msg; do
+                    clean_error=$(echo "$error_msg" | sed 's/^"//;s/"$//')
+                    clean_file=$(echo "$file" | sed 's/\.\.\.//')
+                    echo "| $clean_file | $error_type | $clean_error |"
+                  done
+                  echo ""
+                else
+                  echo "✅ **No errors found in worker logs** - All processed jobs completed successfully!"
+                  echo ""
+                fi
+                
+                # Performance Anomalies
+                echo "## Performance Anomalies"
+                echo ""
+                anomalies_output=$(python3 ${GITHUB_WORKSPACE}/tests/log_analyzer.py anomalies /tmp/worker_analysis.csv 2>/dev/null || echo "")
+                if [ -z "$anomalies_output" ]; then
+                  echo "✅ **No performance anomalies detected** - All jobs processed within expected timeframes"
+                else
+                  echo "⚠️ **Performance issues detected:**"
+                  echo ""
+                  echo "$anomalies_output" | sed 's/ANOMALY: /🐌 **Slow Processing**: /'
+                fi
+                echo ""
+              fi
+            fi
+            
+            # Add comprehensive analysis based on results (keep original logic)
+            if [ $total_tests -eq 0 ] && [ $skipped_count -gt 0 ]; then
+              echo "##  No Testable Files ⚠️"
+              echo ""
+              echo "All files in the test directory were skipped."
+              echo ""
+              echo "**Common reasons for skipped files:**"
+              echo "- Unsupported file formats (only .csv, .tsv, .xlsx, .json, .geojson, .txt supported)"
+              echo "- Files not accessible via HTTP server"
+              echo "- Hidden files or system files"
+              echo ""
+              echo "**Recommendation:** Add supported data files to test directory."
+              
+            elif [ $total_tests -eq 0 ]; then
+              echo "##  No Files Found ❌"
+              echo ""
+              echo "No files found in test directory to test."
+              
+            elif [ $passed -eq $total_tests ]; then
+              echo "##  All Tested Files Passed! 🎉"
+              echo ""
+              echo "DataPusher Plus is working correctly with all testable files."
+              if [ $skipped_count -gt 0 ]; then
+                echo ""
+                echo "**Note:** $skipped_count file(s) were skipped. See the Skipped Files section above for details."
+              fi
+              
+            elif [ $passed -gt 0 ]; then
+              echo "## Result: Partial Success"
+              echo ""
+              echo "DataPusher Plus works with some files but has issues with others."
+              echo ""
+              
+            else
+              echo "## Result: All Tested Files Failed ❌"
+              echo ""
+              echo "DataPusher Plus is not working correctly with any tested files."
+              echo ""
+              echo "### All Failed Files:"
+              if [ -f /tmp/test_results.csv ]; then
+                tail -n +2 /tmp/test_results.csv | while IFS=',' read -r timestamp file_name upload_status resource_id datapusher_status datastore_active rows_imported processing_time error_message; do
+                  clean_error=$(echo "$error_message" | sed 's/^"//;s/"$//')
+                  echo "- **$file_name**: $clean_error"
+                done
+              fi
+              
+              if [ $skipped_count -gt 0 ]; then
+                echo ""
+                echo "### Files Not Even Attempted:"
+                if [ -f /tmp/skipped_files.csv ]; then
+                  tail -n +2 /tmp/skipped_files.csv | while IFS=',' read -r file_name reason; do
+                    echo "- **$file_name**: $reason"
+                  done
+                fi
+              fi
+            fi
+            
+            echo ""
+            echo "---"
+            echo ""
+            echo "**Analysis completed:** $(date '+%A, %B %d, %Y at %I:%M %p %Z')"
+            
+          } > /tmp/combined_summary.md
+          
+          # Write to GitHub Actions step summary
+          cat /tmp/combined_summary.md >> $GITHUB_STEP_SUMMARY
+          
+          echo "Combined analysis summary generated and added to workflow summary"
+          echo ""
+          echo "Preview of generated summary:"
+          echo "=================================="
+          cat /tmp/combined_summary.md
+
+      - name: Upload test results as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: datapusher-plus-test-results
+          path: |
+            /tmp/test_results.csv
+            /tmp/ckan_stdout.log
+            /tmp/ckan_worker.log
+            /tmp/worker_analysis.csv
+          retention-days: 3
+          
+      - name: Cleanup
+        if: always()
+        run: |
+          echo "Stopping any running CKAN processes..."
+          pkill -f "ckan.*run"  
+          echo "Cleanup completed"

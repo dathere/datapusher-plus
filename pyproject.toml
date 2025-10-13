@@ -1,0 +1,46 @@
+[project]
+name = "datapusher-plus"
+version = "2.0.0"
+description = "Next-generation, extensible Data Ingestion framework for CKAN. Accelerated by qsv."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "AGPL-3.0-or-later" }
+authors = [
+	{ name = "datHere" },
+]
+maintainers = [
+	{ name = "datHere Engineering", email = "info@dathere.com" }
+]
+keywords = ["ckan", "ckanext", "datapusher", "datastore", "csv", "qsv", "data-ingestion", "metadata", "schema"]
+classifiers = [
+	"Intended Audience :: Developers",
+	"Development Status :: 5 - Production/Stable",
+	"License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+	"Programming Language :: Python :: 3 :: Only",
+	"Programming Language :: Python :: 3.10",
+	"Programming Language :: Python :: 3.11",
+	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Topic :: Internet :: WWW/HTTP :: Dynamic Content :: CGI Tools/Libraries",
+	"Topic :: Software Development :: Libraries :: Application Frameworks",
+	"Topic :: Database"
+]
+urls = { Repository = "https://github.com/dathere/datapusher-plus", Issues = "https://github.com/dathere/datapusher-plus/issues", Changelog = "https://github.com/dathere/datapusher-plus/blob/main/CHANGELOG.md" }
+dynamic = ["dependencies", "optional-dependencies"]
+
+[project.entry-points."ckan.plugins"]
+datapusher_plus = "ckanext.datapusher_plus.plugin:DatapusherPlusPlugin"
+
+[project.entry-points."babel.extractors"]
+ckan = "ckan.lib.extract:extract_ckan"
+
+[build-system]
+requires = ["setuptools>=62.6.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = { find = { where = ["."], exclude = ["tests*"] } }
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+optional-dependencies = { dev = { file = ["requirements-dev.txt"] } }
