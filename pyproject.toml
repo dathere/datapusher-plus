@@ -5,13 +5,19 @@ description = "Next-generation, extensible Data Ingestion framework for CKAN. Ac
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "AGPL-3.0-or-later" }
-authors = [
-	{ name = "datHere" },
+authors = [{ name = "datHere" }]
+maintainers = [{ name = "datHere Engineering", email = "info@dathere.com" }]
+keywords = [
+	"ckan",
+	"ckanext",
+	"datapusher",
+	"datastore",
+	"csv",
+	"qsv",
+	"data-ingestion",
+	"metadata",
+	"schema",
 ]
-maintainers = [
-	{ name = "datHere Engineering", email = "info@dathere.com" }
-]
-keywords = ["ckan", "ckanext", "datapusher", "datastore", "csv", "qsv", "data-ingestion", "metadata", "schema"]
 classifiers = [
 	"Intended Audience :: Developers",
 	"Development Status :: 5 - Production/Stable",
@@ -23,10 +29,15 @@ classifiers = [
 	"Programming Language :: Python :: 3.13",
 	"Topic :: Internet :: WWW/HTTP :: Dynamic Content :: CGI Tools/Libraries",
 	"Topic :: Software Development :: Libraries :: Application Frameworks",
-	"Topic :: Database"
+	"Topic :: Database",
 ]
-urls = { Repository = "https://github.com/dathere/datapusher-plus", Issues = "https://github.com/dathere/datapusher-plus/issues", Changelog = "https://github.com/dathere/datapusher-plus/blob/main/CHANGELOG.md" }
-dynamic = ["dependencies", "optional-dependencies"]
+
+[project.urls]
+Homepage = "https://github.com/dathere/datapusher-plus"
+Repository = "https://github.com/dathere/datapusher-plus"
+Issues = "https://github.com/dathere/datapusher-plus/issues"
+Changelog = "https://github.com/dathere/datapusher-plus/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/dathere/datapusher-plus#readme"
 
 [project.entry-points."ckan.plugins"]
 datapusher_plus = "ckanext.datapusher_plus.plugin:DatapusherPlusPlugin"
