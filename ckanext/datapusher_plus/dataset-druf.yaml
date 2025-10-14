@@ -90,11 +90,25 @@ resource_fields:
     label: Name
     form_placeholder: eg. January 2011
 
+  - field_name: format
+    label: Format
+    preset: resource_format_autocomplete
+
   - field_name: description
     label: Description
     form_snippet: markdown.html
     form_placeholder: Some useful notes about the data
 
-  - field_name: format
-    label: Format
-    preset: resource_format_autocomplete
+  - field_name: rights
+    label: Rights
+    form_snippet: markdown.html
+    validators: ignore_missing
+
+  - field_name: license
+    label: License
+    validators: ignore_missing
+
+  - field_name: data_dictionary
+    label: Data dictionary
+    validators: ignore_missing
+
