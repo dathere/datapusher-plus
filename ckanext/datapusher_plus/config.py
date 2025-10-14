@@ -146,6 +146,11 @@ SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
     "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE", "0.1"
 )
 
+# CSV spatial extent detection settings
+AUTO_CSV_SPATIAL_EXTENT = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_csv_spatial_extent", True)
+)
+
 # Latitude and longitude column names
 # multiple fields can be specified, separated by commas
 # matching columns will be from left to right and the jinja2

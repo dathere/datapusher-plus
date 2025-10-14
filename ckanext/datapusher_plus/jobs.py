@@ -1281,6 +1281,63 @@ def _push_to_datastore(
         logger,
     )
 
+    # ============================================================
+    # SPATIAL EXTENT DETECTION FOR CSV WITH LAT/LONG COLUMNS
+    # ============================================================
+    # Check if this is a CSV file (not already processed as spatial format)
+    # and detect latitude/longitude columns to calculate spatial extent
+    # Use the existing lat/lon detection logic from FormulaProcessor
+    if (conf.AUTO_CSV_SPATIAL_EXTENT and not spatial_format_flag and 
+        resource_format.upper() in ["CSV", "TSV", "TAB"]):
+        logger.info("Checking for latitude/longitude columns in CSV using existing detection logic...")
+        
+        # Use the detected lat/lon fields from the already initialized FormulaProcessor
+        lat_column = formula_processor.dpp.get("LAT_FIELD")
+        lon_column = formula_processor.dpp.get("LON_FIELD")
+        
+        # If we found both lat and lon columns, calculate spatial extent
+        if lat_column and lon_column and not formula_processor.dpp.get("NO_LAT_LON_FIELDS"):
+            logger.info(f"Found latitude/longitude columns: {lat_column}, {lon_column}")
+            
+            try:
+                # Get min/max values from the stats we already calculated
+                lat_stats = resource_fields_stats.get(lat_column, {}).get("stats", {})
+                lon_stats = resource_fields_stats.get(lon_column, {}).get("stats", {})
+                
+                if lat_stats and lon_stats:
+                    lat_min = float(lat_stats.get("min", 0))
+                    lat_max = float(lat_stats.get("max", 0))
+                    lon_min = float(lon_stats.get("min", 0))
+                    lon_max = float(lon_stats.get("max", 0))
+                    
+                    # The FormulaProcessor already validated coordinate bounds,
+                    # so we can trust these values are within valid ranges
+                    # Add spatial extent to package dpp_suggestions (following DRUF pattern)
+                    spatial_extent_data = {
+                        "type": "BoundingBox",
+                        "coordinates": [
+                            [lon_min, lat_min],
+                            [lon_max, lat_max],
+                        ],
+                    }
+                    
+                    # Add to package dpp_suggestions like other computed metadata
+                    package.setdefault("dpp_suggestions", {})["dpp_spatial_extent"] = spatial_extent_data
+                    
+                    logger.info(
+                        f"Added dpp_spatial_extent to package dpp_suggestions from CSV lat/lon columns: "
+                        f"lat({lat_min}, {lat_max}), lon({lon_min}, {lon_max})"
+                    )
+                    logger.info(f"Spatial extent: {spatial_extent_data}")
+                else:
+                    logger.warning("Could not retrieve min/max statistics for lat/lon columns")
+                    
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Error calculating spatial extent from lat/lon columns: {e}")
+        else:
+            if formula_processor.dpp.get("NO_LAT_LON_FIELDS"):
+                logger.info("No suitable latitude/longitude column pairs found in CSV")
+
     package.setdefault("dpp_suggestions", {})[
         "STATUS"
     ] = "STARTING FORMULAE PROCESSING..."
