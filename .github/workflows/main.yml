@@ -89,27 +89,78 @@ jobs:
       - name: Install requirements, ckanapi and datapusher-plus
         run: |
           set -eu
-          # Use pip from the container (image usually has Python/pip)
-          python3 -m pip install --upgrade pip setuptools wheel  
+          
+          # Install system dependencies first (including GDAL and geospatial libraries)
+          apt-get update
+          apt-get install -y \
+            python3-virtualenv \
+            python3-dev \
+            python3-pip \
+            python3-wheel \
+            build-essential \
+            libxslt1-dev \
+            libxml2-dev \
+            libffi-dev \
+            libpq-dev \
+            zlib1g-dev \
+            git \
+            uchardet \
+            unzip \
+            gdal-bin \
+            libgdal-dev \
+            libspatialindex-dev \
+            libgeos-dev \
+            libproj-dev
+          
+          # Get GDAL version for Python bindings
+          export GDAL_VERSION=$(gdal-config --version)
+          echo "GDAL version: $GDAL_VERSION"
+          
+          # Set GDAL environment variables
+          export CPLUS_INCLUDE_PATH=/usr/include/gdal
+          export C_INCLUDE_PATH=/usr/include/gdal
+          
+          # Upgrade pip and build tools
+          python3 -m pip install --upgrade pip setuptools wheel
+          
+          # Install GDAL Python bindings matching system GDAL version
+          pip install "GDAL==$GDAL_VERSION"
+          
+          # Install project requirements if they exist
           if [ -f requirements.txt ]; then
-            pip install -r requirements.txt  
+            pip install -r requirements.txt
           fi
+          
           if [ -f requirements-dev.txt ]; then
-            pip install -r requirements-dev.txt  
+            pip install -r requirements-dev.txt
           fi
-          # install current repo editable if present
+          
+          # Install current repo in editable mode if setup files exist
           if [ -f setup.py ] || [ -f pyproject.toml ]; then
-            pip install -e .  
+            pip install -e .
           fi
-          # Ensure ckanapi and datapusher-plus are available
+          
+          # Install core dependencies
           pip install --upgrade ckanapi
-          pip install datasize
-          apt install -y python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev uchardet unzip  
-          # Install datapusher-plus package (the pip package name is typically datapusher-plus)
-          echo "Installing datapusher-plus from branch: $DATAPUSHER_BRANCH"
-          pip install -e "git+https://github.com/dathere/datapusher-plus.git@$DATAPUSHER_BRANCH#egg=datapusher-plus"  
-          pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'  
-          echo "Installed ckanapi and datapusher-plus (best-effort)"
+          
+          # Clone datapusher-plus and install its requirements first
+          echo "Cloning datapusher-plus from branch: $DATAPUSHER_BRANCH"
+          git clone --depth 1 --branch "$DATAPUSHER_BRANCH" https://github.com/dathere/datapusher-plus.git /tmp/datapusher-plus
+          
+          # Install datapusher-plus requirements
+          cd /tmp/datapusher-plus
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          
+          # Install datapusher-plus itself
+          pip install -e .
+          cd -
+          
+          # Install ckanext-scheming
+          pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'
+          
+          echo "Installation complete: GDAL, ckanapi, datapusher-plus, and ckanext-scheming"
       - name: Install qsv (musl static)
         run: |
           set -eu
