@@ -5,6 +5,8 @@ import json
 import requests
 from pathlib import Path
 import ckan.plugins.toolkit as tk
+import logging
+
 
 # SSL verification settings
 SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
@@ -62,7 +64,21 @@ MAX_CONTENT_LENGTH = tk.asint(
     tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
 )
 CHUNK_SIZE = tk.asint(tk.config.get("ckanext.datapusher_plus.chunk_size", "1048576"))
-DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 0))
+#DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 0))
+# Excel sheet selection (qsv is 0-based)
+_val = tk.config.get("ckanext.datapusher_plus.default_excel_sheet")
+if _val is None:
+    # Backward-compat: support legacy key (deprecated)
+    _legacy = tk.config.get("DEFAULT_EXCEL_SHEET")
+    if _legacy is not None:
+        logging.getLogger(__name__).warning(
+            "DEPRECATION: 'DEFAULT_EXCEL_SHEET' is deprecated; "
+            "use 'ckanext.datapusher_plus.default_excel_sheet'."
+        )
+        _val = _legacy
+
+DEFAULT_EXCEL_SHEET = tk.asint(_val) if _val is not None else 0
+
 SORT_AND_DUPE_CHECK = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check", True)
 )
