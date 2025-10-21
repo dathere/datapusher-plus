@@ -62,7 +62,7 @@ MAX_CONTENT_LENGTH = tk.asint(
     tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
 )
 CHUNK_SIZE = tk.asint(tk.config.get("ckanext.datapusher_plus.chunk_size", "1048576"))
-DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 0))
+DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("ckanext.datapusher_plus.default_excel_sheet", 0))
 SORT_AND_DUPE_CHECK = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check", True)
 )
