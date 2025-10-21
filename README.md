@@ -141,9 +141,9 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     it to the appropriate directory, e.g. for Linux:
 
     ```bash
-    wget https://github.com/dathere/qsv/releases/download/2.22.1/qsv-2.22.1-x86_64-unknown-linux-gnu.zip
-    unzip qsv-2.22.1-x86_64-unknown-linux-gnu.zip
-    rm qsv-2.22.1-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
     ```
 
