@@ -41,7 +41,7 @@ groups:
         description: |
           Download proxy
 
-      - key: ckanext.datapusher_plus.types
+      - key: ckanext.datapusher_plus.formats
         description: |
           Types of files to be processed
         default: csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
