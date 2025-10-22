@@ -223,6 +223,35 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
     ## Option 1: Debian Package Installation (Easiest)
 
+    [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
+    it to the appropriate directory, e.g. for Linux:
+
+    ```bash
+    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    sudo mv qsv* /usr/local/bin
+    ```
+
+    Alternatively, if you want to install qsv from source, follow
+    the instructions [here](https://github.com/dathere/qsv#installation). Note that when compiling from source,
+    you may want to look into the [Performance Tuning](https://github.com/dathere/qsv#performance-tuning)
+    section to squeeze even more performance from qsv.
+
+    Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
+    (This will be the case when running Ubuntu 18.04 or older).
+    If so, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+
+    If you already have qsv, update it to the latest release by using the --update option.
+
+    `qsvdp --update`
+
+    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
+    qsv with the `--update` option and it will check for the latest version and update as required.
+
+    ### Linux Installation
+
+    If you are running Debian based distribution, you can install qsv using the following command:
     If you are running Debian based Linux distribution on x86_64, you can quickly install qsv using the following commands:
 
     Add the qsv repository to your sources list:
