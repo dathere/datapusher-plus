@@ -7,7 +7,6 @@ from __future__ import absolute_import
 import logging
 import json
 import datetime
-from six import text_type as str
 
 import ckan.plugins.toolkit as tk
 from ckanext.datapusher_plus.model import Logs
@@ -30,12 +29,14 @@ class StoringHandler(logging.Handler):
         funcName = str(record.funcName)
         job_log = Logs(
             job_id=self.task_id,
-            timestamp=datetime.datetime.now(),
+            # this needs to be a naive datetime, and utcnow() is deprecated and its
+            # replacement is not naive, so we need to remove the tzinfo
+            timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
             message=message,
             level=level,
             module=module,
             funcName=funcName,
-            lineno=record.lineno
+            lineno=record.lineno,
         )
         job_log.save()
 
@@ -74,8 +75,7 @@ class JobError(Exception):
 def get_dp_plus_user_apitoken():
     """Returns the API Token for authentication.
     datapusher plus actions require an authenticated user to perform the actions. This
-    method returns the api_token set in the config file and defaults to the
-    site_user.
+    method returns the api_token set in the config file.
     """
     api_token = tk.config.get("ckanext.datapusher_plus.api_token", None)
     if api_token:
@@ -85,9 +85,10 @@ def get_dp_plus_user_apitoken():
     api_token = tk.config.get("ckan.datapusher.api_token", None)
     if api_token:
         return api_token
-
-    site_user = tk.get_action("get_site_user")({"ignore_auth": True}, {})
-    return site_user["apikey"]
+    else:
+        raise Exception(
+            "No API token found. API token required for DP+ service account."
+        )
 
 
 def check_response(

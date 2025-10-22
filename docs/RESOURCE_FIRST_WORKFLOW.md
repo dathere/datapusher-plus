@@ -1,4 +1,4 @@
-## Resource-first Upload Workflow
+## Dataset Resource Upload First (DRUF) Workflow
 
 In traditional CKAN, the dataset package upload workflow is as follows:
 

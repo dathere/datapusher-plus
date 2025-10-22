@@ -5,7 +5,11 @@ from __future__ import annotations
 
 from ckan.common import CKANConfig
 import logging
-from typing import Any, Callable
+import types
+from typing import Any, Callable, Optional, Literal
+
+from ckan.plugins.toolkit import add_template_directory, h
+from ckan.types import Action, AuthFunction, Context
 
 import ckan.model as model
 import ckan.plugins as p
@@ -19,18 +23,12 @@ tk = p.toolkit
 
 log = logging.getLogger(__name__)
 
-try:
-    config_declarations = tk.blanket.config_declarations
-except AttributeError:
-    # CKAN 2.9 does not have config_declarations.
-    # Remove when dropping support.
-    def config_declarations(cls):
-        return cls
+
+config_declarations = tk.blanket.config_declarations
 
 
-# Get ready for CKAN 2.10 upgrade
-if tk.check_ckan_version("2.10"):
-    from ckan.types import Action, AuthFunction, Context
+class DatastoreException(Exception):
+    pass
 
 
 class DatastoreException(Exception):
@@ -43,19 +41,67 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
     p.implements(p.IConfigurable, inherit=True)
     p.implements(p.IActions)
     p.implements(p.IAuthFunctions)
+    p.implements(p.IPackageController, inherit=True)
     p.implements(p.IResourceUrlChange)
     p.implements(p.IResourceController, inherit=True)
     p.implements(p.ITemplateHelpers)
     p.implements(p.IBlueprint)
     p.implements(p.IClick)
+    
+    # Always implement IFormRedirect if available, methods will check config
+    try:
+        p.implements(p.IFormRedirect)
+    except (ImportError, AttributeError):
+        # IFormRedirect not available in this CKAN version
+        pass
 
     legacy_mode = False
     resource_show_action = None
 
+    def configure(self, config):
+        """Called when the plugin is loaded."""
+        # Check configuration for optional features and store for reference
+        self.enable_form_redirect = tk.asbool(
+            config.get('ckanext.datapusher_plus.enable_form_redirect', False)
+        )
+        self.enable_druf = tk.asbool(
+            config.get('ckanext.datapusher_plus.enable_druf', False)
+        )
+        
+        if self.enable_form_redirect:
+            log.info("IFormRedirect functionality enabled for DataPusher Plus")
+        else:
+            log.debug("IFormRedirect functionality disabled")
+            
+        if self.enable_druf:
+            log.info("DRUF functionality enabled for DataPusher Plus")
+
     def update_config(self, config: CKANConfig):
+        # Always add base templates
         tk.add_template_directory(config, "templates")
         tk.add_public_directory(config, "public")
         tk.add_resource("assets", "datapusher_plus")
+        
+        # Check configuration for optional features directly from config
+        enable_druf = tk.asbool(config.get('ckanext.datapusher_plus.enable_druf', False))
+        enable_form_redirect = tk.asbool(config.get('ckanext.datapusher_plus.enable_form_redirect', False))
+        
+        # Conditionally add DRUF templates if enabled
+        if enable_druf:
+            # Add DRUF-specific template overrides
+            tk.add_template_directory(config, "templates/druf")
+            log.info("DataPusher Plus: DRUF template overrides loaded")
+        
+        # Log configuration status
+        if enable_form_redirect:
+            log.info("DataPusher Plus: IFormRedirect functionality enabled")
+        if enable_druf:
+            log.info("DataPusher Plus: DRUF (Dataset Resource Upload First) functionality enabled")
+
+    # IPackageController
+    def before_dataset_index(self, dataset_dict: dict[str, Any]):
+        dataset_dict.pop("dpp_suggestions", None)
+        return dataset_dict
 
     # IResourceUrlChange
     def notify(self, resource: model.Resource):
@@ -96,7 +142,19 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
                 "No supported formats configured,\
                     using DataPusher Plus internals"
             )
-            supported_formats = ["csv", "xls", "xlsx", "tsv"]
+            supported_formats = [
+                "csv",
+                "xls",
+                "xlsx",
+                "tsv",
+                "ssv",
+                "tab",
+                "ods",
+                "geojson",
+                "shp",
+                "qgis",
+                "zip",
+            ]
 
         submit = (
             resource_format
@@ -159,13 +217,131 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         return {
             "datapusher_plus_status": dph.datapusher_status,
             "datapusher_plus_status_description": dph.datapusher_status_description,
+            "scheming_field_suggestion": dph.scheming_field_suggestion,
+            "scheming_get_suggestion_value": dph.scheming_get_suggestion_value,
+            "scheming_is_valid_suggestion": dph.scheming_is_valid_suggestion,
+            "is_preformulated_field": dph.is_preformulated_field,
         }
 
     # IBlueprint
-
     def get_blueprint(self):
-        return views.get_blueprints()
+        """Register plugin blueprints"""
+        blueprints = []
+        blueprints.extend(views.get_blueprints())
+        
+        # Only include DRUF blueprints if enabled
+        enable_druf = tk.asbool(tk.config.get('ckanext.datapusher_plus.enable_druf', False))
+        if enable_druf:
+            try:
+                import ckanext.datapusher_plus.druf_view as druf_view
+                blueprints.extend(druf_view.get_blueprints())
+                log.debug("DRUF blueprints registered")
+            except ImportError as e:
+                log.error(f"Failed to import DRUF views: {e}")
+        
+        return blueprints 
 
     # IClick
     def get_commands(self):
         return cli.get_commands()
+
+    # IFormRedirect methods - always present but check config before acting
+    def dataset_save_redirect(
+            self, package_type: str, package_name: str,
+            action: Literal['create', 'edit'], save_action: Optional[str],
+            data: dict[str, Any],
+            ) -> Optional[str]:
+        # Check if IFormRedirect is enabled
+        enable_form_redirect = tk.asbool(tk.config.get('ckanext.datapusher_plus.enable_form_redirect', False))
+        if not enable_form_redirect:
+            log.debug("IFormRedirect disabled, using default dataset redirect")
+            return None
+            
+        log.debug(f"IFormRedirect dataset save: {action}, save_action: {save_action}")
+        # Only redirect after successful dataset creation, not during editing
+        if action == 'create':
+            return h.url_for(f'{package_type}.read', id=package_name)
+        return None
+
+    def resource_save_redirect(
+            self, package_type: str, package_name: str, resource_id: Optional[str],
+            action: Literal['create', 'edit'], save_action: str,
+            data: dict[str, Any],
+            ) -> Optional[str]:
+        # Check if IFormRedirect is enabled
+        enable_form_redirect = tk.asbool(tk.config.get('ckanext.datapusher_plus.enable_form_redirect', False))
+        if not enable_form_redirect:
+            log.debug("IFormRedirect disabled, using default resource redirect")
+            return None
+            
+        log.debug(f"IFormRedirect resource save: {action}, save_action: {save_action}")
+        if action == 'edit':
+            return h.url_for(
+                f'{package_type}_resource.read',
+                id=package_name, resource_id=resource_id
+            )
+        if save_action == 'again':
+            return h.url_for(
+                '{}_resource.new'.format(package_type), id=package_name,
+            )
+        # For normal resource creation, let CKAN handle the default flow
+        return None
+
+    # IFormRedirect methods - always present but only active when enabled
+    def dataset_save_redirect(
+            self, package_type: str, package_name: str,
+            action: Literal['create', 'edit'], save_action: Optional[str],
+            data: dict[str, Any],
+            ) -> Optional[str]:
+        # Check if form redirect is enabled
+        enable_form_redirect = tk.asbool(tk.config.get('ckanext.datapusher_plus.enable_form_redirect', False))
+        if not enable_form_redirect:
+            log.debug(f"IFormRedirect disabled - letting CKAN handle dataset redirect for {package_name}")
+            return None  # Let CKAN handle normal redirects
+        
+        log.debug(f"IFormRedirect: dataset_save_redirect called - action: {action}, save_action: {save_action}")
+        
+        # Only redirect in specific scenarios, not all dataset saves
+        # For dataset creation, be very careful not to break normal workflow
+        if action == 'create':
+            # Let CKAN handle the normal flow (usually to add resources)
+            # Only redirect to dataset view if explicitly requested with special save action
+            if save_action == 'go-dataset':
+                log.debug(f"IFormRedirect: redirecting to dataset view for {package_name}")
+                return h.url_for(f'{package_type}.read', id=package_name)
+            else:
+                log.debug(f"IFormRedirect: letting CKAN handle normal dataset creation flow for {package_name}")
+                return None  # Let CKAN handle the normal flow
+        elif action == 'edit':
+            # For edits, redirect to dataset view
+            log.debug(f"IFormRedirect: redirecting to dataset view after edit for {package_name}")
+            return h.url_for(f'{package_type}.read', id=package_name)
+        
+        # Default: let CKAN handle the redirect
+        log.debug(f"IFormRedirect: default case - letting CKAN handle redirect for {package_name}")
+        return None
+
+    def resource_save_redirect(
+            self, package_type: str, package_name: str, resource_id: Optional[str],
+            action: Literal['create', 'edit'], save_action: str,
+            data: dict[str, Any],
+            ) -> Optional[str]:
+        # Check if form redirect is enabled
+        enable_form_redirect = tk.asbool(tk.config.get('ckanext.datapusher_plus.enable_form_redirect', False))
+        if not enable_form_redirect:
+            log.debug(f"IFormRedirect disabled - letting CKAN handle resource redirect for {resource_id}")
+            return None  # Let CKAN handle normal redirects
+            
+        log.debug(f"IFormRedirect: resource_save_redirect called - action: {action}, save_action: {save_action}")
+        
+        if action == 'edit':
+            return h.url_for(
+                f'{package_type}_resource.read',
+                id=package_name, resource_id=resource_id
+            )
+        if save_action == 'again':
+            return h.url_for(
+                '{}_resource.new'.format(package_type), id=package_name,
+            )
+        # After resource creation, go to the dataset edit page to allow adding more resources
+        return h.url_for(u'{}.edit'.format(package_type), id=package_name)

@@ -178,9 +178,8 @@ groups:
         description: |
           Auto alias unique
       
-      - key: ckanext.datapusher_plus.upload_log_verbosity
-        type: int
+      - key: ckanext.datapusher_plus.upload_log_level
         editable: true
-        default: 1
+        default: INFO
         description: |
-          Upload log verbosity (0 = None, 1 = INFO, 2 = DEBUG)
+          Upload log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
