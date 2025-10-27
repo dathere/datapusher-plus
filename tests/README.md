@@ -1,8 +1,15 @@
 
+**Automated CI Workflow**: [`main.yml`](https://github.com/dathere/datapusher-plus/actions/workflows/main.yml)
+- Full integration test with CKAN 2.11, PostgreSQL, Solr, and Redis
+- Tests file uploads, processing pipeline, and datastore imports
+- Generates analytics via `log_analyzer.py`
+
+> [!TIP]
+>**Standalone Testing**: [datapusher-plus_testing](https://github.com/dathere/datapusher-plus_testing)
+>- Dedicated repository for custom test scenarios
+>- Same workflow, user-defined test files in `/custom` directory
+>- Manual trigger via GitHub Actions workflow_dispatch
 ## Technical Reference
-
-
-
 ### Time Measurements
 - All `time` values in the worker_analysis.csv are measured in **seconds**
 
