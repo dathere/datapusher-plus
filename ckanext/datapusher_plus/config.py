@@ -32,7 +32,7 @@ UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "IN
 # Supported formats
 FORMATS = tk.config.get(
     "ckanext.datapusher_plus.formats",
-    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "qgis", "zip"],
+    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "qgis", "zip", "dbf"],
 )
 if isinstance(FORMATS, str):
     FORMATS = FORMATS.split()
@@ -175,4 +175,11 @@ JINJA2_BYTECODE_CACHE_DIR = tk.config.get(
 # contents into the datastore. Leave the zip file as the "main" resource.
 AUTO_UNZIP_ONE_FILE = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_unzip_one_file", True)
+)
+
+# if a zip archive contains multiple files (and does not contain a shapefile),
+# automatically create a manifest CSV with metadata about the zip contents
+# and pump that into the datastore. If set to False, the zip will be skipped.
+AUTO_CREATE_ZIP_MANIFEST = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_create_zip_manifest", True)
 )

@@ -409,6 +409,8 @@ def extract_zip_or_metadata(
     Extract metadata from ZIP archive and save to CSV file.
     If the ZIP file contains only one item of a supported format and
     AUTO_UNZIP_ONE_FILE is True, extract it directly.
+    If the ZIP file contains shapefile components (.shp, .dbf, .shx, etc.),
+    extract the .dbf file for use as the data source.
 
     Args:
         zip_path: Path to the ZIP file
@@ -437,6 +439,39 @@ def extract_zip_or_metadata(
             file_list = [info for info in zip_file.infolist() if not info.is_dir()]
             file_count = len(file_list)
 
+            # Check if this ZIP contains shapefile components
+            shp_files = [f for f in file_list if f.filename.lower().endswith('.shp')]
+            dbf_files = [f for f in file_list if f.filename.lower().endswith('.dbf')]
+            
+            # If we have shapefile components, look for the .dbf file
+            if shp_files and dbf_files:
+                # For each .shp file, try to find matching .dbf file
+                for shp_file in shp_files:
+                    base_name = os.path.splitext(shp_file.filename)[0]
+                    # Look for matching .dbf file (case-insensitive)
+                    matching_dbf = None
+                    for dbf_file in dbf_files:
+                        dbf_base = os.path.splitext(dbf_file.filename)[0]
+                        if dbf_base.lower() == base_name.lower():
+                            matching_dbf = dbf_file
+                            break
+                    
+                    if matching_dbf:
+                        logger.info(
+                            f"ZIP contains shapefile components. Extracting .dbf file: {matching_dbf.filename}"
+                        )
+                        # Extract ONLY the .dbf file (not the whole shapefile)
+                        result_path = os.path.join(output_dir, "shapefile_data.dbf")
+                        with zip_file.open(matching_dbf.filename) as source, open(
+                            result_path, "wb"
+                        ) as target:
+                            target.write(source.read())
+                        logger.info(
+                            f"Successfully extracted shapefile .dbf to '{result_path}'"
+                        )
+                        # Return DBF format so it will be processed as a DBF file
+                        return file_count, result_path, "DBF"
+
             if file_count == 1 and conf.AUTO_UNZIP_ONE_FILE:
                 file_info = file_list[0]
                 file_name = file_info.filename
@@ -460,6 +495,13 @@ def extract_zip_or_metadata(
                     logger.warning(
                         f"ZIP contains a single file that is not supported: {file_name}"
                     )
+
+            # Check if we should create a manifest
+            if not conf.AUTO_CREATE_ZIP_MANIFEST:
+                logger.info(
+                    f"ZIP file contains {file_count} file/s, but AUTO_CREATE_ZIP_MANIFEST is disabled. Skipping..."
+                )
+                return 0, "", ""
 
             # Otherwise, write metadata CSV
             logger.info(

@@ -283,6 +283,18 @@ def _push_to_datastore(
             else:
                 logger.info(f"File format: {resource_format}")
 
+            # Check if this is actually a GeoJSON file even if format is JSON
+            # GeoJSON files often get detected as JSON by MIME type
+            resource_name = resource.get("name", "").lower()
+            resource_url_lower = resource_url.lower()
+            if (resource_format == "JSON" and 
+                (resource_name.endswith('.geojson') or 
+                 resource_url_lower.endswith('.geojson') or
+                 'geojson' in resource_name or
+                 'geojson' in resource_url_lower)):
+                logger.info("Detected GeoJSON file (was identified as JSON). Changing format to GEOJSON...")
+                resource_format = "GEOJSON"
+
             tmp = os.path.join(temp_dir, "tmp." + resource_format)
             length = 0
             # using MD5 for file deduplication only
@@ -362,7 +374,10 @@ def _push_to_datastore(
             tmp, temp_dir, logger
         )
         if not file_count:
-            logger.error("ZIP file invalid or no files found in ZIP file.")
+            logger.warning("ZIP file invalid, no files found, or ZIP manifest creation is disabled.")
+            return
+        if not extracted_path:
+            logger.warning("ZIP processing skipped (AUTO_CREATE_ZIP_MANIFEST is disabled).")
             return
         logger.info(
             f"More than one file in the ZIP file ({file_count} files), saving metadata..."
@@ -385,7 +400,55 @@ def _push_to_datastore(
 
     # flag to check if the file is a spatial format
     spatial_format_flag = False
-    simplification_failed_flag = False
+    spatial_bounds = None  # Store spatial bounds from GeoJSON/Shapefile
+    
+    # ----------------- is it a DBF file? ---------------
+    # DBF files need special handling since qsv excel doesn't support them
+    # We use Fiona which can read DBF files (they're part of shapefiles)
+    if resource.get("format").upper() == "DBF" or unzipped_format == "DBF":
+        logger.info("Converting DBF file to CSV using Fiona...")
+        try:
+            import fiona
+            
+            qsv_dbf_csv = os.path.join(temp_dir, "qsv_dbf.csv")
+            
+            # Read DBF file using Fiona
+            with fiona.open(tmp, 'r') as dbf:
+                # Get field names from schema
+                fieldnames = list(dbf.schema['properties'].keys())
+                
+                # Write to CSV
+                with open(qsv_dbf_csv, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    
+                    record_count = 0
+                    # Write all records
+                    for feature in dbf:
+                        # Get properties (attributes) from the feature
+                        row = feature['properties']
+                        
+                        # Convert None values to empty strings and ensure all values are strings
+                        clean_row = {}
+                        for field in fieldnames:
+                            value = row.get(field)
+                            if value is None:
+                                clean_row[field] = ''
+                            else:
+                                clean_row[field] = str(value) if not isinstance(value, str) else value
+                        
+                        writer.writerow(clean_row)
+                        record_count += 1
+                    
+                    logger.info(f"Converted DBF to CSV successfully: {record_count} records")
+            
+            tmp = qsv_dbf_csv
+            logger.info("DBF file converted...")
+        except ImportError:
+            raise utils.JobError("Fiona library not installed. Cannot process DBF files. Install with: pip install fiona")
+        except Exception as e:
+            raise utils.JobError(f"Failed to convert DBF file: {e}")
+    
     # ----------------- is it a spreadsheet? ---------------
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
@@ -431,115 +494,46 @@ def _push_to_datastore(
         os.link(tmp, qsv_spatial_file)
         qsv_spatial_csv = os.path.join(temp_dir, "qsv_spatial.csv")
 
-        if conf.AUTO_SPATIAL_SIMPLIFICATION:
-            # Try to convert spatial file to CSV using spatial_helpers
-            logger.info(
-                f"Converting spatial file to CSV with a simplification relative tolerance of {conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE}..."
+        # Convert spatial file to CSV WITHOUT geometry column for datastore
+        # (WKT can be too large for PostgreSQL tsvector)
+        # Spatial extent metadata will be preserved in resource metadata
+        logger.info("Converting spatial file to CSV (attributes only, excluding geometry)...")
+
+        try:
+            success, error_message, bounds = sh.convert_spatial_to_csv(
+                qsv_spatial_file,
+                resource_format,
+                qsv_spatial_csv,
+                max_wkt_length=None,
+                task_logger=logger,
+                exclude_geometry=True,  # Exclude geometry to avoid PostgreSQL size limits
             )
-
-            try:
-                # Use the convert_to_csv function from spatial_helpers
-                success, error_message, bounds = sh.process_spatial_file(
-                    qsv_spatial_file,
-                    resource_format,
-                    output_csv_path=qsv_spatial_csv,
-                    tolerance=conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE,
-                    task_logger=logger,
-                )
-
-                if success:
-                    logger.info(
-                        "Spatial file successfully simplified and converted to CSV"
-                    )
-                    tmp = qsv_spatial_csv
-
-                    # Check if the simplified resource already exists
-                    simplified_resource_name = (
-                        os.path.splitext(resource["name"])[0]
-                        + "_simplified"
-                        + os.path.splitext(resource["name"])[1]
-                    )
-                    existing_resource, existing_resource_id = dsu.resource_exists(
-                        resource["package_id"], simplified_resource_name
-                    )
-
-                    if existing_resource:
-                        logger.info(
-                            "Simplified resource already exists. Replacing it..."
-                        )
-                        dsu.delete_resource(existing_resource_id)
-                    else:
-                        logger.info(
-                            "Simplified resource does not exist. Uploading it..."
-                        )
-                        new_simplified_resource = {
-                            "package_id": resource["package_id"],
-                            "name": os.path.splitext(resource["name"])[0]
-                            + "_simplified"
-                            + os.path.splitext(resource["name"])[1],
-                            "url": "",
-                            "format": resource["format"],
-                            "hash": "",
-                            "mimetype": resource["mimetype"],
-                            "mimetype_inner": resource["mimetype_inner"],
-                        }
-
-                        # Add bounds information if available
-                        if bounds:
-                            minx, miny, maxx, maxy = bounds
-                            new_simplified_resource.update(
-                                {
-                                    "dpp_spatial_extent": {
-                                        "type": "BoundingBox",
-                                        "coordinates": [
-                                            [minx, miny],
-                                            [maxx, maxy],
-                                        ],
-                                    }
-                                }
-                            )
-                            logger.info(
-                                f"Added dpp_spatial_extent to resource metadata: {bounds}"
-                            )
-
-                        dsu.upload_resource(new_simplified_resource, qsv_spatial_file)
-
-                        # delete the simplified spatial file
-                        os.remove(qsv_spatial_file)
-
-                    simplification_failed_flag = False
-                else:
-                    logger.warning(
-                        f"Upload of simplified spatial file failed: {error_message}"
-                    )
-                    simplification_failed_flag = True
-            except Exception as e:
-                logger.warning(f"Simplification and conversion failed: {str(e)}")
-                logger.warning(
-                    f"Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {conf.QSV_STATS_STRING_MAX_LENGTH} characters..."
-                )
-                simplification_failed_flag = True
-                pass
-
-        # If we are not auto-simplifying or simplification failed, use qsv geoconvert
-        if not conf.AUTO_SPATIAL_SIMPLIFICATION or simplification_failed_flag:
-            logger.info("Converting spatial file to CSV using qsv geoconvert...")
-
-            # Run qsv geoconvert
-            qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
-            try:
-                qsv.geoconvert(
-                    tmp,
-                    resource_format,
-                    "csv",
-                    max_length=conf.QSV_STATS_STRING_MAX_LENGTH,
-                    output_file=qsv_geoconvert_csv,
-                )
-            except utils.JobError as e:
-                raise utils.JobError(f"qsv geoconvert failed: {e}")
-
-            tmp = qsv_geoconvert_csv
-            logger.info("Geoconverted successfully")
+            
+            if not success:
+                raise utils.JobError(f"Spatial to CSV conversion failed: {error_message}")
+            
+            tmp = qsv_spatial_csv
+            logger.info("Converted to CSV successfully (attributes only)")
+            spatial_format_flag = True
+            
+            # Store bounds in resource metadata if available
+            if bounds:
+                spatial_bounds = bounds
+                minx, miny, maxx, maxy = spatial_bounds
+                resource.update({
+                    "dpp_spatial_extent": {
+                        "type": "BoundingBox",
+                        "coordinates": [
+                            [minx, miny],
+                            [maxx, maxy],
+                        ],
+                    }
+                })
+                logger.info(f"Added dpp_spatial_extent to resource metadata: {bounds}")
+                logger.info("Note: Geometry column excluded from datastore (too large for PostgreSQL). Spatial extent preserved in metadata.")
+                
+        except Exception as e:
+            raise utils.JobError(f"Spatial to CSV conversion failed: {e}")
 
     else:
         # --- its not a spreadsheet nor a spatial format, its a CSV/TSV/TAB file ------
@@ -769,34 +763,32 @@ def _push_to_datastore(
     qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
 
     try:
-        # If the file is a spatial format, we need to use --max-length
+        # If the file is a spatial format, we need to set the max string length
         # to truncate overly long strings from causing issues with
         # Python's CSV reader and Postgres's limits with the COPY command
         if spatial_format_flag:
-            env = os.environ.copy()
-            env["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
-            qsv_stats = qsv.stats(
-                tmp,
-                infer_dates=True,
-                dates_whitelist=conf.QSV_DATES_WHITELIST,
-                stats_jsonl=True,
-                prefer_dmy=conf.PREFER_DMY,
-                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
-                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
-                output_file=qsv_stats_csv,
-                env=env,
-            )
-        else:
-            qsv_stats = qsv.stats(
-                tmp,
-                infer_dates=True,
-                dates_whitelist=conf.QSV_DATES_WHITELIST,
-                stats_jsonl=True,
-                prefer_dmy=conf.PREFER_DMY,
-                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
-                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
-                output_file=qsv_stats_csv,
-            )
+            # Set environment variable for qsv stats
+            original_max_length = os.environ.get("QSV_STATS_STRING_MAX_LENGTH")
+            os.environ["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
+            
+        qsv_stats = qsv.stats(
+            tmp,
+            infer_dates=True,
+            dates_whitelist=conf.QSV_DATES_WHITELIST,
+            stats_jsonl=True,
+            prefer_dmy=conf.PREFER_DMY,
+            cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
+            summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
+            output_file=qsv_stats_csv,
+        )
+        
+        # Restore original environment variable if it was set for spatial format
+        if spatial_format_flag:
+            if original_max_length is not None:
+                os.environ["QSV_STATS_STRING_MAX_LENGTH"] = original_max_length
+            else:
+                os.environ.pop("QSV_STATS_STRING_MAX_LENGTH", None)
+                
     except utils.JobError as e:
         raise utils.JobError(f"Cannot infer data types and compile statistics: {e}")
 
