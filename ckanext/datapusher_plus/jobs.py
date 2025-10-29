@@ -1174,6 +1174,22 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
             if conf.AUTO_INDEX_THRESHOLD:
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
+    # Go through the qsv_stats_csv file and ensure the "mean" field is empty for
+    # field of type "Date"
+    new_qsv_stats_csv = os.path.join(temp_dir, "qsv_stats_cleaned.csv")
+    with open(qsv_stats_csv, mode="r") as inp, open(new_qsv_stats_csv, mode="w") as outp:
+        reader = csv.DictReader(inp)
+        fieldnames = reader.fieldnames
+        writer = csv.DictWriter(outp, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in reader:
+            if row["type"] == "Date" or row["type"] == "DateTime":
+                row["mean"] = 0
+            writer.writerow(row)
+    qsv_stats_csv = new_qsv_stats_csv
+    logger.info(f"New qsv_stats_csv types for {qsv_stats_csv}")
+    print(open(qsv_stats_csv).read())
+
     # Get the field stats for each field in the headers list
     existing = datastore_resource_exists(resource_id)
     existing_info = None
@@ -1342,11 +1358,9 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
     qsv_freq_cmd = [
         conf.QSV_BIN,
         "frequency",
-        "--limit",
-        "0",
+        "--limit", "0",
         tmp,
-        "--output",
-        qsv_freq_csv,
+        "--output", qsv_freq_csv,
     ]
     try:
         qsv_freq = subprocess.run(qsv_freq_cmd, check=True)
@@ -1366,10 +1380,15 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 value TEXT,
                 count INTEGER,
                 percentage FLOAT,
+                extra TEXT,
                 PRIMARY KEY (field, value, count)
             )
         """
         ).format(freq_table, freq_table)
+        # Could not copy frequency data to database:
+        # extra data after last expected column
+        # CONTEXT: COPY 737a3aad-c1c8-4507-8411-2dc6ca176f84-druf-freq,
+        # line 2: "country,Afghanistan,6,2.52101,1"
     )
 
     # Copy frequency CSV to /tmp directory for debugging purposes
