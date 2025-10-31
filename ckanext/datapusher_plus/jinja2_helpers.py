@@ -887,3 +887,132 @@ def get_column_stats(context, column_name, stat_name=None):
             return field_stats.get(stat_name, 0)
     else:
         return field_stats
+
+
+@jinja2_global
+@pass_context
+def get_dataset_spatial_extent(context: dict) -> dict:
+    """Get the overall spatial extent for the dataset (aggregated from all spatial resources).
+    
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+    
+    Returns:
+        dict: Spatial extent data with bounding box coordinates, or empty dict if none found
+        
+    Example:
+        {{ get_dataset_spatial_extent() }}
+        Returns: {
+            "type": "BoundingBox",
+            "coordinates": [[min_lon, min_lat], [max_lon, max_lat]],
+            "source": "aggregated_from_resources",
+            "resource_count": 2
+        }
+    """
+    package = context.get("package", {})
+    dpp_suggestions = package.get("dpp_suggestions", {})
+    return dpp_suggestions.get("dpp_spatial_extent", {})
+
+
+@jinja2_global
+@pass_context 
+def get_spatial_resources(context: dict) -> dict:
+    """Get all resources in the dataset that have spatial data.
+    
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+    
+    Returns:
+        dict: Dictionary mapping resource IDs to their spatial extent data
+        
+    Example:
+        {{ get_spatial_resources() }}
+        Returns: {
+            "resource-id-1": {
+                "type": "BoundingBox", 
+                "coordinates": [[lon_min, lat_min], [lon_max, lat_max]],
+                "lat_field": "latitude",
+                "lon_field": "longitude", 
+                "resource_name": "Data File 1"
+            },
+            "resource-id-2": { ... }
+        }
+    """
+    package = context.get("package", {})
+    dpp_suggestions = package.get("dpp_suggestions", {})
+    return dpp_suggestions.get("spatial_resources", {})
+
+
+@jinja2_global
+@pass_context
+def has_spatial_data(context: dict, resource_id: str = None) -> bool:
+    """Check if the dataset or a specific resource has spatial data.
+    
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+        resource_id: Optional resource ID to check. If None, checks if dataset has any spatial data.
+    
+    Returns:
+        bool: True if spatial data exists, False otherwise
+        
+    Examples:
+        Check if dataset has any spatial data:
+        {{ has_spatial_data() }}
+        
+        Check if specific resource has spatial data:
+        {{ has_spatial_data("resource-id-123") }}
+    """
+    package = context.get("package", {})
+    dpp_suggestions = package.get("dpp_suggestions", {})
+    spatial_resources = dpp_suggestions.get("spatial_resources", {})
+    
+    if resource_id:
+        return resource_id in spatial_resources
+    else:
+        return len(spatial_resources) > 0
+
+
+@jinja2_global
+@pass_context
+def get_spatial_bounds_wkt(context: dict, resource_id: str = None) -> str:
+    """Get spatial bounds as WKT (Well-Known Text) polygon format.
+    
+    Args:
+        context: The context of the template
+                 (automatically passed by Jinja2 using @pass_context decorator)
+        resource_id: Optional resource ID. If None, returns dataset-level bounds.
+    
+    Returns:
+        str: WKT polygon representation of the spatial bounds
+        
+    Examples:
+        Dataset bounds:
+        {{ get_spatial_bounds_wkt() }}
+        
+        Resource bounds:
+        {{ get_spatial_bounds_wkt("resource-id-123") }}
+        
+        Returns: "POLYGON((lon_min lat_min, lon_min lat_max, lon_max lat_max, lon_max lat_min, lon_min lat_min))"
+    """
+    if resource_id:
+        spatial_resources = get_spatial_resources(context)
+        extent_data = spatial_resources.get(resource_id, {})
+    else:
+        extent_data = get_dataset_spatial_extent(context)
+    
+    if not extent_data or "coordinates" not in extent_data:
+        return ""
+    
+    coords = extent_data["coordinates"]
+    if len(coords) != 2:
+        return ""
+        
+    lon_min, lat_min = coords[0]
+    lon_max, lat_max = coords[1]
+    
+    # Create WKT polygon (counterclockwise order)
+    wkt = f"POLYGON(({lon_min} {lat_min}, {lon_min} {lat_max}, {lon_max} {lat_max}, {lon_max} {lat_min}, {lon_min} {lat_min}))"
+    return wkt

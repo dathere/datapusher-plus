@@ -409,6 +409,8 @@ def extract_zip_or_metadata(
     Extract metadata from ZIP archive and save to CSV file.
     If the ZIP file contains only one item of a supported format and
     AUTO_UNZIP_ONE_FILE is True, extract it directly.
+    If the ZIP file contains shapefile components (.shp, .dbf, .shx, etc.),
+    extract the .dbf file for use as the data source.
 
     Args:
         zip_path: Path to the ZIP file
@@ -418,10 +420,11 @@ def extract_zip_or_metadata(
                      (if not provided, module logger will be used)
 
     Returns:
-        tuple: (int, str, str) - (file_count, result_path, unzipped_format)
+        tuple: (int, str, str, tuple) - (file_count, result_path, unzipped_format, spatial_bounds)
             - file_count: Number of files in the ZIP
             - result_path: Path to the extracted file or metadata CSV
             - unzipped_format: Format of the extracted file (e.g., "csv", "json", etc.)
+            - spatial_bounds: Tuple of (minx, miny, maxx, maxy) if shapefile, else None
     """
     import os
 
@@ -436,6 +439,68 @@ def extract_zip_or_metadata(
         with zipfile.ZipFile(zip_path, "r") as zip_file:
             file_list = [info for info in zip_file.infolist() if not info.is_dir()]
             file_count = len(file_list)
+
+            # Check if this ZIP contains shapefile components
+            shp_files = [f for f in file_list if f.filename.lower().endswith('.shp')]
+            dbf_files = [f for f in file_list if f.filename.lower().endswith('.dbf')]
+            
+            # If we have shapefile components, look for the .dbf file
+            if shp_files and dbf_files:
+                # For each .shp file, try to find matching .dbf file
+                for shp_file in shp_files:
+                    base_name = os.path.splitext(shp_file.filename)[0]
+                    # Look for matching .dbf file (case-insensitive)
+                    matching_dbf = None
+                    for dbf_file in dbf_files:
+                        dbf_base = os.path.splitext(dbf_file.filename)[0]
+                        if dbf_base.lower() == base_name.lower():
+                            matching_dbf = dbf_file
+                            break
+                    
+                    if matching_dbf:
+                        logger.info(
+                            f"ZIP contains shapefile components. Extracting .dbf file: {matching_dbf.filename}"
+                        )
+                        # Extract ONLY the .dbf file (not the whole shapefile)
+                        result_path = os.path.join(output_dir, "shapefile_data.dbf")
+                        with zip_file.open(matching_dbf.filename) as source, open(
+                            result_path, "wb"
+                        ) as target:
+                            target.write(source.read())
+                        logger.info(
+                            f"Successfully extracted shapefile .dbf to '{result_path}'"
+                        )
+                        
+                        # Also extract all shapefile components to read spatial bounds
+                        spatial_bounds = None
+                        try:
+                            # Extract all shapefile components for the matching shapefile
+                            shp_base = base_name
+                            shp_dir = os.path.join(output_dir, "shapefile_temp")
+                            os.makedirs(shp_dir, exist_ok=True)
+                            
+                            # Extract all files that match this shapefile base name
+                            for file_info in file_list:
+                                file_base = os.path.splitext(file_info.filename)[0]
+                                if file_base.lower() == shp_base.lower():
+                                    extract_path = os.path.join(shp_dir, os.path.basename(file_info.filename))
+                                    with zip_file.open(file_info.filename) as source, open(
+                                        extract_path, "wb"
+                                    ) as target:
+                                        target.write(source.read())
+                            
+                            # Read bounds from the extracted shapefile
+                            import fiona
+                            shp_path = os.path.join(shp_dir, os.path.basename(shp_file.filename))
+                            with fiona.open(shp_path, 'r') as src:
+                                bounds = src.bounds
+                                spatial_bounds = bounds  # (minx, miny, maxx, maxy)
+                                logger.info(f"Extracted spatial bounds from shapefile: {bounds}")
+                        except Exception as e:
+                            logger.warning(f"Could not extract spatial bounds from shapefile: {e}")
+                        
+                        # Return DBF format so it will be processed as a DBF file, with spatial bounds
+                        return file_count, result_path, "DBF", spatial_bounds
 
             if file_count == 1 and conf.AUTO_UNZIP_ONE_FILE:
                 file_info = file_list[0]
@@ -455,11 +520,18 @@ def extract_zip_or_metadata(
                     logger.debug(
                         f"Successfully extracted '{file_name}' to '{result_path}'"
                     )
-                    return file_count, result_path, file_ext
+                    return file_count, result_path, file_ext, None
                 else:
                     logger.warning(
                         f"ZIP contains a single file that is not supported: {file_name}"
                     )
+
+            # Check if we should create a manifest
+            if not conf.AUTO_CREATE_ZIP_MANIFEST:
+                logger.info(
+                    f"ZIP file contains {file_count} file/s, but AUTO_CREATE_ZIP_MANIFEST is disabled. Skipping..."
+                )
+                return 0, "", "", None
 
             # Otherwise, write metadata CSV
             logger.info(
@@ -510,14 +582,14 @@ def extract_zip_or_metadata(
                             "compress_type": file_info.compress_type,
                         }
                     )
-                return file_count, result_path, "CSV"
+                return file_count, result_path, "CSV", None
 
     except zipfile.BadZipFile:
         logger.error(f"Error: '{zip_path}' is not a valid ZIP file.")
-        return 0, "", ""
+        return 0, "", "", None
     except Exception as e:
         logger.error(f"Error: {str(e)}")
-        return 0, "", ""
+        return 0, "", "", None
 
 
 def scheming_field_suggestion(field):
