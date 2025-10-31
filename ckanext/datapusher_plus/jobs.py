@@ -370,9 +370,15 @@ def _push_to_datastore(
     if resource_format.upper() == "ZIP":
         logger.info("Processing ZIP file...")
 
-        file_count, extracted_path, unzipped_format = dph.extract_zip_or_metadata(
+        file_count, extracted_path, unzipped_format, zip_spatial_bounds = dph.extract_zip_or_metadata(
             tmp, temp_dir, logger
         )
+        
+        # If spatial bounds were extracted from the shapefile, use them
+        if zip_spatial_bounds:
+            spatial_bounds = zip_spatial_bounds
+            logger.debug(f"Using spatial bounds from ZIP extraction: {spatial_bounds}")
+        
         if not file_count:
             logger.warning("ZIP file invalid, no files found, or ZIP manifest creation is disabled.")
             return
@@ -1279,9 +1285,11 @@ def _push_to_datastore(
     # Check if this is a CSV file (not already processed as spatial format)
     # and detect latitude/longitude columns to calculate spatial extent
     # Use the existing lat/lon detection logic from FormulaProcessor
+    # Note: ZIP and DBF are included because shapefiles (ZIP) contain DBF files 
+    # with lat/lon columns that should be processed for spatial extent
     if (conf.AUTO_CSV_SPATIAL_EXTENT and not spatial_format_flag and 
-        resource_format.upper() in ["CSV", "TSV", "TAB"]):
-        logger.info("Checking for latitude/longitude columns in CSV using existing detection logic...")
+        resource_format.upper() in ["CSV", "TSV", "TAB", "ZIP", "DBF"]):
+        logger.info("Checking for latitude/longitude columns using existing detection logic...")
         
         # Use the detected lat/lon fields from the already initialized FormulaProcessor
         lat_column = formula_processor.dpp.get("LAT_FIELD")
@@ -1329,6 +1337,34 @@ def _push_to_datastore(
         else:
             if formula_processor.dpp.get("NO_LAT_LON_FIELDS"):
                 logger.info("No suitable latitude/longitude column pairs found in CSV")
+    
+    # ============================================================
+    # SPATIAL EXTENT FOR GEOJSON/SHAPEFILE FORMATS
+    # ============================================================
+    # If this was a spatial format (GeoJSON/Shapefile), add the spatial extent
+    # from resource metadata to package dpp_suggestions for the gazetteer widget
+    elif spatial_format_flag and spatial_bounds:
+        logger.info("Adding spatial extent from GeoJSON/Shapefile to package dpp_suggestions...")
+        try:
+            minx, miny, maxx, maxy = spatial_bounds
+            spatial_extent_data = {
+                "type": "BoundingBox",
+                "coordinates": [
+                    [minx, miny],
+                    [maxx, maxy],
+                ],
+            }
+            
+            # Add to package dpp_suggestions for the gazetteer widget to access
+            package.setdefault("dpp_suggestions", {})["dpp_spatial_extent"] = spatial_extent_data
+            
+            logger.info(
+                f"Added dpp_spatial_extent to package dpp_suggestions from spatial format: "
+                f"bounds({minx}, {miny}, {maxx}, {maxy})"
+            )
+            logger.info(f"Spatial extent: {spatial_extent_data}")
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(f"Error adding spatial extent from spatial format to package suggestions: {e}")
 
     package.setdefault("dpp_suggestions", {})[
         "STATUS"
