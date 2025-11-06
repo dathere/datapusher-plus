@@ -1366,15 +1366,11 @@ def _push_to_datastore(task_id, input, dry_run=False, temp_dir=None):
                 value TEXT,
                 count INTEGER,
                 percentage FLOAT,
-                extra TEXT,
+                rank FLOAT,
                 PRIMARY KEY (field, value, count)
             )
         """
         ).format(freq_table, freq_table)
-        # Could not copy frequency data to database:
-        # extra data after last expected column
-        # CONTEXT: COPY 737a3aad-c1c8-4507-8411-2dc6ca176f84-druf-freq,
-        # line 2: "country,Afghanistan,6,2.52101,1"
     )
 
     # Copy frequency CSV to /tmp directory for debugging purposes
