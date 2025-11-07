@@ -3,30 +3,33 @@
 
 from __future__ import annotations
 
-
 import json
+import zipfile
+import csv
 import logging
 import datetime
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional, Union, Dict, List, Tuple
 
 import ckan.plugins.toolkit as toolkit
 
 from ckanext.datapusher_plus.model import Jobs, Metadata, Logs
 import ckanext.datapusher_plus.job_exceptions as jex
+import ckanext.datapusher_plus.config as conf
 
 _ = toolkit._
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
-def datapusher_status(resource_id: str):
+def datapusher_status(resource_id: str) -> Dict[str, str]:
     try:
         return toolkit.get_action("datapusher_status")({}, {"resource_id": resource_id})
     except toolkit.ObjectNotFound:
         return {"status": "unknown"}
 
 
-def datapusher_status_description(status: dict[str, Any]):
+def datapusher_status_description(status: Dict[str, Any]) -> str:
 
     CAPTIONS = {
         "complete": _("Complete"),
@@ -44,7 +47,9 @@ def datapusher_status_description(status: dict[str, Any]):
         return DEFAULT_STATUS
 
 
-def get_job(job_id, limit=None, use_aps_id=False):
+def get_job(
+    job_id: Optional[str], limit: Optional[int] = None, use_aps_id: bool = False
+) -> Optional[Dict[str, Any]]:
     """Return the job with the given job_id as a dict.
 
     The dict also includes any metadata or logs associated with the job.
@@ -130,8 +135,14 @@ def get_job(job_id, limit=None, use_aps_id=False):
 
 
 def add_pending_job(
-    job_id, api_key, job_type, job_key=None, data=None, metadata=None, result_url=None
-):
+    job_id: str,
+    api_key: str,
+    job_type: str,
+    job_key: Optional[str] = None,
+    data: Optional[Dict[str, Any]] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+    result_url: Optional[str] = None,
+) -> None:
     """Add a new job with status "pending" to the jobs table.
 
     All code that adds jobs to the jobs table should go through this function.
@@ -230,7 +241,9 @@ def add_pending_job(
                 raise e
 
 
-def validate_error(error):
+def validate_error(
+    error: Optional[Union[str, Dict[str, Any]]],
+) -> Optional[Dict[str, str]]:
     """Validate and return the given error object.
 
     Based on the given error object, return either None or a dict with a
@@ -270,7 +283,9 @@ def validate_error(error):
             )
 
 
-def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
+def update_job(
+    job_id: str, job_dict: Dict[str, Any]
+) -> None:  # sourcery skip: raise-specific-error
     """Update the database row for the given job_id with the given job_dict.
 
     All functions that update rows in the jobs table do it by calling this
@@ -310,11 +325,11 @@ def update_job(job_id, job_dict):  # sourcery skip: raise-specific-error
         Jobs.update(jobs_dict)
 
     except Exception as e:
-        log.error("Failed to update job %s: %s", job_id, e)
+        logger.error("Failed to update job %s: %s", job_id, e)
         raise e
 
 
-def mark_job_as_completed(job_id, data=None):
+def mark_job_as_completed(job_id: str, data: Optional[Any] = None) -> None:
     """Mark a job as completed successfully.
 
     :param job_id: the job_id of the job to be updated
@@ -332,7 +347,7 @@ def mark_job_as_completed(job_id, data=None):
     update_job(job_id, update_dict)
 
 
-def mark_job_as_errored(job_id, error_object):
+def mark_job_as_errored(job_id: str, error_object: Union[str, Dict[str, str]]) -> None:
     """Mark a job as failed with an error.
 
     :param job_id: the job_id of the job to be updated
@@ -351,7 +366,7 @@ def mark_job_as_errored(job_id, error_object):
     update_job(job_id, update_dict)
 
 
-def mark_job_as_failed_to_post_result(job_id):
+def mark_job_as_failed_to_post_result(job_id: str) -> None:
     """Mark a job as 'failed to post result'.
 
     This happens when a job completes (either successfully or with an error)
@@ -369,7 +384,7 @@ def mark_job_as_failed_to_post_result(job_id):
     update_job(job_id, update_dict)
 
 
-def delete_api_key(job_id):
+def delete_api_key(job_id: str) -> None:
     """Delete the given job's API key from the database.
 
     The API key is used when posting the job's result to the client's callback
@@ -380,6 +395,199 @@ def delete_api_key(job_id):
     update_job(job_id, {"api_key": None})
 
 
-def set_aps_job_id(job_id, aps_job_id):
+def set_aps_job_id(job_id: str, aps_job_id: str) -> None:
 
     update_job(job_id, {"aps_job_id": aps_job_id})
+
+
+def extract_zip_or_metadata(
+    zip_path: Union[str, Path],
+    output_dir: Optional[Union[str, Path]] = None,
+    task_logger: Optional[logging.Logger] = None,
+):
+    """
+    Extract metadata from ZIP archive and save to CSV file.
+    If the ZIP file contains only one item of a supported format and
+    AUTO_UNZIP_ONE_FILE is True, extract it directly.
+
+    Args:
+        zip_path: Path to the ZIP file
+        output_dir: Directory to save the extracted or metadata file
+                    (defaults to zip_path's directory)
+        task_logger: Optional logger to use for logging
+                     (if not provided, module logger will be used)
+
+    Returns:
+        tuple: (int, str, str) - (file_count, result_path, unzipped_format)
+            - file_count: Number of files in the ZIP
+            - result_path: Path to the extracted file or metadata CSV
+            - unzipped_format: Format of the extracted file (e.g., "csv", "json", etc.)
+    """
+    import os
+
+    logger = task_logger if task_logger is not None else logger
+
+    if output_dir is None:
+        output_dir = os.path.dirname(zip_path)
+    # Default result path for metadata
+    result_path = os.path.join(output_dir, "zip_metadata.csv")
+
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zip_file:
+            file_list = [info for info in zip_file.infolist() if not info.is_dir()]
+            file_count = len(file_list)
+
+            if file_count == 1 and conf.AUTO_UNZIP_ONE_FILE:
+                file_info = file_list[0]
+                file_name = file_info.filename
+                file_ext = os.path.splitext(file_name)[1][1:].upper()
+
+                if file_ext in [fmt.upper() for fmt in conf.FORMATS]:
+                    logger.info(
+                        f"ZIP contains a single supported file: {file_name}. Extracting directly for analysis..."
+                    )
+                    # Extract to output_dir with correct extension
+                    result_path = os.path.join(output_dir, f"zip_data.{file_ext}")
+                    with zip_file.open(file_name) as source, open(
+                        result_path, "wb"
+                    ) as target:
+                        target.write(source.read())
+                    logger.debug(
+                        f"Successfully extracted '{file_name}' to '{result_path}'"
+                    )
+                    return file_count, result_path, file_ext
+                else:
+                    logger.warning(
+                        f"ZIP contains a single file that is not supported: {file_name}"
+                    )
+
+            # Otherwise, write metadata CSV
+            logger.info(
+                f"ZIP file contains {file_count} file/s. Saving ZIP metadata..."
+            )
+            with open(result_path, "w", newline="") as csv_file:
+                fieldnames = [
+                    "filename",
+                    "compressed_size",
+                    "file_size",
+                    "compression_ratio",
+                    "date_time",
+                    "create_system",
+                    "create_version",
+                    "extract_version",
+                    "flag_bits",
+                    "internal_attr",
+                    "external_attr",
+                    "CRC",
+                    "compress_type",
+                ]
+                writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+                writer.writeheader()
+                for file_info in file_list:
+                    if file_info.file_size > 0:
+                        compression_ratio = (
+                            file_info.compress_size / file_info.file_size
+                        ) * 100
+                    else:
+                        compression_ratio = 0
+                    date_time = datetime.datetime(*file_info.date_time).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    writer.writerow(
+                        {
+                            "filename": file_info.filename,
+                            "compressed_size": file_info.compress_size,
+                            "file_size": file_info.file_size,
+                            "compression_ratio": f"{compression_ratio:.2f}%",
+                            "date_time": date_time,
+                            "create_system": file_info.create_system,
+                            "create_version": file_info.create_version,
+                            "extract_version": file_info.extract_version,
+                            "flag_bits": file_info.flag_bits,
+                            "internal_attr": file_info.internal_attr,
+                            "external_attr": file_info.external_attr,
+                            "CRC": file_info.CRC,
+                            "compress_type": file_info.compress_type,
+                        }
+                    )
+                return file_count, result_path, "CSV"
+
+    except zipfile.BadZipFile:
+        logger.error(f"Error: '{zip_path}' is not a valid ZIP file.")
+        return 0, "", ""
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        return 0, "", ""
+
+
+def scheming_field_suggestion(field):
+    """
+    Returns suggestion data for a field if it exists
+    """
+    suggestion_label = field.get('suggestion_label', field.get('label', ''))
+    suggestion_formula = field.get('suggestion_formula', field.get('suggest_jinja2', None))
+
+    if suggestion_formula:
+        return {
+            'label': suggestion_label,
+            'formula': suggestion_formula
+        }
+    return None
+
+
+
+def scheming_get_suggestion_value(field_name, data=None, errors=None, lang=None):
+    if not data:
+        return ''
+
+    try:
+        # Log the field name
+        logger.info(f"Field name extracted: {field_name}")
+
+        # Get package data (where dpp_suggestions is stored)
+        package_data = data
+        logger.info(f"Data passed to scheming_get_suggestion_value: {data}")
+
+        # Check if dpp_suggestions exists and has the package section
+        if (package_data and 'dpp_suggestions' in package_data and 
+            isinstance(package_data['dpp_suggestions'], dict) and
+            'package' in package_data['dpp_suggestions']):
+
+            # Get the suggestion value if it exists
+            if field_name in package_data['dpp_suggestions']['package']:
+                logger.info(f"Suggestion value found for field '{field_name}': {package_data['dpp_suggestions']['package'][field_name]}")
+                return package_data['dpp_suggestions']['package'][field_name]
+
+        # No suggestion value found
+        return ''
+    except Exception as e:
+        # Log the error but don't crash
+        logger.warning(f"Error getting suggestion value: {e}")
+        return ''
+
+def scheming_is_valid_suggestion(field, value):
+    """
+    Check if a suggested value is valid for a field, particularly for select fields
+    """
+    # If not a select/choice field, always valid
+    if not field.get('choices') and not field.get('choices_helper'):
+        return True
+
+    # Get all valid choices for this field
+    choices = scheming_field_choices(field)
+    if not choices:
+        return True
+
+    # Check if the value is in the list of valid choices
+    for choice in choices:
+        if choice['value'] == value:
+            return True
+
+    return False
+
+def is_preformulated_field(field):
+    """
+    Check if a field is preformulated (has formula attribute)
+    This helper returns True only if the field has a 'formula' key with a non-empty value
+    """
+    return bool(field.get('formula', False))

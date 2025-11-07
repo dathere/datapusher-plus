@@ -4,12 +4,51 @@
 
 # DataPusher+
 
-DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of
-[ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher.
+> NOTE: v2 is a major revamp. Documentation is currently WIP.
 
-Datapusher+ is droping usage of [CKAN Service Provider][], with [Messytables] replaced by [qsv].
+DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher - [super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file](docs/dataset_schema.yaml).
 
-[TNRIS](https://tnris.org)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
+
+https://github.com/user-attachments/assets/b2fc2c3a-d244-4d11-9cf3-8270f0e99162
+
+
+The Formulas have access to not just the `package` and `resource` fields (in the same namespaces), it also has access to the following information in these additional namespaces that can be used in Jinja2 expressions:
+* `dpps` - with the "s" for stats.<br/>Each field will have an extensive list of summary statistics (by default: 
+type, is_ascii, sum, min/max, range, sort_order, sortiness, min_length, max_length, sum_length, avg_length, stddev_length, variance_length, cv_length, mean, sem, geometric_mean, harmonic_mean, stddev, variance, cv, nullcount, max_precision, sparsity, cardinality, uniqueness_ratio.) Check [here](https://github.com/dathere/qsv/wiki/Supplemental#stats-command-output-explanation) for all other available statistics.
+* `dppf` - with the "f" for frequency table.<br/>Each field will have its frequency table available sorted in descending order the top N (configurable, default 10) values, with a corresponding count & percentage. "Other (COUNT)" will be used as a "basket" for other values with COUNT set to the count of other values beyond the top N. ID fields will be indicated by "<ALL_UNIQUE>" in the table.
+* `dpp` - additional inferred/calculated metadata.<br/>
+  * `ORIGINAL_FILE_SIZE` (bytes)
+  * `PREVIEW_FILE_SIZE` (bytes)
+  * `RECORD_COUNT` (int)
+  * `PREVIEW_RECORD_COUNT` (int)
+  * `IS_SORTED` (bool)
+  * `DEDUPED` (bool)
+  * `DUPE_COUNT` (int: -1 if there are no dupes)
+  * Date/DateTime metadata<br/>
+    DP+ can infer date/datetime columns - supporting 19 different formats. As it is a relatively expensive operation, it will only do so for candidate columns with names that fit a configurable pattern.
+      * `DATE_FIELDS` - a list of inferred date columns
+      * `NO_DATE_FIELDS` (bool)
+      * `DATETIME_FIELDS` - a list of inferred datetime columns
+      * `NO_DATETIME_FIELDS` (bool)
+  * Latitude/Longitude metadata<br/>
+    DP+ can infer the latitude and longitude columns based on the column's characteristics. A column is inferred to be a latitude/longitude column if:
+      * its in a comma-separated priority-order list of lat/long name patterns
+      * for latitude, if its of type "Float" with a range of -90.0 to 90.0, and
+      * for longitude, if its a "Float" with a range of -180.0 to 180.0.
+    * `LAT_FIELD` and `LON_FIELD` - the inferred lat/long columns
+    * `NO_LAT_LONG_FIELDS` (bool)
+
+Beyond the extensive list of built-in Jinja2 [filters](https://jinja.palletsprojects.com/en/stable/templates/#list-of-builtin-filters)/[functions](https://jinja.palletsprojects.com/en/stable/templates/#list-of-global-functions), DP+ also supports an extensive list of additional [custom filters/functions](https://github.com/dathere/datapusher-plus/blob/607e7c5e5d75c5dc7ac55d684522c7972bc33d1d/ckanext/datapusher_plus/jinja2_helpers.py#L171). Several of these helper functions make it trivially easy to calculate [DCAT 3](https://doi-do.github.io/dcat-us/) recommended, optional properties that would ordinarily be too painstaking to manually compile (e.g `dcat-us:GeographicBoundingBox`, `dcat:temporalResolution`, `dcat:startDate`, `dcat:endDate`, etc. ).
+
+There are two Formula types that are indicated by adding these keywords to the scheming yaml file:
+ * `formula` - the formula will be evaluated at resource creation/update time and the result is assigned to the corresponding package/resource field immediately.
+ * `suggest_formula` - the formula will be evaluated at resource creation/update time and the result is stored in the `dpp_suggestions` package field as a compound JSON object. `dpp_suggestions` contains all the suggestion for both package and resource fields. This field is parsed to show "Suggestions" during metadata entry for the associated package/resource field using the Suggestion UI (indicated by a function symbol next to the metadata field name).
+
+ Formulas that fail to evaluate will return with the `#ERROR!:` (reminiscent of Excel's `#VALUE!` function error) prefix followed by a detailed Jinja2 error message.
+
+In addition, Datapusher+ is no longer a webservice, but a full-fledged CKAN extension. It drops usage of the deprecated [CKAN Service Provider][], with the unmaintained [Messytables] replaced by the blazing-fast [qsv] data-wrangling engine.
+
+[TxGIO](https://geographic.texas.gov/)/[TWDB](https://www.twdb.texas.gov/) provided the use cases that informed and supported the development
 of Datapusher+, specifically, to support a [Resource-first upload workflow](docs/RESOURCE_FIRST_WORKFLOW.md#Resource-first-Upload-Workflow).
 
 For a more detailed overview, see the [CKAN Monthly Live Jan 2023 presentation](https://docs.google.com/presentation/d/e/2PACX-1vT0BfmrrtaEINRGg4UI_m7B02_X6HlFr4yN_DXmgX9goVtgu2DNmZjl-SowL9ZA2ibQhDjScRRJh95q/pub?start=false&loop=false&delayms=3000).
@@ -76,6 +115,8 @@ It features:
     * sanitized column names (guaranteeing valid PostgreSQL column identifiers) while preserving the original column name as a label, which is used to label columns in DataTables_view.
     * an optional "summary stats" resource as an extension of the Data Dictionary, with comprehensive summary statistics for each column - sum, min/max/range, min/max length, mean, stddev, variance, nullcount, sparsity, quartiles, IQR, lower/upper fences, skewness, median, mode/s, antimode/s & cardinality.
   * convert Excel & OpenOffice/LibreOffice Calc (ODS) files to CSV, with the ability to choose which sheet to use by default (e.g. 0 is the first sheet, -1 is the last sheet, -2 the second to last sheet, etc.)
+  * convert SHP and GeoJSON files to CSV, with optional geometry simplification.
+  * decompress ZIP archives and insert the manifest as a CSV file with detailed metadata about the files in the archive. For ZIP archives with only one recognized file format, it can also automatically decompress the file and push that instead of the ZIP manifest into the Datastore.
   * convert various date formats ([19 date formats are recognized](https://github.com/jqnatividad/belt/tree/main/dateparser#accepted-date-formats) with each format having several variants; ~80 date format permutations in total) to a standard [RFC 3339](https://www.rfc-editor.org/rfc/rfc3339) format
   * enable random access of a CSV by creating a CSV index - which also enables parallel processing of different parts of a CSV simultaneously (a major reason type inferencing and stats calculation is so fast)
   * instantaneously count the number of rows with a CSV index
@@ -102,6 +143,54 @@ Without an index, it takes 1.3 seconds.
       Ok, that's bad, but what makes it worse is that the old table has been deleted already, and Datapusher doesn't tell you what
       caused the job to fail! YIKES!!!!
 
+## DRUF: Dataset Resource Upload First Workflow
+
+DataPusher+ supports an optional **DRUF (Dataset Resource Upload First)** workflow that allows users to upload data files before creating dataset metadata. This resource-first approach is particularly useful for:
+
+- **Data-driven workflows**: Where the structure and content of the data informs the metadata
+- **Exploratory data publishing**: When you want to examine the data before writing descriptions
+- **Simplified workflows**: Reducing the cognitive load of filling out metadata forms upfront
+
+### How DRUF Works
+
+When DRUF is enabled, the dataset creation workflow is modified:
+
+1. **"Add Dataset" buttons** redirect to a resource upload page instead of the metadata form
+2. **Temporary datasets** are automatically created with placeholder metadata
+3. **Resource upload happens first**, allowing DataPusher+ to analyze the data
+4. **Metadata forms** are enhanced with data-driven suggestions based on the uploaded content
+5. **Form redirects** guide users through a logical resource-first workflow
+
+### Enabling DRUF
+
+- To enable DRUF you need [`DRUF compatable ckan version`](https://github.com/ckan/ckan/tree/7778-iformredirect) 
+- You need to have scheming extension enabled and use the example DRUF compatable schema included in the dp+ extension.
+
+Add the following configuration to your CKAN config file (e.g., `/etc/ckan/default/ckan.ini`):
+
+
+```ini
+# Enable DRUF (Dataset Resource Upload First) workflow
+ckanext.datapusher_plus.enable_druf = true
+ckanext.datapusher_plus.enable_form_redirect = true
+```
+
+
+### Backwards Compatibility
+
+DRUF is completely optional and disabled by default. When disabled:
+- Standard CKAN dataset creation workflow is preserved
+- No template modifications are applied
+- Full backwards compatibility with existing CKAN installations
+
+
+## Requirements:
+* CKAN 2.10+
+* Python 3.10+
+* tested and developed on Ubuntu 22.04.5
+* [`ckan.datastore.sqlsearch.enabled`](https://docs.ckan.org/en/2.10/maintaining/datastore.html#ckanext.datastore.logic.action.datastore_search_sql) set to `true` if you want to use the `temporal_resolution` and `guess_accrual_periodicity` Formula helpers
+* ckanext-scheming extension
+
 ## Development Installation
 
 Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN, and will be available as a CKAN plugin. This will allow for easier integration with CKAN and other CKAN extensions.
@@ -109,22 +198,19 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 1. Install the required packages.
 
     ```bash
-    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev file
+    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev uchardet
     ```
 
-2. Activate the CKAN virtual environment using atleast python 3.8.
+2. Activate the CKAN virtual environment using at least python 3.10.
 
     ```bash
     . /usr/lib/ckan/default/bin/activate
     ```
 
-    > ℹ️ **NOTE:** DP+ requires at least python 3.8 as it makes extensive use of new capabilities introduced in 3.7/3.8
-    > to the [subprocess module](https://docs.python.org/3.8/library/subprocess.html).
-
 3. Install the extension using following commands:
 
     ```bash
-   pip install -e "git+https://github.com/dathere/datapusher-plus.git@1.0.1#egg=datapusher-plus"
+   pip install -e "git+https://github.com/dathere/datapusher-plus.git@2.0.0#egg=datapusher-plus"
     ```
 
 4. Install the dependencies.
@@ -135,15 +221,15 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
 
 5. Install [qsv](https://github.com/dathere/qsv).
 
-    ## Manual Installation
+    ## Option 1: Debian Package Installation (Easiest)
 
     [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
     it to the appropriate directory, e.g. for Linux:
 
     ```bash
-    wget https://github.com/dathere/qsv/releases/download/2.22.1/qsv-2.22.1-x86_64-unknown-linux-gnu.zip
-    unzip qsv-2.22.1-x86_64-unknown-linux-gnu.zip
-    rm qsv-2.22.1-x86_64-unknown-linux-gnu.zip
+    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
     sudo mv qsv* /usr/local/bin
     ```
 
@@ -166,17 +252,18 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
     ### Linux Installation
 
     If you are running Debian based distribution, you can install qsv using the following command:
+    If you are running Debian based Linux distribution on x86_64, you can quickly install qsv using the following commands:
 
     Add the qsv repository to your sources list:
 
       ```bash
-      echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://tino097.github.io/qsv-deb-releases ./" > qsv.list
+      echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://dathere.github.io/qsv-deb-releases ./" > qsv.list
       ```
 
     Import trusted GPG key:
 
       ```bash
-    wget -O - https://tino097.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
+    wget -O - https://dathere.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
       ```
 
     Install qsv:
@@ -186,10 +273,52 @@ Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN,
       sudo apt install qsv
       ```
 
-6. Configure the Datapusher+ database.
+    ## Option 2: Install Prebuilt qsv Binaries (Easy)
+    [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy it to the appropriate directory, e.g. for Ubuntu LTS 22.04 or 24.04:
 
-   Make sure to create the `datapusher` PostgreSQL user and the `datapusher_jobs` database
-   (see [DataPusher+ Database Setup](#datapusher-database-setup)).
+    ```bash
+    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
+    sudo mv qsv* /usr/local/bin
+    ```
+
+    If you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library. If so, use the `qsv-4.0.0-unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+
+
+    > ℹ️ **NOTE:** qsv's prebuilt binaries have the ability to self-update to the latest version. Just run qsv with the `--update` option and it will check for the latest version and update itself as required.
+    > ```
+    > sudo qsvdp --update
+    > ```
+
+    ## Option 3: Build qsv from source 
+    Finally, you can build qsvdp from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster, but may take up to 30 minutes to compile.
+    
+    ```bash
+    git clone https://github.com/dathere/qsv.git
+    cd qsv
+
+    # install Rust, if it's not installed
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+    # build qsvdp
+    CARGO_BUILD_RUSTFLAGS='-C target-cpu=native' cargo build --release --locked --bin qsvdp -F datapusher_plus
+    sudo cp target/release/qsvdp /usr/local/bin
+    cargo clean
+    ```
+
+6. Create an API token for the DP+ Service account. 
+   Replace `CKAN_ADMIN` with an existing CKAN user with sysadmin privileges.
+
+    ```
+    ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$(ckan -c /etc/ckan/default/ckan.ini user token add CKAN_ADMIN dpplus | tail -n 1 | tr -d '\t')"
+    ```
+
+7. DataPusher+ Database Setup
+
+   ```
+   ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
+   ```
 
 ## Configuring
 
@@ -201,69 +330,70 @@ Add `datapusher_plus` to the plugins in your CKAN configuration file
 ```ini
 ckan.plugins = <other plugins> datapusher_plus
 ```
+Use a DP+ extended scheming schema:
 
+```ini
+scheming.dataset_schemas =  ckanext.datapusher_plus:dataset-druf.yaml
+```
 
-> ℹ️ **NOTE:** DP+ recognizes some additional TSV and spreadsheet subformats - `xlsm` and `xlsb` for Excel Spreadsheets,
-> and `tab` for TSV files. To process these subformats, set `ckan.datapusher.formats` as follows in your CKAN.INI file:
->
+Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) for details.
+
 >```ini
-> ckanext.datapusher_plus.copy_readbuffer_size = 1048576
-> ckanext.datapusher_plus.max_content_length = 1256000000000
-> ckanext.datapusher_plus.ignore_file_hash = true
-> ckanext.datapusher_plus.chunk_size = 16384
-> ckanext.datapusher_plus.download_timeout = 300
+> ckanext.datapusher_plus.use_proxy = false
+> ckanext.datapusher_plus.download_proxy = 
 > ckanext.datapusher_plus.ssl_verify = false
-> ckanext.datapusher_plus.download_proxy =
-> ckanext.datapusher_plus.types = csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
-> ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}
+> # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
+> ckanext.datapusher_plus.upload_log_level = INFO
+> ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
 > ckanext.datapusher_plus.pii_screening = false
-> ckanext.datapusher_plus.pii_quick_screen = false
 > ckanext.datapusher_plus.pii_found_abort = false
-> ckanext.datapusher_plus.pii_show_candidates = false
 > ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
-> ckanext.datapusher_plus.qsv_bin =  /usr/local/bin/qsvdp
-> ckanext.datapusher_plus.file_bin = /usr/bin/file
-> ckanext.datapusher_plus.prefer_dmy = false
+> ckanext.datapusher_plus.pii_show_candidates = false
+> ckanext.datapusher_plus.pii_quick_screen = false
+> ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
 > ckanext.datapusher_plus.preview_rows = 100
-> ckanext.datapusher_plus.auto_index_threshold = 3
-> ckanext.datapusher_plus.auto_unique_index = true
-> ckanext.datapusher_plus.auto_index_dates = true
+> ckanext.datapusher_plus.download_timeout = 300
+> ckanext.datapusher_plus.max_content_length = 1256000000000
+> ckanext.datapusher_plus.chunk_size = 16384
+> ckanext.datapusher_plus.default_excel_sheet = 0
 > ckanext.datapusher_plus.sort_and_dupe_check = true
 > ckanext.datapusher_plus.dedup = false
-> ckanext.datapusher_plus.default_excel_sheet = 0
-> ckanext.datapusher_plus.add_summary_stats_resource = false
+> ckanext.datapusher_plus.unsafe_prefix = unsafe_
+> ckanext.datapusher_plus.reserved_colnames = _id
+> ckanext.datapusher_plus.prefer_dmy = false
+> ckanext.datapusher_plus.ignore_file_hash = true
+> ckanext.datapusher_plus.auto_index_threshold = 3
+> ckanext.datapusher_plus.auto_index_dates = true
+> ckanext.datapusher_plus.auto_unique_index = true
 > ckanext.datapusher_plus.summary_stats_options =
+> ckanext.datapusher_plus.add_summary_stats_resource = false
+> ckanext.datapusher_plus.summary_stats_with_preview = false
+> ckanext.datapusher_plus.qsv_stats_string_max_length = 32767
+> ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created
+> ckanext.datapusher_plus.qsv_freq_limit = 10
 > ckanext.datapusher_plus.auto_alias = true
 > ckanext.datapusher_plus.auto_alias_unique = false
-> ckanext.datapusher_plus.api_token = 
+> ckanext.datapusher_plus.copy_readbuffer_size = 1048576
+> ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
+> ckanext.datapusher_plus.auto_spatial_simplication = true
+> ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+> ckanext.datapusher_plus.latitude_fields = latitude,lat
+> ckanext.datapusher_plus.longitude_fields = longitude,long,lon
+> ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+> ckanext.datapusher_plus.auto_unzip_one_file = true
+> ckanext.datapusher_plus.api_token = <CKAN service account token for CKAN user with sysadmin privileges>
+>ckanext.datapusher_plus.describeGPT_api_key = <Token for OpenAI API compatible service>
 >```
 >
 >and add this entry to your CKAN's `resource_formats.json` file.
 >
->```json
+>```
 > ["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
 >```
 
-### DataPusher+ Database Setup
-
-DP+ tables will be created with the command:
-
-```bash
-ckan -c /etc/ckan/default/ckan.ini datapusher_plus db-init
-```
-
-**NOTE:** If you are upgrading from a previous version of Datapusher, you will need to run the following command to upgrade the database:
-
-```bash
-
-ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
-
-```
-
 ## Usage
 
-Any file that has one of the supported formats (defined in [`ckanext.datapusher_plus.formats`](https://docs.ckan.org/en/latest/maintaining/configuration.html#ckan-datapusher-formats)) will be attempted to be loaded
-into the DataStore.
+Any file that has one of the supported formats (defined in `ckanext.datapusher_plus.formats`) will be attempted to be loaded into the DataStore.
 
 You can also manually trigger resources to be resubmitted. When editing a resource in CKAN (clicking the "Manage" button on a resource page), a new tab named "DataStore" will appear. This will contain a log of the last attempted upload and a button to retry the upload. Once a resource has been "pushed" into the Datastore, a "Data Dictionary" tab will also be available where the data pusblisher can fine-tune the inferred data dictionary.
 
@@ -286,7 +416,7 @@ To Resubmit a specific resource, whether or not the hash of the data file has ch
 
 ## License
 
-This material is copyright (c) 2020 Open Knowledge Foundation and other contributors
+This material is copyright (c) 2025, datHere, Open Knowledge Foundation and other contributors
 
 It is open and licensed under the GNU Affero General Public License (AGPL) v3.0
 whose full text may be found at:
