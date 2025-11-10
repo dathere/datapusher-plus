@@ -161,6 +161,107 @@ jobs:
           pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'
           
           echo "Installation complete: GDAL, ckanapi, datapusher-plus, and ckanext-scheming"
+
+
+      - name: Check GLIBC version
+        run: |
+          echo "=== System Information ==="
+          lsb_release -a 2>/dev/null || cat /etc/os-release
+          echo ""
+          echo "=== GLIBC Version ==="
+          ldd --version | head -n1
+          echo ""
+          echo "=== libc6 Package Version ==="
+          apt-cache policy libc6 | head -n3  
+
+      - name: Install qsv
+        run: |
+          set -eu
+          
+          # Install potential missing runtime dependencies for GNU version
+          apt-get update
+          apt-get install -y libc6 libgcc-s1 libstdc++6 wget unzip
+          
+          # Download GNU version of qsv
+          QSV_VER="9.1.0"
+          QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-gnu.zip"
+          QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
+          
+          echo "Downloading qsv GNU version from: $QSV_URL"
+          mkdir -p /tmp/qsv-install && cd /tmp/qsv-install
+          
+          if ! wget -q "$QSV_URL" -O "$QSV_ZIP"; then
+            echo "Failed to download qsv"
+            exit 1
+          fi
+          
+          echo "Download successful. Extracting..."
+          unzip -q "$QSV_ZIP"
+          
+          echo "=== Files in archive ==="
+          ls -lh
+          
+          # Try to find and install the qsv binary
+          QSV_BINARY=""
+          if [ -f "qsvdp" ]; then
+            QSV_BINARY="qsvdp"
+          elif [ -f "qsv" ]; then
+            QSV_BINARY="qsv"
+          else
+            echo "ERROR: Could not find qsv or qsvdp binary in extracted files"
+            echo "Archive contents:"
+            ls -la
+            exit 1
+          fi
+          
+          echo "Found binary: $QSV_BINARY"
+          
+          # Make binary executable and move to bin
+          chmod +x "$QSV_BINARY"
+          mv "$QSV_BINARY" "/usr/local/bin/$QSV_BINARY"
+          
+          # Check if binary runs and show any missing libraries
+          echo "Testing qsv installation..."
+          if ! /usr/local/bin/$QSV_BINARY --version; then
+            echo "qsv failed to run. Checking for missing libraries..."
+            ldd /usr/local/bin/$QSV_BINARY || true
+            
+            # Alternative: Try the musl version if GNU fails
+            echo "GNU version failed. Falling back to musl version..."
+            cd /tmp/qsv-install
+            rm -f "$QSV_ZIP"
+            
+            QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
+            QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
+            
+            echo "Downloading musl version from: $QSV_URL"
+            if ! wget -q "$QSV_URL" -O "$QSV_ZIP"; then
+              echo "Failed to download musl version"
+              exit 1
+            fi
+            
+            unzip -qo "$QSV_ZIP"
+            
+            if [ -f "qsvdp" ]; then
+              chmod +x qsvdp
+              mv -f qsvdp /usr/local/bin/qsvdp
+              echo "Installed musl version of qsvdp"
+            elif [ -f "qsv" ]; then
+              chmod +x qsv
+              mv -f qsv /usr/local/bin/qsv
+              echo "Installed musl version of qsv"
+            fi
+            
+            # Test musl version
+            /usr/local/bin/qsvdp --version 2>/dev/null || /usr/local/bin/qsv --version 2>/dev/null || echo "Warning: qsv installed but version check failed"
+          else
+            echo "qsv GNU version installed successfully!"
+          fi
+          
+          # Clean up
+          cd /
+          rm -rf /tmp/qsv-install
+          
       - name: Install qsv (musl static)
         run: |
           set -eu
