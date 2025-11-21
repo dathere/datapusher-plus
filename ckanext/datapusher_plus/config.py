@@ -32,7 +32,7 @@ UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "IN
 # Supported formats
 FORMATS = tk.config.get(
     "ckanext.datapusher_plus.formats",
-    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "qgis", "zip", "dbf"],
+    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "qgis", "zip"],
 )
 if isinstance(FORMATS, str):
     FORMATS = FORMATS.split()
@@ -62,7 +62,7 @@ MAX_CONTENT_LENGTH = tk.asint(
     tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
 )
 CHUNK_SIZE = tk.asint(tk.config.get("ckanext.datapusher_plus.chunk_size", "1048576"))
-DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("DEFAULT_EXCEL_SHEET", 0))
+DEFAULT_EXCEL_SHEET = tk.asint(tk.config.get("ckanext.datapusher_plus.default_excel_sheet", 0))
 SORT_AND_DUPE_CHECK = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.sort_and_dupe_check", True)
 )
@@ -177,9 +177,30 @@ AUTO_UNZIP_ONE_FILE = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_unzip_one_file", True)
 )
 
-# if a zip archive contains multiple files (and does not contain a shapefile),
-# automatically create a manifest CSV with metadata about the zip contents
-# and pump that into the datastore. If set to False, the zip will be skipped.
-AUTO_CREATE_ZIP_MANIFEST = tk.asbool(
-    tk.config.get("ckanext.datapusher_plus.auto_create_zip_manifest", True)
+# AI Suggestions Settings
+ENABLE_AI_SUGGESTIONS = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.enable_ai_suggestions", True)
+)
+OPENROUTER_API_KEY = tk.config.get("ckanext.datapusher_plus.openrouter_api_key", "")
+OPENROUTER_MODEL = tk.config.get(
+    "ckanext.datapusher_plus.openrouter_model", "anthropic/claude-3.5-sonnet"
+)
+OPENROUTER_BASE_URL = tk.config.get(
+    "ckanext.datapusher_plus.openrouter_base_url", "https://openrouter.ai/api/v1"
+)
+AI_TEMPERATURE = tk.config.get("ckanext.datapusher_plus.ai_temperature", 0.7)
+AI_MAX_TOKENS = tk.asint(tk.config.get("ckanext.datapusher_plus.ai_max_tokens", "2000"))
+AI_TIMEOUT = tk.asint(tk.config.get("ckanext.datapusher_plus.ai_timeout", "60"))
+AI_MAX_CONTEXT_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.ai_max_context_length", "8000")
+)
+AI_MIN_DESCRIPTION_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.ai_min_description_length", "50")
+)
+AI_MAX_TAGS = tk.asint(tk.config.get("ckanext.datapusher_plus.ai_max_tags", "10"))
+AI_INCLUDE_SAMPLE_DATA = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.ai_include_sample_data", True)
+)
+AI_FALLBACK_ON_FAILURE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.ai_fallback_on_failure", True)
 )

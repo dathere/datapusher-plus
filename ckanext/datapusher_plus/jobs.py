@@ -1194,6 +1194,79 @@ def _push_to_datastore(
             f'...indexing/vacuum analysis done. Indexed {index_count} column/s in "{resource_id}" in {index_elapsed:,.2f} seconds.'
         )
 
+
+    # ============================================================
+    # GENERATE AI SUGGESTIONS
+    # ============================================================
+    # Generate AI-powered suggestions for dataset fields using QSV analysis
+    ai_suggestions_start = time.perf_counter()
+    
+    # Fetch the scheming_yaml and package first (needed for both AI and DRUF)
+    package_id = resource["package_id"]
+    scheming_yaml, package = dsu.get_scheming_yaml(
+        package_id, scheming_yaml_type="dataset"
+    )
+    
+    if conf.ENABLE_AI_SUGGESTIONS:
+        logger.info("Generating AI suggestions...")
+        try:
+            from ckanext.datapusher_plus.ai_suggestions import AIDescriptionGenerator
+            
+            ai_generator = AIDescriptionGenerator(logger=logger)
+            
+            # Get sample data for context
+            sample_data = None
+            try:
+                qsv_sample = qsv.slice(
+                    tmp,
+                    start=0,
+                    end=10,  # Get first 10 rows as sample
+                )
+                sample_data = str(qsv_sample.stdout)
+            except Exception as e:
+                logger.warning(f"Could not get sample data for AI: {e}")
+            
+            # Generate AI suggestions
+            ai_suggestions = ai_generator.generate_ai_suggestions(
+                resource_metadata=resource,
+                dataset_metadata=package,
+                stats_data=resource_fields_stats,
+                freq_data=resource_fields_freqs,
+                dataset_stats=dataset_stats,
+                sample_data=sample_data
+            )
+            
+            # Store AI suggestions in dpp_suggestions field
+            if ai_suggestions:
+                logger.info(f"Generated {len(ai_suggestions)} AI suggestions")
+                
+                # Ensure dpp_suggestions field exists in package
+                if "dpp_suggestions" not in package:
+                    package["dpp_suggestions"] = {}
+                
+                # Store AI suggestions under 'ai_suggestions' key
+                package["dpp_suggestions"]["ai_suggestions"] = ai_suggestions
+                
+                # Update package with AI suggestions
+                try:
+                    dsu.patch_package(package)
+                    logger.info("AI suggestions stored in package")
+                except Exception as e:
+                    logger.error(f"Error storing AI suggestions: {e}")
+            else:
+                logger.info("No AI suggestions generated")
+                
+            ai_suggestions_elapsed = time.perf_counter() - ai_suggestions_start
+            logger.info(f"AI suggestions generation completed in {ai_suggestions_elapsed:,.2f} seconds")
+            
+        except ImportError as e:
+            logger.warning(f"Could not import AI suggestions module: {e}")
+        except Exception as e:
+            logger.error(f"Error generating AI suggestions: {e}")
+            logger.debug(f"AI suggestions error details: {traceback.format_exc()}")
+    else:
+        logger.debug("AI suggestions are disabled")
+    
     # ============================================================
     # PROCESS DRUF JINJA2 FORMULAE
     # ============================================================
