@@ -18,6 +18,8 @@ import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.logic.action as action
 import ckanext.datapusher_plus.logic.auth as auth
 import ckanext.datapusher_plus.cli as cli
+import ckanext.datapusher_plus.jinja2_helpers as dphj
+
 
 tk = p.toolkit
 
@@ -221,6 +223,12 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
             "scheming_get_suggestion_value": dph.scheming_get_suggestion_value,
             "scheming_is_valid_suggestion": dph.scheming_is_valid_suggestion,
             "is_preformulated_field": dph.is_preformulated_field,
+            "spatial_extent_feature_collection": dphj.spatial_extent_feature_collection,
+            "scheming_has_ai_suggestion_fields": dph.scheming_has_ai_suggestion_fields,
+            "scheming_field_supports_ai_suggestion": dph.scheming_field_supports_ai_suggestion,
+            "scheming_get_ai_suggestion_value": dph.scheming_get_ai_suggestion_value,
+            "scheming_has_ai_suggestions": dph.scheming_has_ai_suggestions,
+            "scheming_get_ai_suggestion_source": dph.scheming_get_ai_suggestion_source,
         }
 
     # IBlueprint

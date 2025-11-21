@@ -14,3 +14,11 @@ suggestions:
   contents:
     - js/scheming-suggestions.js
 
+ai-suggestions:
+  filter: rjsmin
+  output: datapusher_plus/%(version)s_scheming-ai-suggestions.js
+  contents:
+    - js/scheming-ai-suggestions.js
+  extra:
+    preload:
+      - base/main

@@ -409,6 +409,8 @@ def extract_zip_or_metadata(
     Extract metadata from ZIP archive and save to CSV file.
     If the ZIP file contains only one item of a supported format and
     AUTO_UNZIP_ONE_FILE is True, extract it directly.
+    If the ZIP file contains shapefile components (.shp, .dbf, .shx, etc.),
+    extract the .dbf file for use as the data source.
 
     Args:
         zip_path: Path to the ZIP file
@@ -418,10 +420,11 @@ def extract_zip_or_metadata(
                      (if not provided, module logger will be used)
 
     Returns:
-        tuple: (int, str, str) - (file_count, result_path, unzipped_format)
+        tuple: (int, str, str, tuple) - (file_count, result_path, unzipped_format, spatial_bounds)
             - file_count: Number of files in the ZIP
             - result_path: Path to the extracted file or metadata CSV
             - unzipped_format: Format of the extracted file (e.g., "csv", "json", etc.)
+            - spatial_bounds: Tuple of (minx, miny, maxx, maxy) if shapefile, else None
     """
     import os
 
@@ -436,6 +439,68 @@ def extract_zip_or_metadata(
         with zipfile.ZipFile(zip_path, "r") as zip_file:
             file_list = [info for info in zip_file.infolist() if not info.is_dir()]
             file_count = len(file_list)
+
+            # Check if this ZIP contains shapefile components
+            shp_files = [f for f in file_list if f.filename.lower().endswith('.shp')]
+            dbf_files = [f for f in file_list if f.filename.lower().endswith('.dbf')]
+            
+            # If we have shapefile components, look for the .dbf file
+            if shp_files and dbf_files:
+                # For each .shp file, try to find matching .dbf file
+                for shp_file in shp_files:
+                    base_name = os.path.splitext(shp_file.filename)[0]
+                    # Look for matching .dbf file (case-insensitive)
+                    matching_dbf = None
+                    for dbf_file in dbf_files:
+                        dbf_base = os.path.splitext(dbf_file.filename)[0]
+                        if dbf_base.lower() == base_name.lower():
+                            matching_dbf = dbf_file
+                            break
+                    
+                    if matching_dbf:
+                        logger.info(
+                            f"ZIP contains shapefile components. Extracting .dbf file: {matching_dbf.filename}"
+                        )
+                        # Extract ONLY the .dbf file (not the whole shapefile)
+                        result_path = os.path.join(output_dir, "shapefile_data.dbf")
+                        with zip_file.open(matching_dbf.filename) as source, open(
+                            result_path, "wb"
+                        ) as target:
+                            target.write(source.read())
+                        logger.info(
+                            f"Successfully extracted shapefile .dbf to '{result_path}'"
+                        )
+                        
+                        # Also extract all shapefile components to read spatial bounds
+                        spatial_bounds = None
+                        try:
+                            # Extract all shapefile components for the matching shapefile
+                            shp_base = base_name
+                            shp_dir = os.path.join(output_dir, "shapefile_temp")
+                            os.makedirs(shp_dir, exist_ok=True)
+                            
+                            # Extract all files that match this shapefile base name
+                            for file_info in file_list:
+                                file_base = os.path.splitext(file_info.filename)[0]
+                                if file_base.lower() == shp_base.lower():
+                                    extract_path = os.path.join(shp_dir, os.path.basename(file_info.filename))
+                                    with zip_file.open(file_info.filename) as source, open(
+                                        extract_path, "wb"
+                                    ) as target:
+                                        target.write(source.read())
+                            
+                            # Read bounds from the extracted shapefile
+                            import fiona
+                            shp_path = os.path.join(shp_dir, os.path.basename(shp_file.filename))
+                            with fiona.open(shp_path, 'r') as src:
+                                bounds = src.bounds
+                                spatial_bounds = bounds  # (minx, miny, maxx, maxy)
+                                logger.info(f"Extracted spatial bounds from shapefile: {bounds}")
+                        except Exception as e:
+                            logger.warning(f"Could not extract spatial bounds from shapefile: {e}")
+                        
+                        # Return DBF format so it will be processed as a DBF file, with spatial bounds
+                        return file_count, result_path, "DBF", spatial_bounds
 
             if file_count == 1 and conf.AUTO_UNZIP_ONE_FILE:
                 file_info = file_list[0]
@@ -455,11 +520,18 @@ def extract_zip_or_metadata(
                     logger.debug(
                         f"Successfully extracted '{file_name}' to '{result_path}'"
                     )
-                    return file_count, result_path, file_ext
+                    return file_count, result_path, file_ext, None
                 else:
                     logger.warning(
                         f"ZIP contains a single file that is not supported: {file_name}"
                     )
+
+            # Check if we should create a manifest
+            if not conf.AUTO_CREATE_ZIP_MANIFEST:
+                logger.info(
+                    f"ZIP file contains {file_count} file/s, but AUTO_CREATE_ZIP_MANIFEST is disabled. Skipping..."
+                )
+                return 0, "", "", None
 
             # Otherwise, write metadata CSV
             logger.info(
@@ -510,14 +582,14 @@ def extract_zip_or_metadata(
                             "compress_type": file_info.compress_type,
                         }
                     )
-                return file_count, result_path, "CSV"
+                return file_count, result_path, "CSV", None
 
     except zipfile.BadZipFile:
         logger.error(f"Error: '{zip_path}' is not a valid ZIP file.")
-        return 0, "", ""
+        return 0, "", "", None
     except Exception as e:
         logger.error(f"Error: {str(e)}")
-        return 0, "", ""
+        return 0, "", "", None
 
 
 def scheming_field_suggestion(field):
@@ -591,3 +663,157 @@ def is_preformulated_field(field):
     This helper returns True only if the field has a 'formula' key with a non-empty value
     """
     return bool(field.get('formula', False))
+
+
+
+
+
+def scheming_has_ai_suggestion_fields(schema):
+    """
+    Check if the schema has any fields that support AI suggestions
+    
+    Args:
+        schema: The schema dictionary
+        
+    Returns:
+        bool: True if any field supports AI suggestions, False otherwise
+    """
+    if not schema:
+        return False
+        
+    if 'dataset_fields' in schema:
+        for field in schema['dataset_fields']:
+            if field.get('ai_suggestion', False):
+                return True
+                
+    if 'resource_fields' in schema:
+        for field in schema['resource_fields']:
+            if field.get('ai_suggestion', False):
+                return True
+                
+    return False
+
+def scheming_field_supports_ai_suggestion(field):
+    """
+    Check if a field supports AI suggestions
+    
+    Args:
+        field: The field dictionary from the schema
+        
+    Returns:
+        bool: True if the field supports AI suggestions, False otherwise
+    """
+    return field.get('ai_suggestion', False)
+
+def scheming_get_ai_suggestion_value(field_name, data=None):
+    """
+    Get AI suggestion value for a field from dpp_suggestions
+    
+    Args:
+        field_name: Name of the field
+        data: Form data dictionary containing dpp_suggestions
+        
+    Returns:
+        str: AI suggestion value or empty string if not available
+    """
+    if not data:
+        logger.debug(f"No data provided to scheming_get_ai_suggestion_value for field '{field_name}'")
+        return ""
+    
+    # Get dpp_suggestions from data
+    dpp_suggestions = data.get('dpp_suggestions', {})
+    
+    # Handle JSON string
+    if isinstance(dpp_suggestions, str):
+        try:
+            import json
+            dpp_suggestions = json.loads(dpp_suggestions)
+        except (json.JSONDecodeError, TypeError):
+            logger.debug(f"Failed to parse dpp_suggestions JSON for field '{field_name}'")
+            return ""
+    
+    # Get AI suggestions
+    ai_suggestions = dpp_suggestions.get('ai_suggestions', {})
+    
+    if not ai_suggestions or not isinstance(ai_suggestions, dict):
+        logger.debug(f"No AI suggestions found for field '{field_name}'. dpp_suggestions keys: {list(dpp_suggestions.keys())}")
+        return ""
+    
+    # Get suggestion for this field
+    field_suggestion = ai_suggestions.get(field_name, {})
+    
+    if isinstance(field_suggestion, dict):
+        value = field_suggestion.get('value', '')
+        if value:
+            logger.debug(f"Found AI suggestion for '{field_name}': {len(value)} chars")
+        return value
+    
+    return str(field_suggestion) if field_suggestion else ""
+
+
+def scheming_has_ai_suggestions(data=None):
+    """
+    Check if AI suggestions are available in the data
+    
+    Args:
+        data: Form data dictionary containing dpp_suggestions
+        
+    Returns:
+        bool: True if AI suggestions are available, False otherwise
+    """
+    if not data:
+        return False
+    
+    # Get dpp_suggestions from data
+    dpp_suggestions = data.get('dpp_suggestions', {})
+    
+    # Handle JSON string
+    if isinstance(dpp_suggestions, str):
+        try:
+            dpp_suggestions = json.loads(dpp_suggestions)
+        except (json.JSONDecodeError, TypeError):
+            return False
+    
+    # Check if AI suggestions exist
+    ai_suggestions = dpp_suggestions.get('ai_suggestions', {})
+    
+    return bool(ai_suggestions and isinstance(ai_suggestions, dict))
+
+
+def scheming_get_ai_suggestion_source(field_name, data=None):
+    """
+    Get the source of AI suggestion for a field
+    
+    Args:
+        field_name: Name of the field
+        data: Form data dictionary containing dpp_suggestions
+        
+    Returns:
+        str: Source of the suggestion (e.g., "AI Generated", "Auto-generated")
+    """
+    if not data:
+        return ""
+    
+    # Get dpp_suggestions from data
+    dpp_suggestions = data.get('dpp_suggestions', {})
+    
+    # Handle JSON string
+    if isinstance(dpp_suggestions, str):
+        try:
+            dpp_suggestions = json.loads(dpp_suggestions)
+        except (json.JSONDecodeError, TypeError):
+            return ""
+    
+    # Get AI suggestions
+    ai_suggestions = dpp_suggestions.get('ai_suggestions', {})
+    
+    if not ai_suggestions or not isinstance(ai_suggestions, dict):
+        return ""
+    
+    # Get suggestion for this field
+    field_suggestion = ai_suggestions.get(field_name, {})
+    
+    if isinstance(field_suggestion, dict):
+        return field_suggestion.get('source', 'AI Generated')
+    
+    return ""

@@ -23,6 +23,213 @@ from ckanext.datapusher_plus.logging_utils import TRACE
 logger = logging.getLogger(__name__)
 
 
+def extract_spatial_bounds(
+    input_path: Union[str, Path],
+    resource_format: str,
+    task_logger: Optional[logging.Logger] = None,
+) -> Optional[Tuple[float, float, float, float]]:
+    """
+    Extract bounding box from a spatial file without full processing.
+
+    This is a lightweight function that only reads the spatial file metadata
+    to extract the bounding box coordinates, without performing simplification
+    or conversion to CSV.
+
+    Args:
+        input_path (Union[str, Path]): Path to the input spatial file. Can be a zipped Shapefile
+            or a GeoJSON file.
+        resource_format (str): The format of the spatial file (e.g., "SHP", "QGIS", "GEOJSON").
+        task_logger (Optional[logging.Logger], optional): Logger to use for logging progress and
+            errors. If not provided, a module-level logger is used.
+
+    Returns:
+        Optional[Tuple[float, float, float, float]]: Bounding box coordinates (minx, miny, maxx, maxy)
+            or None if extraction fails.
+    """
+    log = task_logger if task_logger is not None else logger
+    zip_temp_dir = None
+    
+    try:
+        input_path = Path(input_path)
+        if not input_path.exists():
+            log.warning(f"Input file does not exist: {input_path}")
+            return None
+
+        # Handle zipped Shapefiles
+        if resource_format.upper() == "SHP" or resource_format.upper() == "QGIS":
+            zip_temp_dir = input_path.parent / f"temp_bounds_{uuid.uuid4()}"
+            zip_temp_dir.mkdir(exist_ok=True)
+
+            with zipfile.ZipFile(input_path, "r") as zip_ref:
+                zip_ref.extractall(zip_temp_dir)
+
+            shp_files = [
+                f for f in os.listdir(zip_temp_dir) if f.lower().endswith(".shp")
+            ]
+
+            if shp_files:
+                input_path = zip_temp_dir / shp_files[0]
+                log.debug(f"Extracting bounds from shapefile: {input_path}")
+            else:
+                log.warning("No .shp file found in the zipped Shapefile")
+                return None
+
+        # Extract bounds using Fiona
+        with fiona.open(input_path) as src:
+            bounds = src.bounds
+            log.info(f"Extracted spatial bounds: {bounds}")
+            return bounds
+
+    except Exception as e:
+        log.warning(f"Failed to extract spatial bounds: {str(e)}")
+        return None
+    finally:
+        if zip_temp_dir and zip_temp_dir.exists():
+            shutil.rmtree(zip_temp_dir)
+
+
+def convert_spatial_to_csv(
+    input_path: Union[str, Path],
+    resource_format: str,
+    output_csv_path: Union[str, Path],
+    max_wkt_length: Optional[int] = None,
+    task_logger: Optional[logging.Logger] = None,
+    exclude_geometry: bool = False,
+) -> Tuple[bool, Optional[str], Optional[Tuple[float, float, float, float]]]:
+    """
+    Convert a spatial file to CSV format with WKT geometry column (no simplification).
+
+    This function provides a reliable alternative to qsv geoconvert, using Fiona and
+    Shapely to read spatial data and convert geometries to WKT format.
+
+    Args:
+        input_path (Union[str, Path]): Path to the input spatial file. Can be a zipped Shapefile
+            or a GeoJSON file.
+        resource_format (str): The format of the spatial file (e.g., "SHP", "QGIS", "GEOJSON").
+        output_csv_path (Union[str, Path]): Path to the output CSV file.
+        max_wkt_length (Optional[int], optional): Maximum length for WKT strings. If provided,
+            WKT strings longer than this will be truncated with ellipsis.
+        task_logger (Optional[logging.Logger], optional): Logger to use for logging progress and
+            errors. If not provided, a module-level logger is used.
+        exclude_geometry (bool, optional): If True, exclude the geometry column from output.
+            Useful when geometry is too large for datastore. Default is False.
+
+    Returns:
+        Tuple[bool, Optional[str], Optional[Tuple[float, float, float, float]]]
+            - success (bool): True if the conversion was successful, False otherwise.
+            - error_message (Optional[str]): Error message if failed, or None if successful.
+            - bounds (Optional[Tuple[float, float, float, float]]): Bounding box coordinates 
+              (minx, miny, maxx, maxy) or None if failed
+
+    Notes:
+        - The output CSV will contain all attribute columns plus a "geometry" column with WKT
+          (unless exclude_geometry is True).
+        - No simplification is performed - geometries are converted as-is.
+        - If max_wkt_length is specified, long WKT strings will be truncated.
+    """
+    log = task_logger if task_logger is not None else logger
+    zip_temp_dir = None
+    
+    try:
+        input_path = Path(input_path)
+        if not input_path.exists():
+            return False, f"Input file does not exist: {input_path}", None
+
+        output_csv_path = Path(output_csv_path)
+        
+        log.info(f"Converting spatial file to CSV: {input_path}")
+        
+        # Handle zipped Shapefiles
+        if resource_format.upper() == "SHP" or resource_format.upper() == "QGIS":
+            zip_temp_dir = input_path.parent / f"temp_convert_{uuid.uuid4()}"
+            zip_temp_dir.mkdir(exist_ok=True)
+
+            with zipfile.ZipFile(input_path, "r") as zip_ref:
+                zip_ref.extractall(zip_temp_dir)
+
+            shp_files = [
+                f for f in os.listdir(zip_temp_dir) if f.lower().endswith(".shp")
+            ]
+
+            if shp_files:
+                input_path = zip_temp_dir / shp_files[0]
+                log.debug(f"Using shapefile: {input_path}")
+            else:
+                return False, "No .shp file found in the zipped Shapefile", None
+
+        # Read spatial features using Fiona
+        log.debug(f"Reading features from {input_path}")
+        with fiona.open(input_path) as src:
+            features = list(src)
+            bounds = src.bounds
+            log.info(f"Source CRS: {src.crs}")
+            log.info(f"Source bounds: {bounds}")
+            log.info(f"Found {len(features)} features")
+
+        if not features:
+            return False, "No features found in the input file", None
+
+        # Process features
+        valid_attributes = []
+        wkt_geoms = [] if not exclude_geometry else None
+        error_count = 0
+
+        for i, feat in enumerate(features):
+            try:
+                # Get attributes
+                valid_attributes.append(feat["properties"])
+                
+                # Convert to WKT only if not excluding geometry
+                if not exclude_geometry:
+                    # Convert GeoJSON geometry to Shapely geometry
+                    original_geom = shape(feat["geometry"])
+                    
+                    # Convert to WKT
+                    wkt = dumps(original_geom)
+                    
+                    # Truncate if needed
+                    if max_wkt_length and len(wkt) > max_wkt_length:
+                        wkt = wkt[:max_wkt_length - 3] + "..."
+                        log.debug(f"Truncated WKT for feature {i} to {max_wkt_length} characters")
+                    
+                    wkt_geoms.append(wkt)
+                
+            except Exception as e:
+                error_count += 1
+                log.warning(f"Error processing feature {i}: {str(e)}")
+                continue
+
+        if error_count > 0:
+            log.warning(
+                f"Failed to process {error_count} out of {len(features)} features"
+            )
+
+        if not valid_attributes:
+            return False, "No features could be processed", None
+
+        # Create DataFrame
+        df = pd.DataFrame(valid_attributes)
+        
+        # Add geometry column only if not excluding
+        if not exclude_geometry and wkt_geoms:
+            df["geometry"] = wkt_geoms
+            log.info(f"Successfully converted {len(wkt_geoms)} features to CSV with WKT geometry")
+        else:
+            log.info(f"Successfully converted {len(valid_attributes)} features to CSV (geometry excluded)")
+
+        # Write to CSV
+        df.to_csv(output_csv_path, index=False)
+
+        return True, None, bounds
+
+    except Exception as e:
+        return False, f"Error converting spatial file to CSV: {str(e)}", None
+
+    finally:
+        if zip_temp_dir and zip_temp_dir.exists():
+            shutil.rmtree(zip_temp_dir)
+
+
 def simplify_polygon(
     geom: Union[Polygon, MultiPolygon],
     relative_tolerance: float,
