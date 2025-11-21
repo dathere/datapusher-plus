@@ -144,6 +144,17 @@ ckan.module('scheming-suggestions', function($) {
 
                 if (dppPackageSuggestions.hasOwnProperty(fieldName)) {
                     var suggestionValue = dppPackageSuggestions[fieldName];
+                    
+                    // Check if suggestion value is null/undefined/None string - disable button if so
+                    if (suggestionValue === null || suggestionValue === undefined || suggestionValue === 'None' || suggestionValue === '') {
+                        $buttonEl.addClass('suggestion-btn-disabled');
+                        $buttonEl.attr('title', self.options.noSuggestionTitle);
+                        $buttonEl.prop('disabled', true);
+                        $buttonEl.show();
+                        self._hideFieldLoadingIndicator($buttonEl);
+                        return;
+                    }
+                    
                     var isErrorSuggestion = typeof suggestionValue === 'string' && suggestionValue.startsWith(self.options.errorPrefix);
                     var suggestionLabel = fieldSchema.suggestion_label || fieldSchema.label || 'Suggestion';
                     var suggestionFormula = fieldSchema.suggestion_formula || 'N/A'; 
@@ -562,6 +573,12 @@ ckan.module('scheming-suggestions', function($) {
             $(el).on('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
+                
+                // Prevent clicks on disabled buttons
+                if ($(el).hasClass('suggestion-btn-disabled') || $(el).prop('disabled')) {
+                    return;
+                }
+                
                 if ($popoverDiv.is(':empty') && !$popoverDiv.html().trim()) { return; } // Check if truly empty
                 $('.custom-suggestion-popover').not($popoverDiv).hide();
                 var buttonPos = $(el).offset();

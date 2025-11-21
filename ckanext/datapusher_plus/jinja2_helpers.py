@@ -214,6 +214,11 @@ class FormulaProcessor:
             try:
                 formula = jinja2_env.get_template(field_name)
                 rendered_formula = formula.render(**context)
+                
+                # Convert Jinja2's string "None" back to actual None for proper JSON serialization
+                if rendered_formula == "None" or rendered_formula == "":
+                    rendered_formula = None
+                    
                 updates[field_name] = rendered_formula
 
                 self.logger.debug(
