@@ -720,7 +720,7 @@ def _push_to_datastore(
             f'"{len(unsafe_headers)} unsafe" header names found ({unsafe_headers}). Sanitizing..."'
         )
         qsv_safenames = qsv.safenames(
-            tmp, mode="conditional", output_file=qsv_safenames_csv
+            tmp, mode="conditional", reserved=conf.RESERVED_COLNAMES, prefix=conf.UNSAFE_PREFIX, output_file=qsv_safenames_csv
         )
         tmp = qsv_safenames_csv
     else:
