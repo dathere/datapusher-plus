@@ -519,7 +519,6 @@ def _push_to_datastore(
                     f"Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {conf.QSV_STATS_STRING_MAX_LENGTH} characters..."
                 )
                 simplification_failed_flag = True
-                pass
 
         # If we are not auto-simplifying or simplification failed, use qsv geoconvert
         if not conf.AUTO_SPATIAL_SIMPLIFICATION or simplification_failed_flag:
