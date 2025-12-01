@@ -146,6 +146,11 @@ SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
     "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE", "0.1"
 )
 
+# CSV spatial extent detection settings
+AUTO_CSV_SPATIAL_EXTENT = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_csv_spatial_extent", True)
+)
+
 # Latitude and longitude column names
 # multiple fields can be specified, separated by commas
 # matching columns will be from left to right and the jinja2
@@ -170,4 +175,32 @@ JINJA2_BYTECODE_CACHE_DIR = tk.config.get(
 # contents into the datastore. Leave the zip file as the "main" resource.
 AUTO_UNZIP_ONE_FILE = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_unzip_one_file", True)
+)
+
+# AI Suggestions Settings
+ENABLE_AI_SUGGESTIONS = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.enable_ai_suggestions", True)
+)
+OPENROUTER_API_KEY = tk.config.get("ckanext.datapusher_plus.openrouter_api_key", "")
+OPENROUTER_MODEL = tk.config.get(
+    "ckanext.datapusher_plus.openrouter_model", "anthropic/claude-3.5-sonnet"
+)
+OPENROUTER_BASE_URL = tk.config.get(
+    "ckanext.datapusher_plus.openrouter_base_url", "https://openrouter.ai/api/v1"
+)
+AI_TEMPERATURE = tk.config.get("ckanext.datapusher_plus.ai_temperature", 0.7)
+AI_MAX_TOKENS = tk.asint(tk.config.get("ckanext.datapusher_plus.ai_max_tokens", "2000"))
+AI_TIMEOUT = tk.asint(tk.config.get("ckanext.datapusher_plus.ai_timeout", "60"))
+AI_MAX_CONTEXT_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.ai_max_context_length", "8000")
+)
+AI_MIN_DESCRIPTION_LENGTH = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.ai_min_description_length", "50")
+)
+AI_MAX_TAGS = tk.asint(tk.config.get("ckanext.datapusher_plus.ai_max_tags", "10"))
+AI_INCLUDE_SAMPLE_DATA = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.ai_include_sample_data", True)
+)
+AI_FALLBACK_ON_FAILURE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.ai_fallback_on_failure", True)
 )

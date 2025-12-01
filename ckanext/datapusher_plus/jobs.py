@@ -283,6 +283,18 @@ def _push_to_datastore(
             else:
                 logger.info(f"File format: {resource_format}")
 
+            # Check if this is actually a GeoJSON file even if format is JSON
+            # GeoJSON files often get detected as JSON by MIME type
+            resource_name = resource.get("name", "").lower()
+            resource_url_lower = resource_url.lower()
+            if (resource_format == "JSON" and 
+                (resource_name.endswith('.geojson') or 
+                 resource_url_lower.endswith('.geojson') or
+                 'geojson' in resource_name or
+                 'geojson' in resource_url_lower)):
+                logger.info("Detected GeoJSON file (was identified as JSON). Changing format to GEOJSON...")
+                resource_format = "GEOJSON"
+
             tmp = os.path.join(temp_dir, "tmp." + resource_format)
             length = 0
             # using MD5 for file deduplication only
@@ -358,11 +370,20 @@ def _push_to_datastore(
     if resource_format.upper() == "ZIP":
         logger.info("Processing ZIP file...")
 
-        file_count, extracted_path, unzipped_format = dph.extract_zip_or_metadata(
+        file_count, extracted_path, unzipped_format, zip_spatial_bounds = dph.extract_zip_or_metadata(
             tmp, temp_dir, logger
         )
+        
+        # If spatial bounds were extracted from the shapefile, use them
+        if zip_spatial_bounds:
+            spatial_bounds = zip_spatial_bounds
+            logger.debug(f"Using spatial bounds from ZIP extraction: {spatial_bounds}")
+        
         if not file_count:
-            logger.error("ZIP file invalid or no files found in ZIP file.")
+            logger.warning("ZIP file invalid, no files found, or ZIP manifest creation is disabled.")
+            return
+        if not extracted_path:
+            logger.warning("ZIP processing skipped (AUTO_CREATE_ZIP_MANIFEST is disabled).")
             return
         logger.info(
             f"More than one file in the ZIP file ({file_count} files), saving metadata..."
@@ -385,7 +406,55 @@ def _push_to_datastore(
 
     # flag to check if the file is a spatial format
     spatial_format_flag = False
-    simplification_failed_flag = False
+    spatial_bounds = None  # Store spatial bounds from GeoJSON/Shapefile
+    
+    # ----------------- is it a DBF file? ---------------
+    # DBF files need special handling since qsv excel doesn't support them
+    # We use Fiona which can read DBF files (they're part of shapefiles)
+    if resource.get("format").upper() == "DBF" or unzipped_format == "DBF":
+        logger.info("Converting DBF file to CSV using Fiona...")
+        try:
+            import fiona
+            
+            qsv_dbf_csv = os.path.join(temp_dir, "qsv_dbf.csv")
+            
+            # Read DBF file using Fiona
+            with fiona.open(tmp, 'r') as dbf:
+                # Get field names from schema
+                fieldnames = list(dbf.schema['properties'].keys())
+                
+                # Write to CSV
+                with open(qsv_dbf_csv, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+                    writer.writeheader()
+                    
+                    record_count = 0
+                    # Write all records
+                    for feature in dbf:
+                        # Get properties (attributes) from the feature
+                        row = feature['properties']
+                        
+                        # Convert None values to empty strings and ensure all values are strings
+                        clean_row = {}
+                        for field in fieldnames:
+                            value = row.get(field)
+                            if value is None:
+                                clean_row[field] = ''
+                            else:
+                                clean_row[field] = str(value) if not isinstance(value, str) else value
+                        
+                        writer.writerow(clean_row)
+                        record_count += 1
+                    
+                    logger.info(f"Converted DBF to CSV successfully: {record_count} records")
+            
+            tmp = qsv_dbf_csv
+            logger.info("DBF file converted...")
+        except ImportError:
+            raise utils.JobError("Fiona library not installed. Cannot process DBF files. Install with: pip install fiona")
+        except Exception as e:
+            raise utils.JobError(f"Failed to convert DBF file: {e}")
+    
     # ----------------- is it a spreadsheet? ---------------
     # check content type or file extension if its a spreadsheet
     spreadsheet_extensions = ["XLS", "XLSX", "ODS", "XLSM", "XLSB"]
@@ -431,115 +500,46 @@ def _push_to_datastore(
         os.link(tmp, qsv_spatial_file)
         qsv_spatial_csv = os.path.join(temp_dir, "qsv_spatial.csv")
 
-        if conf.AUTO_SPATIAL_SIMPLIFICATION:
-            # Try to convert spatial file to CSV using spatial_helpers
-            logger.info(
-                f"Converting spatial file to CSV with a simplification relative tolerance of {conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE}..."
+        # Convert spatial file to CSV WITHOUT geometry column for datastore
+        # (WKT can be too large for PostgreSQL tsvector)
+        # Spatial extent metadata will be preserved in resource metadata
+        logger.info("Converting spatial file to CSV (attributes only, excluding geometry)...")
+
+        try:
+            success, error_message, bounds = sh.convert_spatial_to_csv(
+                qsv_spatial_file,
+                resource_format,
+                qsv_spatial_csv,
+                max_wkt_length=None,
+                task_logger=logger,
+                exclude_geometry=True,  # Exclude geometry to avoid PostgreSQL size limits
             )
-
-            try:
-                # Use the convert_to_csv function from spatial_helpers
-                success, error_message, bounds = sh.process_spatial_file(
-                    qsv_spatial_file,
-                    resource_format,
-                    output_csv_path=qsv_spatial_csv,
-                    tolerance=conf.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE,
-                    task_logger=logger,
-                )
-
-                if success:
-                    logger.info(
-                        "Spatial file successfully simplified and converted to CSV"
-                    )
-                    tmp = qsv_spatial_csv
-
-                    # Check if the simplified resource already exists
-                    simplified_resource_name = (
-                        os.path.splitext(resource["name"])[0]
-                        + "_simplified"
-                        + os.path.splitext(resource["name"])[1]
-                    )
-                    existing_resource, existing_resource_id = dsu.resource_exists(
-                        resource["package_id"], simplified_resource_name
-                    )
-
-                    if existing_resource:
-                        logger.info(
-                            "Simplified resource already exists. Replacing it..."
-                        )
-                        dsu.delete_resource(existing_resource_id)
-                    else:
-                        logger.info(
-                            "Simplified resource does not exist. Uploading it..."
-                        )
-                        new_simplified_resource = {
-                            "package_id": resource["package_id"],
-                            "name": os.path.splitext(resource["name"])[0]
-                            + "_simplified"
-                            + os.path.splitext(resource["name"])[1],
-                            "url": "",
-                            "format": resource["format"],
-                            "hash": "",
-                            "mimetype": resource["mimetype"],
-                            "mimetype_inner": resource["mimetype_inner"],
-                        }
-
-                        # Add bounds information if available
-                        if bounds:
-                            minx, miny, maxx, maxy = bounds
-                            new_simplified_resource.update(
-                                {
-                                    "dpp_spatial_extent": {
-                                        "type": "BoundingBox",
-                                        "coordinates": [
-                                            [minx, miny],
-                                            [maxx, maxy],
-                                        ],
-                                    }
-                                }
-                            )
-                            logger.info(
-                                f"Added dpp_spatial_extent to resource metadata: {bounds}"
-                            )
-
-                        dsu.upload_resource(new_simplified_resource, qsv_spatial_file)
-
-                        # delete the simplified spatial file
-                        os.remove(qsv_spatial_file)
-
-                    simplification_failed_flag = False
-                else:
-                    logger.warning(
-                        f"Upload of simplified spatial file failed: {error_message}"
-                    )
-                    simplification_failed_flag = True
-            except Exception as e:
-                logger.warning(f"Simplification and conversion failed: {str(e)}")
-                logger.warning(
-                    f"Simplification and conversion failed. Using qsv geoconvert to convert to CSV, truncating large columns to {conf.QSV_STATS_STRING_MAX_LENGTH} characters..."
-                )
-                simplification_failed_flag = True
-                pass
-
-        # If we are not auto-simplifying or simplification failed, use qsv geoconvert
-        if not conf.AUTO_SPATIAL_SIMPLIFICATION or simplification_failed_flag:
-            logger.info("Converting spatial file to CSV using qsv geoconvert...")
-
-            # Run qsv geoconvert
-            qsv_geoconvert_csv = os.path.join(temp_dir, "qsv_geoconvert.csv")
-            try:
-                qsv.geoconvert(
-                    tmp,
-                    resource_format,
-                    "csv",
-                    max_length=conf.QSV_STATS_STRING_MAX_LENGTH,
-                    output_file=qsv_geoconvert_csv,
-                )
-            except utils.JobError as e:
-                raise utils.JobError(f"qsv geoconvert failed: {e}")
-
-            tmp = qsv_geoconvert_csv
-            logger.info("Geoconverted successfully")
+            
+            if not success:
+                raise utils.JobError(f"Spatial to CSV conversion failed: {error_message}")
+            
+            tmp = qsv_spatial_csv
+            logger.info("Converted to CSV successfully (attributes only)")
+            spatial_format_flag = True
+            
+            # Store bounds in resource metadata if available
+            if bounds:
+                spatial_bounds = bounds
+                minx, miny, maxx, maxy = spatial_bounds
+                resource.update({
+                    "dpp_spatial_extent": {
+                        "type": "BoundingBox",
+                        "coordinates": [
+                            [minx, miny],
+                            [maxx, maxy],
+                        ],
+                    }
+                })
+                logger.info(f"Added dpp_spatial_extent to resource metadata: {bounds}")
+                logger.info("Note: Geometry column excluded from datastore (too large for PostgreSQL). Spatial extent preserved in metadata.")
+                
+        except Exception as e:
+            raise utils.JobError(f"Spatial to CSV conversion failed: {e}")
 
     else:
         # --- its not a spreadsheet nor a spatial format, its a CSV/TSV/TAB file ------
@@ -769,34 +769,32 @@ def _push_to_datastore(
     qsv_stats_csv = os.path.join(temp_dir, "qsv_stats.csv")
 
     try:
-        # If the file is a spatial format, we need to use --max-length
+        # If the file is a spatial format, we need to set the max string length
         # to truncate overly long strings from causing issues with
         # Python's CSV reader and Postgres's limits with the COPY command
         if spatial_format_flag:
-            env = os.environ.copy()
-            env["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
-            qsv_stats = qsv.stats(
-                tmp,
-                infer_dates=True,
-                dates_whitelist=conf.QSV_DATES_WHITELIST,
-                stats_jsonl=True,
-                prefer_dmy=conf.PREFER_DMY,
-                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
-                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
-                output_file=qsv_stats_csv,
-                env=env,
-            )
-        else:
-            qsv_stats = qsv.stats(
-                tmp,
-                infer_dates=True,
-                dates_whitelist=conf.QSV_DATES_WHITELIST,
-                stats_jsonl=True,
-                prefer_dmy=conf.PREFER_DMY,
-                cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
-                summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
-                output_file=qsv_stats_csv,
-            )
+            # Set environment variable for qsv stats
+            original_max_length = os.environ.get("QSV_STATS_STRING_MAX_LENGTH")
+            os.environ["QSV_STATS_STRING_MAX_LENGTH"] = str(conf.QSV_STATS_STRING_MAX_LENGTH)
+            
+        qsv_stats = qsv.stats(
+            tmp,
+            infer_dates=True,
+            dates_whitelist=conf.QSV_DATES_WHITELIST,
+            stats_jsonl=True,
+            prefer_dmy=conf.PREFER_DMY,
+            cardinality=bool(conf.AUTO_INDEX_THRESHOLD),
+            summary_stats_options=conf.SUMMARY_STATS_OPTIONS,
+            output_file=qsv_stats_csv,
+        )
+        
+        # Restore original environment variable if it was set for spatial format
+        if spatial_format_flag:
+            if original_max_length is not None:
+                os.environ["QSV_STATS_STRING_MAX_LENGTH"] = original_max_length
+            else:
+                os.environ.pop("QSV_STATS_STRING_MAX_LENGTH", None)
+                
     except utils.JobError as e:
         raise utils.JobError(f"Cannot infer data types and compile statistics: {e}")
 
@@ -823,10 +821,15 @@ def _push_to_datastore(
     # Get the field stats for each field in the headers list
     existing = dsu.datastore_resource_exists(resource_id)
     existing_info = None
+    existing_fields_backup = None  # Backup complete field definitions for recovery
     if existing:
         existing_info = dict(
             (f["id"], f["info"]) for f in existing.get("fields", []) if "info" in f
         )
+        # Backup complete field definitions including Data Dictionary edits
+        # This allows recovery if datastore operations fail
+        existing_fields_backup = existing.get("fields", [])
+        logger.info(f"Backed up {len(existing_fields_backup)} field definitions from existing datastore.")
 
     # if this is an existing resource
     # override with types user requested in Data Dictionary
@@ -841,9 +844,16 @@ def _push_to_datastore(
         ]
 
     # Delete existing datastore resource before proceeding.
+    # We'll wrap subsequent operations in try-except to restore on failure
+    datastore_deleted = False
     if existing:
         logger.info(f'Deleting existing resource "{resource_id}" from datastore.')
-        dsu.delete_datastore_resource(resource_id)
+        try:
+            dsu.delete_datastore_resource(resource_id)
+            datastore_deleted = True
+        except Exception as e:
+            logger.error(f"Failed to delete existing datastore: {e}")
+            raise utils.JobError(f"Failed to delete existing datastore: {e}")
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
@@ -1035,15 +1045,35 @@ def _push_to_datastore(
     else:
         logger.info(f"COPYING {rows_to_copy} rows to Datastore...")
 
-    # first, let's create an empty datastore table w/ guessed types
-    dsu.send_resource_to_datastore(
-        resource=None,
-        resource_id=resource["id"],
-        headers=headers_dicts,
-        records=None,
-        aliases=None,
-        calculate_record_count=False,
-    )
+    # Wrap datastore operations in try-except to restore backup on failure
+    try:
+        # first, let's create an empty datastore table w/ guessed types
+        dsu.send_resource_to_datastore(
+            resource=None,
+            resource_id=resource["id"],
+            headers=headers_dicts,
+            records=None,
+            aliases=None,
+            calculate_record_count=False,
+        )
+    except Exception as e:
+        logger.error(f"Failed to create datastore table: {e}")
+        # If we deleted an existing datastore and creation fails, try to restore it
+        if datastore_deleted and existing_fields_backup:
+            logger.warning("Attempting to restore previous datastore structure with Data Dictionary...")
+            try:
+                dsu.send_resource_to_datastore(
+                    resource=None,
+                    resource_id=resource["id"],
+                    headers=existing_fields_backup,
+                    records=None,
+                    aliases=None,
+                    calculate_record_count=False,
+                )
+                logger.info("Successfully restored previous datastore structure with Data Dictionary.")
+            except Exception as restore_error:
+                logger.error(f"Failed to restore previous datastore structure: {restore_error}")
+        raise utils.JobError(f"Failed to create datastore table: {e}")
 
     copied_count = 0
     try:
@@ -1197,6 +1227,79 @@ def _push_to_datastore(
             f'...indexing/vacuum analysis done. Indexed {index_count} column/s in "{resource_id}" in {index_elapsed:,.2f} seconds.'
         )
 
+
+    # ============================================================
+    # GENERATE AI SUGGESTIONS
+    # ============================================================
+    # Generate AI-powered suggestions for dataset fields using QSV analysis
+    ai_suggestions_start = time.perf_counter()
+    
+    # Fetch the scheming_yaml and package first (needed for both AI and DRUF)
+    package_id = resource["package_id"]
+    scheming_yaml, package = dsu.get_scheming_yaml(
+        package_id, scheming_yaml_type="dataset"
+    )
+    
+    if conf.ENABLE_AI_SUGGESTIONS:
+        logger.info("Generating AI suggestions...")
+        try:
+            from ckanext.datapusher_plus.ai_suggestions import AIDescriptionGenerator
+            
+            ai_generator = AIDescriptionGenerator(logger=logger)
+            
+            # Get sample data for context
+            sample_data = None
+            try:
+                qsv_sample = qsv.slice(
+                    tmp,
+                    start=0,
+                    end=10,  # Get first 10 rows as sample
+                )
+                sample_data = str(qsv_sample.stdout)
+            except Exception as e:
+                logger.warning(f"Could not get sample data for AI: {e}")
+            
+            # Generate AI suggestions
+            ai_suggestions = ai_generator.generate_ai_suggestions(
+                resource_metadata=resource,
+                dataset_metadata=package,
+                stats_data=resource_fields_stats,
+                freq_data=resource_fields_freqs,
+                dataset_stats=dataset_stats,
+                sample_data=sample_data
+            )
+            
+            # Store AI suggestions in dpp_suggestions field
+            if ai_suggestions:
+                logger.info(f"Generated {len(ai_suggestions)} AI suggestions")
+                
+                # Ensure dpp_suggestions field exists in package
+                if "dpp_suggestions" not in package:
+                    package["dpp_suggestions"] = {}
+                
+                # Store AI suggestions under 'ai_suggestions' key
+                package["dpp_suggestions"]["ai_suggestions"] = ai_suggestions
+                
+                # Update package with AI suggestions
+                try:
+                    dsu.patch_package(package)
+                    logger.info("AI suggestions stored in package")
+                except Exception as e:
+                    logger.error(f"Error storing AI suggestions: {e}")
+            else:
+                logger.info("No AI suggestions generated")
+                
+            ai_suggestions_elapsed = time.perf_counter() - ai_suggestions_start
+            logger.info(f"AI suggestions generation completed in {ai_suggestions_elapsed:,.2f} seconds")
+            
+        except ImportError as e:
+            logger.warning(f"Could not import AI suggestions module: {e}")
+        except Exception as e:
+            logger.error(f"Error generating AI suggestions: {e}")
+            logger.debug(f"AI suggestions error details: {traceback.format_exc()}")
+    else:
+        logger.debug("AI suggestions are disabled")
+    
     # ============================================================
     # PROCESS DRUF JINJA2 FORMULAE
     # ============================================================
@@ -1281,6 +1384,93 @@ def _push_to_datastore(
         dataset_stats,
         logger,
     )
+
+    # ============================================================
+    # SPATIAL EXTENT DETECTION FOR CSV WITH LAT/LONG COLUMNS
+    # ============================================================
+    # Check if this is a CSV file (not already processed as spatial format)
+    # and detect latitude/longitude columns to calculate spatial extent
+    # Use the existing lat/lon detection logic from FormulaProcessor
+    # Note: ZIP and DBF are included because shapefiles (ZIP) contain DBF files 
+    # with lat/lon columns that should be processed for spatial extent
+    if (conf.AUTO_CSV_SPATIAL_EXTENT and not spatial_format_flag and 
+        resource_format.upper() in ["CSV", "TSV", "TAB", "ZIP", "DBF"]):
+        logger.info("Checking for latitude/longitude columns using existing detection logic...")
+        
+        # Use the detected lat/lon fields from the already initialized FormulaProcessor
+        lat_column = formula_processor.dpp.get("LAT_FIELD")
+        lon_column = formula_processor.dpp.get("LON_FIELD")
+        
+        # If we found both lat and lon columns, calculate spatial extent
+        if lat_column and lon_column and not formula_processor.dpp.get("NO_LAT_LON_FIELDS"):
+            logger.info(f"Found latitude/longitude columns: {lat_column}, {lon_column}")
+            
+            try:
+                # Get min/max values from the stats we already calculated
+                lat_stats = resource_fields_stats.get(lat_column, {}).get("stats", {})
+                lon_stats = resource_fields_stats.get(lon_column, {}).get("stats", {})
+                
+                if lat_stats and lon_stats:
+                    lat_min = float(lat_stats.get("min", 0))
+                    lat_max = float(lat_stats.get("max", 0))
+                    lon_min = float(lon_stats.get("min", 0))
+                    lon_max = float(lon_stats.get("max", 0))
+                    
+                    # The FormulaProcessor already validated coordinate bounds,
+                    # so we can trust these values are within valid ranges
+                    # Add spatial extent to package dpp_suggestions (following DRUF pattern)
+                    spatial_extent_data = {
+                        "type": "BoundingBox",
+                        "coordinates": [
+                            [lon_min, lat_min],
+                            [lon_max, lat_max],
+                        ],
+                    }
+                    
+                    # Add to package dpp_suggestions like other computed metadata
+                    package.setdefault("dpp_suggestions", {})["dpp_spatial_extent"] = spatial_extent_data
+                    
+                    logger.info(
+                        f"Added dpp_spatial_extent to package dpp_suggestions from CSV lat/lon columns: "
+                        f"lat({lat_min}, {lat_max}), lon({lon_min}, {lon_max})"
+                    )
+                    logger.info(f"Spatial extent: {spatial_extent_data}")
+                else:
+                    logger.warning("Could not retrieve min/max statistics for lat/lon columns")
+                    
+            except (ValueError, TypeError, KeyError) as e:
+                logger.warning(f"Error calculating spatial extent from lat/lon columns: {e}")
+        else:
+            if formula_processor.dpp.get("NO_LAT_LON_FIELDS"):
+                logger.info("No suitable latitude/longitude column pairs found in CSV")
+    
+    # ============================================================
+    # SPATIAL EXTENT FOR GEOJSON/SHAPEFILE FORMATS
+    # ============================================================
+    # If this was a spatial format (GeoJSON/Shapefile), add the spatial extent
+    # from resource metadata to package dpp_suggestions for the gazetteer widget
+    elif spatial_format_flag and spatial_bounds:
+        logger.info("Adding spatial extent from GeoJSON/Shapefile to package dpp_suggestions...")
+        try:
+            minx, miny, maxx, maxy = spatial_bounds
+            spatial_extent_data = {
+                "type": "BoundingBox",
+                "coordinates": [
+                    [minx, miny],
+                    [maxx, maxy],
+                ],
+            }
+            
+            # Add to package dpp_suggestions for the gazetteer widget to access
+            package.setdefault("dpp_suggestions", {})["dpp_spatial_extent"] = spatial_extent_data
+            
+            logger.info(
+                f"Added dpp_spatial_extent to package dpp_suggestions from spatial format: "
+                f"bounds({minx}, {miny}, {maxx}, {maxy})"
+            )
+            logger.info(f"Spatial extent: {spatial_extent_data}")
+        except (ValueError, TypeError, KeyError) as e:
+            logger.warning(f"Error adding spatial extent from spatial format to package suggestions: {e}")
 
     package.setdefault("dpp_suggestions", {})[
         "STATUS"
@@ -1586,29 +1776,45 @@ def _push_to_datastore(
         resource["preview"] = False
         resource["preview_rows"] = None
         resource["partial_download"] = False
-    dsu.update_resource(resource)
+    
+    # Wrap metadata updates in try-except to preserve datastore on SOLR/CKAN failures
+    try:
+        dsu.update_resource(resource)
 
-    # tell CKAN to calculate_record_count and set alias if set
-    dsu.send_resource_to_datastore(
-        resource=None,
-        resource_id=resource["id"],
-        headers=headers_dicts,
-        records=None,
-        aliases=alias,
-        calculate_record_count=True,
-    )
+        # tell CKAN to calculate_record_count and set alias if set
+        dsu.send_resource_to_datastore(
+            resource=None,
+            resource_id=resource["id"],
+            headers=headers_dicts,
+            records=None,
+            aliases=alias,
+            calculate_record_count=True,
+        )
 
-    if alias:
-        logger.info(f'Created alias "{alias}" for "{resource_id}"...')
+        if alias:
+            logger.info(f'Created alias "{alias}" for "{resource_id}"...')
 
-    metadata_elapsed = time.perf_counter() - metadata_start
-    logger.info(
-        f"RESOURCE METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
-    )
+        metadata_elapsed = time.perf_counter() - metadata_start
+        logger.info(
+            f"RESOURCE METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
+        )
 
-    # -------------------- DONE --------------------
-    package.setdefault("dpp_suggestions", {})["STATUS"] = "DONE"
-    dsu.patch_package(package)
+        # -------------------- DONE --------------------
+        package.setdefault("dpp_suggestions", {})["STATUS"] = "DONE"
+        dsu.patch_package(package)
+    except Exception as e:
+        logger.error(f"Failed to update resource/package metadata (possibly SOLR issue): {e}")
+        logger.warning(
+            f"Datastore table '{resource_id}' with Data Dictionary was successfully created, "
+            f"but metadata updates failed. The datastore and Data Dictionary are preserved. "
+            f"You may need to retry or check SOLR status."
+        )
+        # Don't delete the datastore - it's successfully created with data
+        # Just propagate the error so the job is marked as failed
+        raise utils.JobError(
+            f"Datastore created successfully but metadata update failed: {e}. "
+            f"Data Dictionary is preserved in datastore."
+        )
 
     total_elapsed = time.perf_counter() - timer_start
     newline_var = "\n"
