@@ -821,10 +821,15 @@ def _push_to_datastore(
     # Get the field stats for each field in the headers list
     existing = dsu.datastore_resource_exists(resource_id)
     existing_info = None
+    existing_fields_backup = None  # Backup complete field definitions for recovery
     if existing:
         existing_info = dict(
             (f["id"], f["info"]) for f in existing.get("fields", []) if "info" in f
         )
+        # Backup complete field definitions including Data Dictionary edits
+        # This allows recovery if datastore operations fail
+        existing_fields_backup = existing.get("fields", [])
+        logger.info(f"Backed up {len(existing_fields_backup)} field definitions from existing datastore.")
 
     # if this is an existing resource
     # override with types user requested in Data Dictionary
@@ -839,9 +844,16 @@ def _push_to_datastore(
         ]
 
     # Delete existing datastore resource before proceeding.
+    # We'll wrap subsequent operations in try-except to restore on failure
+    datastore_deleted = False
     if existing:
         logger.info(f'Deleting existing resource "{resource_id}" from datastore.')
-        dsu.delete_datastore_resource(resource_id)
+        try:
+            dsu.delete_datastore_resource(resource_id)
+            datastore_deleted = True
+        except Exception as e:
+            logger.error(f"Failed to delete existing datastore: {e}")
+            raise utils.JobError(f"Failed to delete existing datastore: {e}")
 
     # 1st pass of building headers_dict
     # here we map inferred types to postgresql data types
@@ -1033,15 +1045,35 @@ def _push_to_datastore(
     else:
         logger.info(f"COPYING {rows_to_copy} rows to Datastore...")
 
-    # first, let's create an empty datastore table w/ guessed types
-    dsu.send_resource_to_datastore(
-        resource=None,
-        resource_id=resource["id"],
-        headers=headers_dicts,
-        records=None,
-        aliases=None,
-        calculate_record_count=False,
-    )
+    # Wrap datastore operations in try-except to restore backup on failure
+    try:
+        # first, let's create an empty datastore table w/ guessed types
+        dsu.send_resource_to_datastore(
+            resource=None,
+            resource_id=resource["id"],
+            headers=headers_dicts,
+            records=None,
+            aliases=None,
+            calculate_record_count=False,
+        )
+    except Exception as e:
+        logger.error(f"Failed to create datastore table: {e}")
+        # If we deleted an existing datastore and creation fails, try to restore it
+        if datastore_deleted and existing_fields_backup:
+            logger.warning("Attempting to restore previous datastore structure with Data Dictionary...")
+            try:
+                dsu.send_resource_to_datastore(
+                    resource=None,
+                    resource_id=resource["id"],
+                    headers=existing_fields_backup,
+                    records=None,
+                    aliases=None,
+                    calculate_record_count=False,
+                )
+                logger.info("Successfully restored previous datastore structure with Data Dictionary.")
+            except Exception as restore_error:
+                logger.error(f"Failed to restore previous datastore structure: {restore_error}")
+        raise utils.JobError(f"Failed to create datastore table: {e}")
 
     copied_count = 0
     try:
@@ -1743,29 +1775,45 @@ def _push_to_datastore(
         resource["preview"] = False
         resource["preview_rows"] = None
         resource["partial_download"] = False
-    dsu.update_resource(resource)
+    
+    # Wrap metadata updates in try-except to preserve datastore on SOLR/CKAN failures
+    try:
+        dsu.update_resource(resource)
 
-    # tell CKAN to calculate_record_count and set alias if set
-    dsu.send_resource_to_datastore(
-        resource=None,
-        resource_id=resource["id"],
-        headers=headers_dicts,
-        records=None,
-        aliases=alias,
-        calculate_record_count=True,
-    )
+        # tell CKAN to calculate_record_count and set alias if set
+        dsu.send_resource_to_datastore(
+            resource=None,
+            resource_id=resource["id"],
+            headers=headers_dicts,
+            records=None,
+            aliases=alias,
+            calculate_record_count=True,
+        )
 
-    if alias:
-        logger.info(f'Created alias "{alias}" for "{resource_id}"...')
+        if alias:
+            logger.info(f'Created alias "{alias}" for "{resource_id}"...')
 
-    metadata_elapsed = time.perf_counter() - metadata_start
-    logger.info(
-        f"RESOURCE METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
-    )
+        metadata_elapsed = time.perf_counter() - metadata_start
+        logger.info(
+            f"RESOURCE METADATA UPDATES DONE! Resource metadata updated in {metadata_elapsed:,.2f} seconds."
+        )
 
-    # -------------------- DONE --------------------
-    package.setdefault("dpp_suggestions", {})["STATUS"] = "DONE"
-    dsu.patch_package(package)
+        # -------------------- DONE --------------------
+        package.setdefault("dpp_suggestions", {})["STATUS"] = "DONE"
+        dsu.patch_package(package)
+    except Exception as e:
+        logger.error(f"Failed to update resource/package metadata (possibly SOLR issue): {e}")
+        logger.warning(
+            f"Datastore table '{resource_id}' with Data Dictionary was successfully created, "
+            f"but metadata updates failed. The datastore and Data Dictionary are preserved. "
+            f"You may need to retry or check SOLR status."
+        )
+        # Don't delete the datastore - it's successfully created with data
+        # Just propagate the error so the job is marked as failed
+        raise utils.JobError(
+            f"Datastore created successfully but metadata update failed: {e}. "
+            f"Data Dictionary is preserved in datastore."
+        )
 
     total_elapsed = time.perf_counter() - timer_start
     newline_var = "\n"
