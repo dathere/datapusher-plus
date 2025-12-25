@@ -117,14 +117,15 @@ class DatabaseStage(BaseStage):
             cur = raw_connection.cursor()
 
             # Truncate table for COPY FREEZE optimization
-            self._truncate_table(cur, context.resource_id)
+            context.logger.info("Truncating table before COPY...")
+            self._truncate_table(cur, context)
 
             # Prepare COPY SQL
             col_names_list = [h["id"] for h in context.headers_dicts]
             column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
             copy_sql = sql.SQL(
                 "COPY {} ({}) FROM STDIN "
-                "WITH (FORMAT CSV, FREEZE 1, "
+                "WITH (FORMAT CSV, "
                 "HEADER 1, ENCODING 'UTF8');"
             ).format(
                 sql.Identifier(context.resource_id),
@@ -150,7 +151,7 @@ class DatabaseStage(BaseStage):
             if raw_connection:
                 raw_connection.close()
 
-    def _truncate_table(self, cursor: psycopg2.extensions.cursor, resource_id: str) -> None:
+    def _truncate_table(self, cursor: psycopg2.extensions.cursor, context: ProcessingContext) -> None:
         """
         Truncate table to enable COPY FREEZE optimization.
 
@@ -160,12 +161,14 @@ class DatabaseStage(BaseStage):
         """
         try:
             cursor.execute(
-                sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(resource_id))
+                sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(context.resource_id))
             )
         except psycopg2.Error as e:
             # Non-fatal, log warning but continue
             # (table might not exist yet)
-            pass
+            context.logger.warning(
+                f"Could not truncate table {context.resource_id}: {e}"
+            )
 
     def _vacuum_analyze(
         self, connection: psycopg2.extensions.connection, resource_id: str
