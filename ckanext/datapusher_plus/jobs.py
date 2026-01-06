@@ -820,6 +820,22 @@ def _push_to_datastore(
             if conf.AUTO_INDEX_THRESHOLD:
                 headers_cardinality.append(int(fr.get("cardinality") or 0))
 
+    # Go through the qsv_stats_csv file and ensure the "mean" field is empty for
+    # field of type "Date"
+    new_qsv_stats_csv = os.path.join(temp_dir, "qsv_stats_cleaned.csv")
+    with open(qsv_stats_csv, mode="r") as inp, open(new_qsv_stats_csv, mode="w") as outp:
+        reader = csv.DictReader(inp)
+        fieldnames = reader.fieldnames
+        writer = csv.DictWriter(outp, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in reader:
+            if row["type"] == "Date" or row["type"] == "DateTime":
+                row["mean"] = ""
+            writer.writerow(row)
+    qsv_stats_csv = new_qsv_stats_csv
+    logger.info(f"New qsv_stats_csv types for {qsv_stats_csv}")
+    print(open(qsv_stats_csv).read())
+
     # Get the field stats for each field in the headers list
     existing = dsu.datastore_resource_exists(resource_id)
     existing_info = None
