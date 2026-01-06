@@ -154,6 +154,9 @@ def _push_to_datastore(
     dry_run: bool = False,
     temp_dir: Optional[str] = None,
 ) -> Optional[List[Dict[str, Any]]]:
+    # Refresh config at runtime to pick up env-injected settings (eg, ckanext-envars)
+    conf.reload()
+
     # add job to dn  (datapusher_plus_jobs table)
     try:
         dph.add_pending_job(task_id, **input)
