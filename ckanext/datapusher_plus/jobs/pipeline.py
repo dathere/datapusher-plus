@@ -288,7 +288,6 @@ class DataProcessingPipeline:
 
                 # If stage returns None, stop pipeline
                 if context is None:
-                    context.logger.info(f"Pipeline stopped after stage: {stage.name}")
                     return None
 
             except utils.JobError:
