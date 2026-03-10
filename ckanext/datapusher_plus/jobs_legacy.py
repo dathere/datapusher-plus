@@ -1575,18 +1575,11 @@ def _push_to_datastore(
     raw_connection.commit()
     raw_connection.close()
 
-    resource["datastore_active"] = True
-    resource["total_record_count"] = record_count
-    if conf.PREVIEW_ROWS < record_count or (conf.PREVIEW_ROWS > 0):
-        resource["preview"] = True
-        resource["preview_rows"] = copied_count
-    else:
-        resource["preview"] = False
-        resource["preview_rows"] = None
-        resource["partial_download"] = False
-    dsu.update_resource(resource)
-
     # tell CKAN to calculate_record_count and set alias if set
+    # This must happen BEFORE updating resource metadata because
+    # datastore_create internally modifies the resource (e.g. setting
+    # datastore_active, total_record_count), which could overwrite
+    # our preview fields.
     dsu.send_resource_to_datastore(
         resource=None,
         resource_id=resource["id"],
@@ -1598,6 +1591,20 @@ def _push_to_datastore(
 
     if alias:
         logger.info(f'Created alias "{alias}" for "{resource_id}"...')
+
+    # Re-fetch the resource to get the latest state after datastore_create
+    resource = dsu.get_resource(resource_id)
+
+    resource["datastore_active"] = True
+    resource["total_record_count"] = record_count
+    if conf.PREVIEW_ROWS < record_count or (conf.PREVIEW_ROWS > 0):
+        resource["preview"] = True
+        resource["preview_rows"] = copied_count
+    else:
+        resource["preview"] = False
+        resource["preview_rows"] = None
+        resource["partial_download"] = False
+    dsu.update_resource(resource)
 
     metadata_elapsed = time.perf_counter() - metadata_start
     logger.info(

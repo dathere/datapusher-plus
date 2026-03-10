@@ -71,10 +71,11 @@ class MetadataStage(BaseStage):
             if raw_connection:
                 raw_connection.close()
 
-        # Update resource metadata
-        self._update_resource_metadata(context)
-
-        # Set alias and calculate record count
+        # Set alias and calculate record count first, before updating
+        # resource metadata. datastore_create internally modifies the resource
+        # (e.g. setting datastore_active, total_record_count), so we must
+        # update our preview fields AFTER this call to avoid them being
+        # overwritten.
         dsu.send_resource_to_datastore(
             resource=None,
             resource_id=context.resource["id"],
@@ -86,6 +87,10 @@ class MetadataStage(BaseStage):
 
         if alias:
             context.logger.info(f'Created alias "{alias}" for "{context.resource_id}"...')
+
+        # Update resource metadata (preview fields, etc.) AFTER
+        # send_resource_to_datastore to ensure our fields persist.
+        self._update_resource_metadata(context)
 
         metadata_elapsed = time.perf_counter() - metadata_start
         context.logger.info(
@@ -372,10 +377,17 @@ class MetadataStage(BaseStage):
         """
         Update resource metadata fields.
 
+        Re-fetches the resource from CKAN to get the latest state
+        (after datastore_create may have modified it), then sets
+        our metadata fields and persists them.
+
         Args:
             context: Processing context
         """
         record_count = context.dataset_stats.get("RECORD_COUNT", 0)
+
+        # Re-fetch the resource to get the latest state after datastore_create
+        context.resource = dsu.get_resource(context.resource_id)
 
         context.resource["datastore_active"] = True
         context.resource["total_record_count"] = record_count
