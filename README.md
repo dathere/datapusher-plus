@@ -227,10 +227,25 @@ pip install -r requirements-dev.txt
 <details>
 <summary>qsv installation options (click here for more info)</summary>
 
-### Option 1: Install prebuilt qsv binaries
+
+### Option 1: Install qsv from the Debian package
+
+If you are running a Debian-based Linux distribution on x86_64, you can quickly install qsv binaries including `qsvdp` using the following commands:
+
+```bash
+# Add the qsv repository to your sources list:
+echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://dathere.github.io/qsv-deb-releases ./" > qsv.list
+# Import trusted GPG key:
+wget -O - https://dathere.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
+# Install qsv:
+sudo apt update -y
+sudo apt install qsv -y
+```
+
+### Option 2: Install prebuilt qsv binaries
 
 [Download the appropriate prebuilt binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
-it to the appropriate directory, e.g. for Linux:
+it to the appropriate directory. For example you can use the following commands for qsv v19.1.0 on x86_64 Linux (you can update the version `19.1.0` to the latest version available on the [releases page](https://github.com/dathere/qsv/releases)):
 
 ```bash
 wget https://github.com/dathere/qsv/releases/download/19.1.0/qsv-19.1.0-x86_64-unknown-linux-gnu.zip
@@ -246,7 +261,7 @@ If you get glibc errors when starting qsv, your Linux distro may not have the re
 > sudo qsvdp --update
 > ```
 
-### Option 2: Install qsv from source
+### Option 3: Install qsv from source
 
 Alternatively, if you want to install qsv from source, follow
 the instructions [here](https://github.com/dathere/qsv#installation). Note that when compiling from source,
@@ -263,31 +278,6 @@ If you already have qsv, update it to the latest release by using the --update o
 
 > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
 qsv with the `--update` option and it will check for the latest version and update as required.
-
-### Option 3: Install qsv from the Debian package
-
-If you are running a Debian-based Linux distribution on x86_64, you can quickly install qsv using the following commands:
-
-Add the qsv repository to your sources list:
-
-```bash
-echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://dathere.github.io/qsv-deb-releases ./" > qsv.list
-```
-
-Import trusted GPG key:
-
-```bash
-wget -O - https://dathere.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
-```
-
-Install qsv:
-
-```bash
-sudo apt update
-sudo apt install qsv
-```
-
-## Option 3: Build qsv from source
 
 Finally, you can build `qsvdp` from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster, but may take up to 30 minutes to compile.
 
@@ -358,6 +348,12 @@ ckanext.datapusher_plus.latitude_fields = latitude,lat
 ckanext.datapusher_plus.longitude_fields = longitude,long,lon
 ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
 ckanext.datapusher_plus.auto_unzip_one_file = true
+```
+
+Also add this entry to your CKAN's `resource_formats.json` file for `ckanext.datapusher_plus.formats` to work as expected with `tab` files.
+
+```
+["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
 ```
 
 See the configuration section below for more information.
