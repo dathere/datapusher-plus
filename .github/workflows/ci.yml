@@ -21,7 +21,7 @@ on:
       polling_timeout_seconds:
         description: 'Max seconds to wait for DataPusher to process each file'
         required: false
-        default: '120'
+        default: '20'
         type: string
 
 concurrency:
@@ -34,7 +34,7 @@ permissions:
 env:
   FILES_DIR: ${{ github.event.inputs.testing_directory || 'quick' }}
   QSV_VER: ${{ github.event.inputs.qsv_version || '9.1.0' }}
-  POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '120' }}
+  POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '20' }}
   TESTING_REPO_RAW: 'https://raw.githubusercontent.com/dathere/datapusher-plus_testing/main'
   TESTING_REPO_API: 'https://api.github.com/repos/dathere/datapusher-plus_testing/contents'
   CKAN_VERSION: "2.11"
@@ -477,8 +477,9 @@ jobs:
           echo "$file_list"
           echo ""
 
-          max_attempts=$(( ${POLLING_TIMEOUT:-120} / 2 ))
-          echo "Per-file polling: ${max_attempts} attempts x 2s = ${POLLING_TIMEOUT:-120}s max"
+          max_attempts=$(( ${POLLING_TIMEOUT:-20} / 2 ))
+          [ $max_attempts -lt 1 ] && max_attempts=1
+          echo "Per-file polling: ${max_attempts} attempts x 2s = ${POLLING_TIMEOUT:-20}s max"
 
           : > /tmp/test_files.txt
           echo "$file_list" | while IFS= read -r filename; do
@@ -703,6 +704,22 @@ jobs:
               echo "|-----------|----------------|"
               tail -n +2 /tmp/skipped_files.csv | while IFS=',' read -r file_name reason; do
                 echo "| $file_name | $reason |"
+              done
+              echo ""
+            fi
+
+            if [ -f /tmp/test_results.csv ] && [ $total_tests -gt 0 ]; then
+              echo "## Test Run Results"
+              echo ""
+              echo "| # | File | Upload | DPP Status | DataStore | Rows | Time (s) | Error |"
+              echo "|---|------|--------|------------|-----------|------|----------|-------|"
+              counter=1
+              tail -n +2 /tmp/test_results.csv | while IFS=',' read -r ts file_name upload_status resource_id dp_status ds_active rows proc_time error_msg; do
+                clean_error=$(echo "$error_msg" | sed 's/^"//;s/"$//')
+                [ -z "$clean_error" ] && clean_error="-"
+                [ -z "$rows" ] && rows="0"
+                echo "| $counter | $file_name | $upload_status | $dp_status | $ds_active | $rows | $proc_time | $clean_error |"
+                counter=$((counter + 1))
               done
               echo ""
             fi
