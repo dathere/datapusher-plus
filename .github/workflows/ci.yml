@@ -35,7 +35,8 @@ env:
   FILES_DIR: ${{ github.event.inputs.testing_directory || 'quick' }}
   QSV_VER: ${{ github.event.inputs.qsv_version || '9.1.0' }}
   POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '120' }}
-  TESTING_REPO: 'https://github.com/dathere/datapusher-plus_testing.git'
+  TESTING_REPO_RAW: 'https://raw.githubusercontent.com/dathere/datapusher-plus_testing/main'
+  TESTING_REPO_API: 'https://api.github.com/repos/dathere/datapusher-plus_testing/contents'
   CKAN_VERSION: "2.11"
   POSTGRES_PASSWORD: postgres
   CKAN_DB_PASSWORD: pass
@@ -97,11 +98,10 @@ jobs:
       - name: Checkout datapusher-plus
         uses: actions/checkout@v4
 
-      - name: Clone test harness (datapusher-plus_testing)
+      - name: Fetch log analyzer from testing repo
         run: |
-          git clone --depth 1 "$TESTING_REPO" /tmp/dp-testing
-          echo "Test files available at /tmp/dp-testing/tests/"
-          ls /tmp/dp-testing/tests/
+          curl -fsSL "${TESTING_REPO_RAW}/tests/log_analyzer.py" -o /tmp/log_analyzer.py
+          echo "log_analyzer.py downloaded"
 
       - name: Wait for PostgreSQL
         run: |
@@ -462,56 +462,44 @@ jobs:
           echo "timestamp,file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message" > /tmp/test_results.csv
           echo "file_name,reason_skipped" > /tmp/skipped_files.csv
 
-          # Test files come from the cloned testing repo
-          TEST_FILES_DIR="/tmp/dp-testing/tests/$FILES_DIR"
+          # Discover test files via GitHub Contents API — no clone needed
+          REPO_DIR_URL="${TESTING_REPO_API}/tests/${FILES_DIR}"
+          echo "Fetching file list from: $REPO_DIR_URL"
 
-          if [ ! -d "$TEST_FILES_DIR" ]; then
-            echo "ERROR: Test files directory not found: $TEST_FILES_DIR"
-            echo "Available directories in /tmp/dp-testing/tests/:"
-            ls /tmp/dp-testing/tests/
+          file_list=$(curl -fsSL "$REPO_DIR_URL" | jq -r '.[].name' 2>/dev/null)
+          if [ -z "$file_list" ]; then
+            echo "ERROR: Could not list files from $REPO_DIR_URL"
+            echo "Check FILES_DIR value ($FILES_DIR) and GitHub API availability"
             exit 1
           fi
 
-          echo "Using test files from: $TEST_FILES_DIR"
-          find "$TEST_FILES_DIR" -type f | head -20
+          echo "Files found in tests/$FILES_DIR:"
+          echo "$file_list"
           echo ""
 
           max_attempts=$(( ${POLLING_TIMEOUT:-120} / 2 ))
           echo "Per-file polling: ${max_attempts} attempts x 2s = ${POLLING_TIMEOUT:-120}s max"
 
-          echo "Starting HTTP server..."
-          cd "$TEST_FILES_DIR"
-          python3 -m http.server 8080 > /tmp/http_server.log 2>&1 &
-          HTTP_SERVER_PID=$!
-
-          for _i in $(seq 1 15); do
-            curl -sf "http://localhost:8080/" >/dev/null 2>&1 && break
-            sleep 1
-          done
-
-          if ! curl -s "http://localhost:8080/" > /dev/null; then
-            echo "ERROR: HTTP server failed to start"; cat /tmp/http_server.log; exit 1
-          fi
-
           : > /tmp/test_files.txt
-          find "$TEST_FILES_DIR" -type f -name "*" | while read filepath; do
-            filename=$(basename "$filepath")
+          echo "$file_list" | while IFS= read -r filename; do
+            [ -z "$filename" ] && continue
             name=$(echo "$filename" | sed 's/\.[^.]*$//')
             extension=$(echo "$filename" | sed 's/.*\.//' | tr '[:upper:]' '[:lower:]')
+            file_url="${TESTING_REPO_RAW}/tests/${FILES_DIR}/${filename}"
             case "$extension" in
-              csv)     echo "$name|http://localhost:8080/$filename|CSV|text/csv|CSV: $filename" >> /tmp/test_files.txt ;;
-              tsv)     echo "$name|http://localhost:8080/$filename|TSV|text/tab-separated-values|TSV: $filename" >> /tmp/test_files.txt ;;
-              tab)     echo "$name|http://localhost:8080/$filename|TAB|text/tab-separated-values|TAB: $filename" >> /tmp/test_files.txt ;;
-              ssv)     echo "$name|http://localhost:8080/$filename|SSV|text/csv|SSV: $filename" >> /tmp/test_files.txt ;;
-              xls)     echo "$name|http://localhost:8080/$filename|XLS|application/vnd.ms-excel|XLS: $filename" >> /tmp/test_files.txt ;;
-              xlsx)    echo "$name|http://localhost:8080/$filename|XLSX|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet|XLSX: $filename" >> /tmp/test_files.txt ;;
-              xlsxb)   echo "$name|http://localhost:8080/$filename|XLSXB|application/vnd.ms-excel.sheet.binary.macroEnabled.12|XLSXB: $filename" >> /tmp/test_files.txt ;;
-              xlsm)    echo "$name|http://localhost:8080/$filename|XLSM|application/vnd.ms-excel.sheet.macroEnabled.12|XLSM: $filename" >> /tmp/test_files.txt ;;
-              ods)     echo "$name|http://localhost:8080/$filename|ODS|application/vnd.oasis.opendocument.spreadsheet|ODS: $filename" >> /tmp/test_files.txt ;;
-              geojson) echo "$name|http://localhost:8080/$filename|GEOJSON|application/geo+json|GeoJSON: $filename" >> /tmp/test_files.txt ;;
-              shp)     echo "$name|http://localhost:8080/$filename|SHP|application/x-shp|SHP: $filename" >> /tmp/test_files.txt ;;
-              qgis)    echo "$name|http://localhost:8080/$filename|QGIS|application/x-qgis|QGIS: $filename" >> /tmp/test_files.txt ;;
-              zip)     echo "$name|http://localhost:8080/$filename|ZIP|application/zip|ZIP: $filename" >> /tmp/test_files.txt ;;
+              csv)     echo "$name|$file_url|CSV|text/csv|CSV: $filename" >> /tmp/test_files.txt ;;
+              tsv)     echo "$name|$file_url|TSV|text/tab-separated-values|TSV: $filename" >> /tmp/test_files.txt ;;
+              tab)     echo "$name|$file_url|TAB|text/tab-separated-values|TAB: $filename" >> /tmp/test_files.txt ;;
+              ssv)     echo "$name|$file_url|SSV|text/csv|SSV: $filename" >> /tmp/test_files.txt ;;
+              xls)     echo "$name|$file_url|XLS|application/vnd.ms-excel|XLS: $filename" >> /tmp/test_files.txt ;;
+              xlsx)    echo "$name|$file_url|XLSX|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet|XLSX: $filename" >> /tmp/test_files.txt ;;
+              xlsxb)   echo "$name|$file_url|XLSXB|application/vnd.ms-excel.sheet.binary.macroEnabled.12|XLSXB: $filename" >> /tmp/test_files.txt ;;
+              xlsm)    echo "$name|$file_url|XLSM|application/vnd.ms-excel.sheet.macroEnabled.12|XLSM: $filename" >> /tmp/test_files.txt ;;
+              ods)     echo "$name|$file_url|ODS|application/vnd.oasis.opendocument.spreadsheet|ODS: $filename" >> /tmp/test_files.txt ;;
+              geojson) echo "$name|$file_url|GEOJSON|application/geo+json|GeoJSON: $filename" >> /tmp/test_files.txt ;;
+              shp)     echo "$name|$file_url|SHP|application/x-shp|SHP: $filename" >> /tmp/test_files.txt ;;
+              qgis)    echo "$name|$file_url|QGIS|application/x-qgis|QGIS: $filename" >> /tmp/test_files.txt ;;
+              zip)     echo "$name|$file_url|ZIP|application/zip|ZIP: $filename" >> /tmp/test_files.txt ;;
               *)
                 echo "$filename,Unsupported format: .$extension" >> /tmp/skipped_files.csv
                 ;;
@@ -519,8 +507,7 @@ jobs:
           done
 
           if [ ! -s /tmp/test_files.txt ]; then
-            echo "ERROR: No supported test files found in $TEST_FILES_DIR"
-            kill $HTTP_SERVER_PID 2>/dev/null || true
+            echo "ERROR: No supported test files found in tests/$FILES_DIR"
             exit 1
           fi
 
@@ -622,9 +609,6 @@ jobs:
             sleep 3
           done < /tmp/test_files.txt
 
-          kill $HTTP_SERVER_PID 2>/dev/null || true
-          wait $HTTP_SERVER_PID 2>/dev/null || true
-
           if [ -f /tmp/skipped_files.csv ]; then
             skipped_files=$(tail -n +2 /tmp/skipped_files.csv | wc -l)
           fi
@@ -657,7 +641,7 @@ jobs:
             echo "timestamp,job_id,file_name,status,qsv_version,file_format,encoding,normalized,valid_csv,sorted,db_safe_headers,analysis,records,total_time,download_time,analysis_time,copying_time,indexing_time,formulae_time,metadata_time,rows_copied,columns_indexed,error_type,error_message,data_quality_score,processing_efficiency" > /tmp/worker_analysis.csv
           else
             echo "Worker log size: $(du -h /tmp/ckan_worker.log | cut -f1)"
-            python3 /tmp/dp-testing/tests/log_analyzer.py analyze /tmp/ckan_worker.log /tmp/worker_analysis.csv
+            python3 /tmp/log_analyzer.py analyze /tmp/ckan_worker.log /tmp/worker_analysis.csv
           fi
 
           if [ ! -f /tmp/test_results.csv ]; then
@@ -727,7 +711,7 @@ jobs:
           passed=${CI_PASSED_FILES:-0}
 
           if [ "$total" -eq 0 ]; then
-            echo "No files were tested. Check test directory and HTTP server logs."
+            echo "No files were tested. Check FILES_DIR ($FILES_DIR) and GitHub API availability."
             exit 1
           fi
 
