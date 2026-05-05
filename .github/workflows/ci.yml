@@ -644,18 +644,10 @@ jobs:
           cat /tmp/test_results.csv
           echo ""
 
-          # Fail CI if any file failed
-          if [ $failed_files -gt 0 ]; then
-            echo "CI FAILED: $failed_files file(s) did not process successfully."
-            exit 1
-          fi
-
-          if [ $total_files -eq 0 ]; then
-            echo "CI WARNING: No files were tested."
-            exit 1
-          fi
-
-          echo "CI PASSED: All $passed_files file(s) processed successfully."
+          # Save counts for gate step — do not exit 1 here so all steps always run
+          echo "CI_FAILED_FILES=$failed_files" >> $GITHUB_ENV
+          echo "CI_TOTAL_FILES=$total_files" >> $GITHUB_ENV
+          echo "CI_PASSED_FILES=$passed_files" >> $GITHUB_ENV
 
       - name: Generate worker analysis
         if: always()
@@ -726,3 +718,23 @@ jobs:
           kill $CKAN_PID 2>/dev/null || true
           kill $CKAN_WORKER_PID 2>/dev/null || true
           echo "Cleanup completed"
+
+      - name: Check test results
+        if: always()
+        run: |
+          failed=${CI_FAILED_FILES:-0}
+          total=${CI_TOTAL_FILES:-0}
+          passed=${CI_PASSED_FILES:-0}
+
+          if [ "$total" -eq 0 ]; then
+            echo "No files were tested. Check test directory and HTTP server logs."
+            exit 1
+          fi
+
+          if [ "$failed" -gt 0 ]; then
+            echo "$failed of $total file(s) failed DataPusher+ processing. $passed passed."
+            echo "See step summary and artifacts for details."
+            exit 1
+          fi
+
+          echo "All $passed file(s) passed."
