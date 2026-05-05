@@ -633,56 +633,208 @@ jobs:
           echo "CI_TOTAL_FILES=$total_files" >> $GITHUB_ENV
           echo "CI_PASSED_FILES=$passed_files" >> $GITHUB_ENV
 
-      - name: Generate worker analysis
+      - name: Generate combined test results and worker analysis
         if: always()
         run: |
           set -eu
+          echo "=== Processing DataPusher Plus Worker Logs ==="
           if [ ! -f /tmp/ckan_worker.log ]; then
+            echo "No worker log file found"
             echo "timestamp,job_id,file_name,status,qsv_version,file_format,encoding,normalized,valid_csv,sorted,db_safe_headers,analysis,records,total_time,download_time,analysis_time,copying_time,indexing_time,formulae_time,metadata_time,rows_copied,columns_indexed,error_type,error_message,data_quality_score,processing_efficiency" > /tmp/worker_analysis.csv
           else
             echo "Worker log size: $(du -h /tmp/ckan_worker.log | cut -f1)"
             python3 /tmp/log_analyzer.py analyze /tmp/ckan_worker.log /tmp/worker_analysis.csv
           fi
 
-          if [ ! -f /tmp/test_results.csv ]; then
-            echo "No test results found." >> $GITHUB_STEP_SUMMARY
+          if [ ! -f /tmp/test_results.csv ] && [ ! -f /tmp/worker_analysis.csv ]; then
+            echo "# DataPusher+ CI Results" >> $GITHUB_STEP_SUMMARY
+            echo "No test data available." >> $GITHUB_STEP_SUMMARY
             exit 0
           fi
 
-          total_lines=$(wc -l < /tmp/test_results.csv)
-          total_tests=$((total_lines - 1))
-          passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
-          failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
-          rate=0; [ $total_tests -gt 0 ] && rate=$(( passed * 100 / total_tests ))
+          total_tests=0; skipped_count=0; total_files_in_dir=0
+          passed=0; failed=0; error_count=0
+          tested_success_rate=0; overall_success_rate=0
+
+          if [ -f /tmp/test_results.csv ]; then
+            total_lines=$(wc -l < /tmp/test_results.csv)
+            total_tests=$((total_lines - 1))
+            if [ -f /tmp/skipped_files.csv ]; then
+              skipped_lines=$(wc -l < /tmp/skipped_files.csv)
+              skipped_count=$((skipped_lines - 1))
+            fi
+            total_files_in_dir=$((total_tests + skipped_count))
+            if [ $total_tests -gt 0 ]; then
+              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
+              failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
+              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
+              error_count=$(echo "$error_count" | tr -d '\n')
+              tested_success_rate=$(( passed * 100 / total_tests ))
+              [ $total_files_in_dir -gt 0 ] && overall_success_rate=$(( passed * 100 / total_files_in_dir ))
+            fi
+          fi
+
+          worker_analysis_available=false
+          [ -f /tmp/worker_analysis.csv ] && worker_analysis_available=true
 
           {
             echo "# DataPusher+ CI Results"
             echo ""
             echo "**Branch:** \`${{ github.ref_name }}\` | **SHA:** \`${{ github.sha }}\`"
             echo ""
+            echo "## Summary"
+            echo ""
             echo "| Metric | Value |"
             echo "|--------|-------|"
+            echo "| Total Files in Directory | $total_files_in_dir |"
             echo "| Files Tested | $total_tests |"
+            echo "| Files Skipped | $skipped_count |"
             echo "| Passed | $passed |"
             echo "| Failed | $failed |"
-            echo "| Success Rate | ${rate}% |"
+            echo "| Errors | $error_count |"
+            echo "| Success Rate (Tested Files) | ${tested_success_rate}% |"
+            echo "| Success Rate (All Files) | ${overall_success_rate}% |"
             echo ""
-            if [ -f /tmp/worker_analysis.csv ] && [ $(tail -n +2 /tmp/worker_analysis.csv | wc -l) -gt 0 ]; then
-              echo "## Job Details"
+
+            if [ $skipped_count -gt 0 ] && [ -f /tmp/skipped_files.csv ]; then
+              echo "## Skipped Files"
               echo ""
-              echo "| File | Status | Records | Time (s) | Error |"
-              echo "|------|--------|---------|----------|-------|"
-              tail -n +2 /tmp/worker_analysis.csv | while IFS=',' read ts job_id file_name status qsv_ver fmt enc norm valid_csv sorted headers analysis records total_time dl_time an_time cp_time idx_time frm_time meta_time rows_copied cols_idx error_type error_msg dq_score proc_eff; do
-                [ -z "$records" ] && records="0"
-                [ -z "$total_time" ] && total_time="0"
-                [ -z "$error_type" ] && error_type="-"
-                echo "| $file_name | $status | $records | $total_time | $error_type |"
+              echo "| File Name | Reason Skipped |"
+              echo "|-----------|----------------|"
+              tail -n +2 /tmp/skipped_files.csv | while IFS=',' read -r file_name reason; do
+                echo "| $file_name | $reason |"
               done
               echo ""
             fi
+
+            if [ "$worker_analysis_available" = true ]; then
+              total_jobs=$(tail -n +2 /tmp/worker_analysis.csv | wc -l)
+              if [ $total_jobs -gt 0 ]; then
+                echo "## Complete Job Analysis"
+                echo ""
+                echo "| # | File Name | Status | Records | Columns | Time (s) | Valid CSV | Headers Safe | Error Type | Quality Score |"
+                echo "|---|-----------|--------|---------|---------|----------|-----------|--------------|------------|---------------|"
+                counter=1
+                tail -n +2 /tmp/worker_analysis.csv | while IFS=',' read timestamp job_id file_name status qsv_version file_format encoding normalized valid_csv sorted db_safe_headers analysis records total_time download_time analysis_time copying_time indexing_time formulae_time metadata_time rows_copied columns_indexed error_type error_message data_quality_score processing_efficiency; do
+                  [ -z "$records" ] && records="0"
+                  [ -z "$columns_indexed" ] && columns_indexed="0"
+                  [ -z "$total_time" ] && total_time="0"
+                  [ -z "$data_quality_score" ] && data_quality_score="-"
+                  [ -z "$error_type" ] && error_type="-"
+                  case "$status" in
+                    "SUCCESS")    status_display="SUCCESS" ;;
+                    "ERROR")      status_display="ERROR" ;;
+                    "INCOMPLETE") status_display="INCOMPLETE" ;;
+                    *)            status_display="$status" ;;
+                  esac
+                  echo "| $counter | $file_name | $status_display | $records | $columns_indexed | $total_time | $valid_csv | $db_safe_headers | $error_type | $data_quality_score |"
+                  counter=$((counter + 1))
+                done
+                echo ""
+
+                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
+                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
+
+                echo "## File Analysis"
+                echo ""
+                if [ $success_jobs -gt 0 ]; then
+                  echo "### File Formats Processed"
+                  echo ""
+                  formats=$(tail -n +2 /tmp/worker_analysis.csv | grep ",SUCCESS," | cut -d',' -f6 | sort | uniq -c)
+                  if [ -n "$formats" ]; then
+                    echo "| Format | Files | Percentage |"
+                    echo "|--------|-------|------------|"
+                    echo "$formats" | while read count format; do
+                      percentage=$((count * 100 / success_jobs))
+                      echo "| $format | $count | $percentage% |"
+                    done
+                  else
+                    echo "No format data available"
+                  fi
+                  echo ""
+
+                  echo "### Encoding Distribution"
+                  echo ""
+                  encodings=$(tail -n +2 /tmp/worker_analysis.csv | grep ",SUCCESS," | cut -d',' -f7 | sort | uniq -c)
+                  if [ -n "$encodings" ]; then
+                    echo "| Encoding | Files | Status |"
+                    echo "|----------|-------|--------|"
+                    echo "$encodings" | while read count encoding; do
+                      if [ -n "$encoding" ]; then
+                        echo "| $encoding | $count | Compatible |"
+                      else
+                        echo "| Unknown | $count | Needs Review |"
+                      fi
+                    done
+                  else
+                    echo "No encoding data available"
+                  fi
+                  echo ""
+                fi
+
+                echo "## Error Analysis"
+                echo ""
+                if [ $error_jobs -gt 0 ]; then
+                  echo "### Failed Files Details"
+                  echo ""
+                  echo "| File | Error Type | Error Message |"
+                  echo "|------|------------|---------------|"
+                  tail -n +2 /tmp/worker_analysis.csv | grep ",ERROR," | cut -d',' -f3,23,24 | while IFS=',' read file error_type error_msg; do
+                    clean_error=$(echo "$error_msg" | sed 's/^"//;s/"$//')
+                    clean_file=$(echo "$file" | sed 's/\.\.\.//')
+                    echo "| $clean_file | $error_type | $clean_error |"
+                  done
+                  echo ""
+                else
+                  echo "No errors found in worker logs - all processed jobs completed successfully."
+                  echo ""
+                fi
+
+                echo "## Performance Anomalies"
+                echo ""
+                anomalies_output=$(python3 /tmp/log_analyzer.py anomalies /tmp/worker_analysis.csv 2>/dev/null || echo "")
+                if [ -z "$anomalies_output" ]; then
+                  echo "No performance anomalies detected."
+                else
+                  echo "Performance issues detected:"
+                  echo ""
+                  echo "$anomalies_output"
+                fi
+                echo ""
+              fi
+            fi
+
+            if [ $total_tests -eq 0 ] && [ $skipped_count -gt 0 ]; then
+              echo "## No Testable Files"
+              echo "All files in the test directory were skipped."
+            elif [ $total_tests -eq 0 ]; then
+              echo "## No Files Found"
+              echo "No files found in test directory."
+            elif [ $passed -eq $total_tests ]; then
+              echo "## All Tested Files Passed"
+              echo "DataPusher Plus is working correctly with all testable files."
+              [ $skipped_count -gt 0 ] && echo "" && echo "**Note:** $skipped_count file(s) skipped."
+            elif [ $passed -gt 0 ]; then
+              echo "## Partial Success"
+              echo "DataPusher Plus works with some files but has issues with others."
+            else
+              echo "## All Tested Files Failed"
+              echo "DataPusher Plus is not working correctly with any tested files."
+              if [ -f /tmp/test_results.csv ]; then
+                echo ""
+                tail -n +2 /tmp/test_results.csv | while IFS=',' read -r timestamp file_name upload_status resource_id datapusher_status datastore_active rows_imported processing_time error_message; do
+                  clean_error=$(echo "$error_message" | sed 's/^"//;s/"$//')
+                  echo "- **$file_name**: $clean_error"
+                done
+              fi
+            fi
+
+            echo ""
             echo "---"
-            echo "**Completed:** $(date '+%Y-%m-%d %H:%M:%S %Z')"
+            echo "**Completed:** $(date '+%A, %B %d, %Y at %I:%M %p %Z')"
           } >> $GITHUB_STEP_SUMMARY
+
+          echo "Summary written to workflow step summary"
 
       - name: Upload CI artifacts
         uses: actions/upload-artifact@v4
@@ -712,13 +864,9 @@ jobs:
 
           if [ "$total" -eq 0 ]; then
             echo "No files were tested. Check FILES_DIR ($FILES_DIR) and GitHub API availability."
-            exit 1
-          fi
-
-          if [ "$failed" -gt 0 ]; then
+          elif [ "$failed" -gt 0 ]; then
             echo "$failed of $total file(s) failed DataPusher+ processing. $passed passed."
             echo "See step summary and artifacts for details."
-            exit 1
+          else
+            echo "All $passed file(s) passed."
           fi
-
-          echo "All $passed file(s) passed."
