@@ -179,23 +179,27 @@ jobs:
           unzip -q "$QSV_ZIP"
           ls -lh
 
-          QSV_BINARY=""
-          if [ -f "qsvdp" ]; then QSV_BINARY="qsvdp"
-          elif [ -f "qsv" ]; then QSV_BINARY="qsv"
+          # Always install as /usr/local/bin/qsvdp so the CKAN config (qsv_bin)
+          # path is stable regardless of whether the archive ships qsvdp or qsv.
+          if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
+          elif [ -f "qsv" ]; then SRC_BIN="qsv"
           else echo "ERROR: No qsv binary found"; ls -la; exit 1; fi
 
-          chmod +x "$QSV_BINARY"
-          mv "$QSV_BINARY" "/usr/local/bin/$QSV_BINARY"
+          chmod +x "$SRC_BIN"
+          mv -f "$SRC_BIN" /usr/local/bin/qsvdp
 
-          if ! /usr/local/bin/$QSV_BINARY --version; then
+          if ! /usr/local/bin/qsvdp --version; then
             echo "GNU version failed. Falling back to musl..."
-            rm -f "$QSV_ZIP"
+            rm -f /usr/local/bin/qsvdp "$QSV_ZIP"
             QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
             wget -q "https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}" -O "$QSV_ZIP" || exit 1
             unzip -qo "$QSV_ZIP"
-            if [ -f "qsvdp" ]; then chmod +x qsvdp && mv -f qsvdp /usr/local/bin/qsvdp
-            elif [ -f "qsv" ]; then chmod +x qsv && mv -f qsv /usr/local/bin/qsv; fi
-            /usr/local/bin/qsvdp --version 2>/dev/null || /usr/local/bin/qsv --version 2>/dev/null || echo "Warning: qsv version check failed"
+            if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
+            elif [ -f "qsv" ]; then SRC_BIN="qsv"
+            else echo "ERROR: No qsv binary found in musl archive"; ls -la; exit 1; fi
+            chmod +x "$SRC_BIN"
+            mv -f "$SRC_BIN" /usr/local/bin/qsvdp
+            /usr/local/bin/qsvdp --version || { echo "ERROR: musl qsv also failed"; exit 1; }
           else
             echo "qsv GNU version installed successfully!"
           fi
@@ -264,8 +268,8 @@ jobs:
           ckanext.datapusher_plus.auto_alias_unique = false
           ckanext.datapusher_plus.copy_readbuffer_size = 1048576
           ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
-          ckanext.datapusher_plus.auto_spatial_simplication = true
-          ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+          ckanext.datapusher_plus.auto_spatial_simplification = true
+          ckanext.datapusher_plus.spatial_simplification_relative_tolerance = 0.1
           ckanext.datapusher_plus.latitude_fields = latitude,lat
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache

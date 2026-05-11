@@ -88,9 +88,15 @@ jobs:
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='datastore_test'" | grep -q 1 || \
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;"
           echo "Granting permissions (best-effort)..."
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"  
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"  
-          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;"  
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;"
+          # PostgreSQL 15+ removed the implicit CREATE on the public schema for non-owners.
+          # vanilla postgres:15 needs these explicit schema grants for ckan db init / datastore set-permissions.
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d ckan_test -c "GRANT USAGE, CREATE ON SCHEMA public TO ckan_default;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d datastore_test -c "GRANT USAGE, CREATE ON SCHEMA public TO datastore_write;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d datastore_test -c "GRANT USAGE ON SCHEMA public TO datastore_read;"
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -d datastore_test -c "GRANT USAGE ON SCHEMA public TO ckan_default;"
           echo "Database setup completed"
       - name: Install requirements, ckanapi and datapusher-plus
         run: |
