@@ -18,6 +18,17 @@ from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE metacharacters so user input matches literally.
+
+    The alias is built from resource/package/org names — values like ``50%``
+    or ``foo_bar`` would otherwise turn the prefix match into a wildcard and
+    silently corrupt the AUTO_ALIAS_UNIQUE branch. Pair with ``ESCAPE '\\'``
+    in the query.
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 class MetadataStage(BaseStage):
     """
     Updates resource metadata and creates aliases.
@@ -137,10 +148,12 @@ class MetadataStage(BaseStage):
         # Create base alias (limited to 55 chars for sequence/stats suffix)
         alias = f"{resource_name}-{package_name}-{owner_org_name}"[:55]
 
-        # Check if alias exists
+        # Check if alias exists — escape LIKE metacharacters so resource/
+        # package names containing % or _ don't over-match other aliases.
         cursor.execute(
-            "SELECT COUNT(*), alias_of FROM _table_metadata where name like %s group by alias_of",
-            (alias + "%",),
+            "SELECT COUNT(*), alias_of FROM _table_metadata "
+            "where name like %s ESCAPE '\\' group by alias_of",
+            (_escape_like(alias) + "%",),
         )
         alias_query_result = cursor.fetchone()
 
@@ -158,8 +171,9 @@ class MetadataStage(BaseStage):
                 # Find next available sequence number
                 alias = f"{alias}-{alias_sequence:03}"
                 cursor.execute(
-                    "SELECT COUNT(*), alias_of FROM _table_metadata where name like %s group by alias_of;",
-                    (alias + "%",),
+                    "SELECT COUNT(*), alias_of FROM _table_metadata "
+                    "where name like %s ESCAPE '\\' group by alias_of;",
+                    (_escape_like(alias) + "%",),
                 )
                 result = cursor.fetchone()
                 alias_exists = result[0] if result else 0

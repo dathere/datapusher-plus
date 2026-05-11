@@ -83,9 +83,16 @@ def submit(package: str, yes: bool):
             pkg = package_show(
                 cast(Context, {"model": model, "ignore_auth": True}), {"id": id}
             )
+        except tk.ObjectNotFound:
+            # The original code said "was not found" but caught *all* exceptions
+            # and logged the wrong identifier (`package`, not the current `id`).
+            error_shout("Package '{}' was not found".format(id))
+            raise click.Abort()
+        except tk.NotAuthorized:
+            error_shout("Not authorized to read package '{}'".format(id))
+            raise click.Abort()
         except Exception as e:
-            error_shout(e)
-            error_shout("Package '{}' was not found".format(package))
+            error_shout("Unexpected error reading package '{}': {}".format(id, e))
             raise click.Abort()
         if not pkg["resources"]:
             continue

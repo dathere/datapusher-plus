@@ -47,5 +47,11 @@ class LoaderError(JobError):
     pass
 
 
+class JobNotFoundError(JobError):
+    """Raised when a Jobs row cannot be located for an update."""
+
+    pass
+
+
 class InvalidErrorObjectError(Exception):
     pass

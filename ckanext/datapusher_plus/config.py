@@ -6,8 +6,16 @@ import requests
 from pathlib import Path
 import ckan.plugins.toolkit as tk
 
-# SSL verification settings
-SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
+# SSL verification settings.
+# Default to True (verify TLS) — disabling verification is a MITM footgun on
+# downloads. The old non-namespaced "SSL_VERIFY" key is still honoured for
+# backward compatibility with existing deployments.
+SSL_VERIFY = tk.asbool(
+    tk.config.get(
+        "ckanext.datapusher_plus.ssl_verify",
+        tk.config.get("SSL_VERIFY", True),
+    )
+)
 if not SSL_VERIFY:
     requests.packages.urllib3.disable_warnings()
 
@@ -53,11 +61,21 @@ PII_QUICK_SCREEN = tk.asbool(
 )
 
 # Binary paths
-QSV_BIN = Path(tk.config.get("ckanext.datapusher_plus.qsv_bin"))
+_qsv_bin_setting = tk.config.get("ckanext.datapusher_plus.qsv_bin")
+if not _qsv_bin_setting:
+    raise RuntimeError(
+        "ckanext.datapusher_plus.qsv_bin is not set in ckan.ini. "
+        "Install qsv (https://github.com/dathere/qsv) and set this to its "
+        "absolute path before starting CKAN."
+    )
+QSV_BIN = Path(_qsv_bin_setting)
 
 # Data processing settings
 PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "1000"))
 TIMEOUT = tk.asint(tk.config.get("ckanext.datapusher_plus.download_timeout", "300"))
+QSV_COMMAND_TIMEOUT = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.qsv_command_timeout", "1800")
+)
 MAX_CONTENT_LENGTH = tk.asint(
     tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
 )
@@ -137,6 +155,12 @@ DATASTORE_URLS = {
 
 # Datastore write URL
 DATASTORE_WRITE_URL = tk.config.get("ckan.datastore.write_url")
+if not DATASTORE_WRITE_URL:
+    raise RuntimeError(
+        "ckan.datastore.write_url is not set in ckan.ini. "
+        "DataPusher+ uses direct PostgreSQL COPY into the datastore and "
+        "cannot operate without this URL."
+    )
 
 # spatial simplification settings
 AUTO_SPATIAL_SIMPLIFICATION = tk.asbool(

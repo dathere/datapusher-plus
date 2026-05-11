@@ -114,20 +114,29 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
                 "key": "datapusher_plus",
             },
         )
+        # tk.asint gracefully handles bools/None/whitespace and gives a clean
+        # ValueError on garbage — better than bare int() which crashes the
+        # action on a malformed config string like "3600s".
         assume_task_stale_after = datetime.timedelta(
-            seconds=int(config.get("ckan.datapusher.assume_task_stale_after", 3600))
+            seconds=tk.asint(config.get("ckan.datapusher.assume_task_stale_after", 3600))
         )
         assume_task_stillborn_after = datetime.timedelta(
-            seconds=int(config.get("ckan.datapusher.assume_task_stillborn_after", 5))
+            seconds=tk.asint(config.get("ckan.datapusher.assume_task_stillborn_after", 5))
         )
         if existing_task.get("state") == "pending":
             import re
 
-            queued_res_ids = [
-                re.search(r"'resource_id': u?'([^']+)'", job.description).group()[0]
-                for job in get_queue().get_jobs()
-                if "push_to_datastore" in job.description
-            ]
+            # Two bugs were fixed here: (a) .group()[0] returns the first
+            # character of the whole match, not the captured group — the
+            # intent is .group(1); (b) re.search returns None on no-match,
+            # which would AttributeError on .group(). Now we skip non-matches.
+            queued_res_ids = []
+            for job in get_queue().get_jobs():
+                if "push_to_datastore" not in job.description:
+                    continue
+                m = re.search(r"'resource_id': u?'([^']+)'", job.description)
+                if m:
+                    queued_res_ids.append(m.group(1))
             updated = datetime.datetime.strptime(
                 existing_task["last_updated"], "%Y-%m-%dT%H:%M:%S.%f"
             )
@@ -207,7 +216,7 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
     value = json.dumps({"job_id": job.id})
     task["value"] = value
     task["state"] = "pending"
-    task["last_updated"] = (str(datetime.datetime.utcnow()),)
+    task["last_updated"] = str(datetime.datetime.utcnow())
     p.toolkit.get_action("task_status_update")(context, task)
 
     return True
@@ -229,8 +238,11 @@ def datapusher_hook(context: Context, data_dict: dict[str, Any]):
     res_id = _get_or_bust(metadata, "resource_id")
 
     # Pass metadata, not data_dict, as it contains the resource id needed
-    # on the auth checks
-    p.toolkit.check_access("datapusher_submit", context, metadata)
+    # on the auth checks. Use the dedicated datapusher_hook permission rather
+    # than datapusher_submit so the boundary matches the hook's side effects
+    # (marking complete, creating default views, recursive resubmit) and can
+    # be tightened independently.
+    p.toolkit.check_access("datapusher_hook", context, metadata)
 
     task = p.toolkit.get_action("task_status_show")(
         context,

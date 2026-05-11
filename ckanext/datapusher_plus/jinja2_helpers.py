@@ -9,7 +9,8 @@ from datetime import datetime
 from collections import Counter
 from typing import Any, Dict, Optional
 
-from jinja2 import DictLoader, Environment, FileSystemBytecodeCache, pass_context
+from jinja2 import DictLoader, FileSystemBytecodeCache, pass_context
+from jinja2.sandbox import SandboxedEnvironment
 
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
@@ -24,21 +25,34 @@ JINJA2_GLOBALS = []
 USES_SQL = []
 
 
+def _register_unique(registry: list, func):
+    """Append ``func`` to ``registry`` unless an entry with the same qualname
+    is already present.
+
+    The decorators below run at import time; if the module is reloaded (test
+    isolation, hot reload), naive ``append`` would accumulate duplicates and
+    bloat the Jinja env. Guarding by qualname keeps the list idempotent.
+    """
+    qualname = getattr(func, "__qualname__", func.__name__)
+    if not any(getattr(f, "__qualname__", f.__name__) == qualname for f in registry):
+        registry.append(func)
+
+
 def jinja2_filter(func):
     """Decorator to register a function as a Jinja2 filter."""
-    JINJA2_FILTERS.append(func)
+    _register_unique(JINJA2_FILTERS, func)
     return func
 
 
 def jinja2_global(func):
     """Decorator to register a function as a Jinja2 global."""
-    JINJA2_GLOBALS.append(func)
+    _register_unique(JINJA2_GLOBALS, func)
     return func
 
 
 def uses_sql(func):
     """Decorator to register a function as using SQL."""
-    USES_SQL.append(func)
+    _register_unique(USES_SQL, func)
     return func
 
 
@@ -206,8 +220,14 @@ class FormulaProcessor:
 
         return updates
 
-    def create_jinja2_env(self, context: Dict[str, Any]) -> Environment:
-        """Create a configured Jinja2 environment with all filters and globals."""
+    def create_jinja2_env(self, context: Dict[str, Any]) -> SandboxedEnvironment:
+        """Create a configured Jinja2 environment with all filters and globals.
+
+        Uses ``SandboxedEnvironment`` because formula templates originate from
+        scheming YAML authored by sysadmins/schema editors. Without the sandbox,
+        a template like ``{{ ''.__class__.__mro__[1].__subclasses__() }}`` can
+        escape to ``subprocess``, the filesystem, etc. — i.e. RCE on the worker.
+        """
 
         # We use a bytecode cache to speed up the rendering of the Formulas
         # we do not use temp_dir defined in jobs.py because we want the cache
@@ -216,7 +236,9 @@ class FormulaProcessor:
         os.makedirs(cache_dir, exist_ok=True)
         bytecode_cache = FileSystemBytecodeCache(cache_dir)
 
-        env = Environment(loader=DictLoader(context), bytecode_cache=bytecode_cache)
+        env = SandboxedEnvironment(
+            loader=DictLoader(context), bytecode_cache=bytecode_cache
+        )
 
         datastore_sqlsearch_enabled = tk.config.get(
             "ckan.datastore.sqlsearch.enabled", False
