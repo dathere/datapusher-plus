@@ -876,8 +876,9 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          # github.ref_name is "<PR>/merge" for PRs which contains "/"; upload-artifact@v4 rejects "/"
-          name: dp-ci-${{ replace(github.ref_name, '/', '-') }}-${{ github.run_id }}
+          # github.ref_name is "<PR>/merge" on pull_request events (rejected by upload-artifact@v4
+          # because of the "/"); use the PR number directly when available, fall back to ref_name otherwise.
+          name: dp-ci-${{ github.event.pull_request.number && format('pr{0}', github.event.pull_request.number) || github.ref_name }}-${{ github.run_id }}
           path: |
             /tmp/test_results.csv
             /tmp/ckan_stdout.log
