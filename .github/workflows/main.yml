@@ -12,6 +12,10 @@ env:
   # When dispatched with no input, this still resolves to "main" — preserves
   # the existing zero-arg behaviour. Pass `branch=<name>` to target another.
   DATAPUSHER_BRANCH: ${{ inputs.branch || 'main' }}
+  # Opt into Node 24 for JavaScript actions ahead of the 2026-06-02 default
+  # switch. Silences the deprecation annotation on actions/checkout@v4 and
+  # actions/upload-artifact@v4 without needing version bumps.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CKAN_VERSION: "2.11"
   POSTGRES_PASSWORD: postgres
   CKAN_DB_PASSWORD: pass
@@ -1145,9 +1149,14 @@ jobs:
                 done
                 echo ""
                 
-                # Add worker analysis sections
+                # Add worker analysis sections.
+                # Same newline-doubling trap as above: `grep -c ... || echo "0"`
+                # captures "0\n0" on no-match, which then breaks `[ $var -gt 0 ]`
+                # with "unexpected operator: 0". Strip newlines defensively.
                 success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
+                success_jobs=$(echo "$success_jobs" | tr -d '\n')
                 error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
+                error_jobs=$(echo "$error_jobs" | tr -d '\n')
                 
                 # File Analysis
                 echo "## File Analysis"
