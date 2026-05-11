@@ -239,6 +239,11 @@ jobs:
           ckanext.datapusher_plus.ssl_verify = false
           ckanext.datapusher_plus.upload_log_level = INFO
           ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+          # CKAN's bundled test-core.ini sets the legacy `ckan.datapusher.formats` key, which DPP's
+          # _submit_to_datapusher checks FIRST (`tk.config.get("ckan.datapusher.formats") or ...`).
+          # Without overriding it here, the legacy list (csv/xls/xlsx/tsv only) wins and DPP silently
+          # refuses to auto-submit ssv/tab/ods/geojson/shp/qgis/zip resources.
+          ckan.datapusher.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
           ckanext.datapusher_plus.pii_screening = false
           ckanext.datapusher_plus.pii_found_abort = false
           ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
