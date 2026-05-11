@@ -1046,12 +1046,22 @@ jobs:
             total_files_in_dir=$((total_tests + skipped_count))
             
             if [ $total_tests -gt 0 ]; then
-              # Count results by status
+              # Count results by status.
+              #
+              # `grep -c PATTERN FILE || echo "0"` looks safe but isn't:
+              # `grep -c` ALWAYS prints a number (0 when there are no matches),
+              # AND exits 1 on no-match. The `|| echo "0"` then appends a
+              # SECOND "0" on its own line, so the captured value becomes the
+              # two-line string "0\n0" — and the arithmetic below ($(( ... )))
+              # bails with `Illegal number: 0`. Strip newlines defensively
+              # (same pattern that error_count already uses).
               passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
+              passed=$(echo "$passed" | tr -d '\n')
               failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
+              failed=$(echo "$failed" | tr -d '\n')
               error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
               error_count=$(echo "$error_count" | tr -d '\n')
-              
+
               # Calculate success rates
               tested_success_rate=$(( passed * 100 / total_tests ))
               if [ $total_files_in_dir -gt 0 ]; then
