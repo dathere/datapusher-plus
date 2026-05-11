@@ -16,9 +16,27 @@ and skips gracefully outside the CI container.
 
 from __future__ import annotations
 
+import importlib
 import re
 
 import pytest
+
+
+def _import_or_skip(module_name: str):
+    """Like ``pytest.importorskip`` but also skips on RuntimeError.
+
+    ``ckanext.datapusher_plus.config`` raises ``RuntimeError`` at import time
+    when required CKAN settings (``qsv_bin``, ``ckan.datastore.write_url``)
+    are not configured — exactly the case where these tests need to skip
+    rather than fail noisily. ``pytest.importorskip`` only catches
+    ``ImportError``, so wrap it here.
+    """
+    try:
+        return importlib.import_module(module_name)
+    except ImportError as exc:
+        pytest.skip(f"{module_name} is not importable: {exc}")
+    except RuntimeError as exc:
+        pytest.skip(f"{module_name} requires CKAN config: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -88,6 +106,41 @@ class TestJinja2Sandbox:
         template = env.from_string("hello {{ name }}")
         assert template.render(name="world") == "hello world"
 
+    def test_formula_processor_uses_sandboxed_environment(self):
+        """Pin DataPusher+'s own formula engine to ``SandboxedEnvironment`` —
+        the standalone sandbox tests above only prove jinja2's library
+        contract; this one catches a regression back to plain ``Environment``
+        inside ``create_jinja2_env``."""
+        SandboxedEnvironment = pytest.importorskip(
+            "jinja2.sandbox"
+        ).SandboxedEnvironment
+        jinja2_helpers = _import_or_skip("ckanext.datapusher_plus.jinja2_helpers")
+
+        # FormulaProcessor.__init__ does heavy lat/lon/date inference on the
+        # constructor args, so build a minimal stub directly and call the
+        # env-factory method via __get__ to bypass __init__.
+        class _Stub:
+            logger = type(
+                "L",
+                (),
+                {
+                    "trace": lambda self, *a, **k: None,
+                    "debug": lambda self, *a, **k: None,
+                    "info": lambda self, *a, **k: None,
+                    "warning": lambda self, *a, **k: None,
+                    "error": lambda self, *a, **k: None,
+                },
+            )()
+
+        env = jinja2_helpers.FormulaProcessor.create_jinja2_env(
+            _Stub(), {"f": "hello {{ name }}"}
+        )
+        assert isinstance(env, SandboxedEnvironment), (
+            "DataPusher+ formula engine must be a SandboxedEnvironment "
+            "(see jinja2_helpers.create_jinja2_env). Plain Environment "
+            "would allow scheming-YAML formulas to RCE via __class__ walks."
+        )
+
 
 # ---------------------------------------------------------------------------
 # M2 — LIKE-pattern escape for AUTO_ALIAS uniqueness checks.
@@ -100,7 +153,7 @@ class TestEscapeLike:
     prefix match into a wildcard scan."""
 
     def _load(self):
-        metadata = pytest.importorskip(
+        metadata = _import_or_skip(
             "ckanext.datapusher_plus.jobs.stages.metadata"
         )
         return metadata._escape_like
@@ -151,10 +204,14 @@ class TestEmailRegex:
     def test_does_not_match_obvious_non_email(self):
         assert self.PATTERN.search("no at sign here") is None
 
-    def test_does_not_consume_equals_token(self):
-        # The old regex matched "key=value@example.co" — a pseudo-token that
-        # is almost never a real email. The new regex doesn't include "=" in
-        # the local-part character class.
+    def test_equals_is_not_in_local_part(self):
+        """The old regex included ``=`` in the local-part character class, so
+        ``re.search("key=value@example.co")`` would match starting at ``k``
+        and produce ``"key=value@example.co"`` as a 'pseudo-token'. The new
+        regex excludes ``=``; if a match is found at all, it must start after
+        the equals sign (e.g. ``"value@example.co"`` is still a real email
+        and SHOULD be flagged as PII — that's the correct behaviour, not a
+        bug). This test pins that boundary."""
         match = self.PATTERN.search("key=value@example.co")
         assert match is None or "=" not in match.group()
 
@@ -170,7 +227,7 @@ class TestCsvSafeCell:
     with a single quote so the receiving spreadsheet treats them as text."""
 
     def _load(self):
-        helpers = pytest.importorskip("ckanext.datapusher_plus.helpers")
+        helpers = _import_or_skip("ckanext.datapusher_plus.helpers")
         return helpers._csv_safe_cell
 
     @pytest.mark.parametrize(

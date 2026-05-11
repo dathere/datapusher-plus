@@ -104,16 +104,21 @@ class QSVCommand:
             raise utils.JobError(error_msg) from e
         except subprocess.CalledProcessError as e:
             if uses_stdio:
-                stdio = {}
-                stdio["stdout"] = e.stdout
-                stdio["stderr"] = e.stderr
-                return stdio
+                # Callers that opt into stdio capture handle their own failure
+                # logic and just want the raw stdout/stderr back.
+                return {"stdout": e.stdout, "stderr": e.stderr}
+
+            # Always log AND always raise when check=True — previously the
+            # raise was nested inside `if e.stderr:`, so failures with empty
+            # stderr silently returned None/"" and slipped past callers that
+            # had asked for check=True. Build the message with stderr when we
+            # have it, fall back to the exception's str otherwise.
             error_msg = f"qsv command failed: {e}"
-            if hasattr(e, "stderr") and e.stderr:
+            if getattr(e, "stderr", None):
                 error_msg += f" - {e.stderr}"
-                self.logger.error(error_msg)
-                if check:
-                    raise utils.JobError(error_msg)
+            self.logger.error(error_msg)
+            if check:
+                raise utils.JobError(error_msg) from e
             return e.stderr
 
     def version(self) -> str:

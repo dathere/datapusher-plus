@@ -293,9 +293,14 @@ class MetadataStage(BaseStage):
         if existing_stats:
             context.logger.info(f'Deleting existing summary stats "{stats_id}".')
 
+            # Escape LIKE metacharacters in stats_id for the same reason as
+            # the alias-existence checks above — names containing %/_/\\ would
+            # otherwise turn the prefix match into a wildcard scan and could
+            # cascade into deleting the wrong alias_of.
             cursor.execute(
-                "SELECT alias_of FROM _table_metadata where name like %s group by alias_of;",
-                (stats_id + "%",),
+                "SELECT alias_of FROM _table_metadata "
+                "where name like %s ESCAPE '\\' group by alias_of;",
+                (_escape_like(stats_id) + "%",),
             )
             stats_alias_result = cursor.fetchone()
 

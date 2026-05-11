@@ -1052,19 +1052,15 @@ jobs:
             if [ $total_tests -gt 0 ]; then
               # Count results by status.
               #
-              # `grep -c PATTERN FILE || echo "0"` looks safe but isn't:
-              # `grep -c` ALWAYS prints a number (0 when there are no matches),
-              # AND exits 1 on no-match. The `|| echo "0"` then appends a
-              # SECOND "0" on its own line, so the captured value becomes the
-              # two-line string "0\n0" — and the arithmetic below ($(( ... )))
-              # bails with `Illegal number: 0`. Strip newlines defensively
-              # (same pattern that error_count already uses).
-              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
-              passed=$(echo "$passed" | tr -d '\n')
+              # `grep -c PATTERN FILE` always prints a count (0 on no-match)
+              # AND exits 1 when there are zero matches. Pairing it with
+              # `|| echo "0"` would APPEND a second "0", giving "0\n0" — which
+              # both broke `$(( ... ))` arithmetic and (after newline stripping)
+              # rendered as "00" in the summary table. `|| true` keeps grep's
+              # own "0" output without doubling.
+              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || true)
               failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
-              failed=$(echo "$failed" | tr -d '\n')
-              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
-              error_count=$(echo "$error_count" | tr -d '\n')
+              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || true)
 
               # Calculate success rates
               tested_success_rate=$(( passed * 100 / total_tests ))
@@ -1150,13 +1146,11 @@ jobs:
                 echo ""
                 
                 # Add worker analysis sections.
-                # Same newline-doubling trap as above: `grep -c ... || echo "0"`
-                # captures "0\n0" on no-match, which then breaks `[ $var -gt 0 ]`
-                # with "unexpected operator: 0". Strip newlines defensively.
-                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
-                success_jobs=$(echo "$success_jobs" | tr -d '\n')
-                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
-                error_jobs=$(echo "$error_jobs" | tr -d '\n')
+                # `|| true` (not `|| echo "0"`) — see the comment in the test-
+                # results block above. grep -c already prints "0" on no-match;
+                # the `|| true` just keeps the pipeline exit code clean.
+                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || true)
+                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || true)
                 
                 # File Analysis
                 echo "## File Analysis"

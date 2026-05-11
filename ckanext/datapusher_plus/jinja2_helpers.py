@@ -26,16 +26,22 @@ USES_SQL = []
 
 
 def _register_unique(registry: list, func):
-    """Append ``func`` to ``registry`` unless an entry with the same qualname
-    is already present.
+    """Register ``func`` in ``registry``, replacing any existing entry that
+    shares the same qualname.
 
-    The decorators below run at import time; if the module is reloaded (test
-    isolation, hot reload), naive ``append`` would accumulate duplicates and
-    bloat the Jinja env. Guarding by qualname keeps the list idempotent.
+    The decorators below run at import time; a naive ``append`` would
+    accumulate duplicates on module reload (test isolation, hot reload, etc.)
+    and bloat the Jinja env. Skipping on qualname-collision avoids duplicates
+    but pins the registry to the *old* function object, so fixes in the
+    reloaded module would silently never take effect. Replacing the existing
+    entry instead gives idempotent behaviour AND honours reloads.
     """
     qualname = getattr(func, "__qualname__", func.__name__)
-    if not any(getattr(f, "__qualname__", f.__name__) == qualname for f in registry):
-        registry.append(func)
+    for i, existing in enumerate(registry):
+        if getattr(existing, "__qualname__", existing.__name__) == qualname:
+            registry[i] = func
+            return
+    registry.append(func)
 
 
 def jinja2_filter(func):
