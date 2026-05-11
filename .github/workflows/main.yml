@@ -404,7 +404,15 @@ jobs:
             echo "ckan db init returned non-zero; continuing (may already be initialized)."
           fi
           echo "Setting datastore permissions..."
-          if ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
+          # CKAN 2.11 emits its own startup WARNI line to stdout (mixed in with
+          # the SQL `datastore set-permissions` produces). psql then choked on
+          # the log line — "syntax error at or near 2026" — and ON_ERROR_STOP
+          # aborted before the _table_metadata view was created, breaking every
+          # downstream datastore test. Strip ISO-date-prefixed log lines so
+          # only real SQL reaches psql.
+          if ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions \
+              | grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}' \
+              | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
             echo "Datastore permissions set."
           else
             echo "Datastore permission step returned non-zero; continuing."
