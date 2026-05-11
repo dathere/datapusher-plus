@@ -272,7 +272,7 @@ jobs:
           ckanext.datapusher_plus.spatial_simplification_relative_tolerance = 0.1
           ckanext.datapusher_plus.latitude_fields = latitude,lat
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
-          ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+          ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_bytecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
           EOF
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
@@ -339,8 +339,11 @@ jobs:
       - name: Initialize CKAN database
         run: |
           if ! PGPASSWORD=$CKAN_DB_PASSWORD psql -h postgres -U ckan_default -d ckan_test -c "SELECT 1;" >/dev/null 2>&1; then
-            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER IF NOT EXISTS ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';"
-            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE IF NOT EXISTS ckan_test OWNER ckan_default;"
+            # PostgreSQL does not support `CREATE USER/DATABASE IF NOT EXISTS`; guard with explicit existence checks.
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_roles WHERE rolname='ckan_default'" | grep -q 1 || \
+              PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE USER ckan_default WITH PASSWORD '$CKAN_DB_PASSWORD';"
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='ckan_test'" | grep -q 1 || \
+              PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
           fi
           ckan -c /srv/app/src/ckan/test-core.ini db init
           echo "CKAN DB initialized."
@@ -350,11 +353,10 @@ jobs:
       - name: Initialize DataPusher Plus database
         run: |
           set -eu
-          if ckan -c /srv/app/src/ckan/test-core.ini db upgrade -p datapusher_plus; then
-            echo "DataPusher Plus database initialized successfully"
-          else
-            echo "DataPusher Plus DB migration failed (might already be initialized)"
-          fi
+          # Fresh CI environment should always migrate cleanly; let migration failures fail the job
+          # rather than masking schema-init problems and breaking later steps silently.
+          ckan -c /srv/app/src/ckan/test-core.ini db upgrade -p datapusher_plus
+          echo "DataPusher Plus database initialized successfully"
 
       - name: Start CKAN server
         run: |
@@ -384,9 +386,17 @@ jobs:
           ckan -c /srv/app/src/ckan/test-core.ini sysadmin add admin_ckan
           json_response=$(echo "$user_response" | sed -n '/{/,/}/p')
           api_key=$(echo "$json_response" | jq -r '.token // empty')
-          if [ -n "$api_key" ] && [ "$api_key" != "null" ] && [ "$api_key" != "empty" ]; then
-            echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
+          if [ -z "$api_key" ] || [ "$api_key" = "null" ]; then
+            # user_create may have failed (eg user already exists on a re-run) and not returned a token.
+            # Always mint a fresh token so downstream authenticated calls have a working CKAN_API_KEY.
+            echo "Minting fresh API token for admin_ckan..."
+            token_output=$(ckan -c /srv/app/src/ckan/test-core.ini user token add admin_ckan ci-fallback 2>&1)
+            api_key=$(echo "$token_output" | tail -n 1 | tr -d '\t ')
           fi
+          if [ -z "$api_key" ] || [ "$api_key" = "null" ]; then
+            echo "ERROR: could not obtain a CKAN API token for admin_ckan"; exit 1
+          fi
+          echo "CKAN_API_KEY=$api_key" >> $GITHUB_ENV
           echo "User admin_ckan ready"
 
       - name: Create API token for datapusher-plus
@@ -470,7 +480,11 @@ jobs:
           REPO_DIR_URL="${TESTING_REPO_API}/tests/${FILES_DIR}"
           echo "Fetching file list from: $REPO_DIR_URL"
 
-          file_list=$(curl -fsSL "$REPO_DIR_URL" | jq -r '.[].name' 2>/dev/null)
+          # Authenticated requests get 5000/hr (vs 60/hr unauthenticated) — avoids flaky scheduled runs.
+          file_list=$(curl -fsSL \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "$REPO_DIR_URL" | jq -r '.[].name' 2>/dev/null)
           if [ -z "$file_list" ]; then
             echo "ERROR: Could not list files from $REPO_DIR_URL"
             echo "Check FILES_DIR value ($FILES_DIR) and GitHub API availability"
@@ -528,7 +542,8 @@ jobs:
             [ -z "$file_name" ] && continue
             case "$file_name" in '#'*) continue ;; esac
 
-            if ! curl -s --head "$file_url" > /dev/null; then
+            # -f makes 4xx/5xx return non-zero so inaccessible files are reliably skipped.
+            if ! curl -fsI "$file_url" > /dev/null; then
               echo "SKIP: Not accessible: $file_url"
               echo "$(basename "$file_url"),Not accessible via HTTP" >> /tmp/skipped_files.csv
               skipped_files=$((skipped_files + 1))
@@ -886,9 +901,11 @@ jobs:
 
           if [ "$total" -eq 0 ]; then
             echo "No files were tested. Check FILES_DIR ($FILES_DIR) and GitHub API availability."
+            exit 1
           elif [ "$failed" -gt 0 ]; then
             echo "$failed of $total file(s) failed DataPusher+ processing. $passed passed."
             echo "See step summary and artifacts for details."
+            exit 1
           else
             echo "All $passed file(s) passed."
           fi
