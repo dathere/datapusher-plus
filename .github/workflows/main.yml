@@ -1,9 +1,17 @@
 name: Automated DataPusher+ Testing Run
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: "datapusher-plus branch to clone & test (defaults to main)"
+        required: false
+        type: string
+        default: "main"
 env:
   FILES_DIR: "custom"
-  DATAPUSHER_BRANCH: "main"
+  # When dispatched with no input, this still resolves to "main" — preserves
+  # the existing zero-arg behaviour. Pass `branch=<name>` to target another.
+  DATAPUSHER_BRANCH: ${{ inputs.branch || 'main' }}
   CKAN_VERSION: "2.11"
   POSTGRES_PASSWORD: postgres
   CKAN_DB_PASSWORD: pass
