@@ -195,130 +195,197 @@ DRUF is completely optional and disabled by default. When disabled:
 
 Datapusher+ from version 1.0.0 onwards will be installed as a extension of CKAN, and will be available as a CKAN plugin. This will allow for easier integration with CKAN and other CKAN extensions.
 
-1. Install the required packages.
+1. Install the required packages. We expect you are using a Linux distribution based on Ubuntu such as Ubuntu 24.04.
 
-    ```bash
-    sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev uchardet
-    ```
+```bash
+sudo apt install python3-virtualenv python3-dev python3-pip python3-wheel build-essential libxslt1-dev libxml2-dev zlib1g-dev git libffi-dev libpq-dev uchardet -y
+```
 
 2. Activate the CKAN virtual environment using at least python 3.10.
 
-    ```bash
-    . /usr/lib/ckan/default/bin/activate
-    ```
+```bash
+. /usr/lib/ckan/default/bin/activate
+```
 
 3. Install the extension using following commands:
 
-    ```bash
-   pip install -e "git+https://github.com/dathere/datapusher-plus.git@2.0.0#egg=datapusher-plus"
-    ```
+```bash
+cd /usr/lib/ckan/default/src
+pip install -e "datapusher-plus@git+https://github.com/dathere/datapusher-plus.git@3.0.0"
+```
 
 4. Install the dependencies.
 
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+cd datapusher-plus
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+```
 
-5. Install [qsv](https://github.com/dathere/qsv).
+5. Install [qsv](https://github.com/dathere/qsv), such as the `qsvdp` binary and move it to `/usr/local/bin/qsvdp` for access through the `PATH` environment variable.
 
-    ## Option 1: Debian Package Installation (Easiest)
-
-    [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
-    it to the appropriate directory, e.g. for Linux:
-
-    ```bash
-    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    sudo mv qsv* /usr/local/bin
-    ```
-
-    Alternatively, if you want to install qsv from source, follow
-    the instructions [here](https://github.com/dathere/qsv#installation). Note that when compiling from source,
-    you may want to look into the [Performance Tuning](https://github.com/dathere/qsv#performance-tuning)
-    section to squeeze even more performance from qsv.
-
-    Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
-    (This will be the case when running Ubuntu 18.04 or older).
-    If so, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
-
-    If you already have qsv, update it to the latest release by using the --update option.
-
-    `qsvdp --update`
-
-    > ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
-    qsv with the `--update` option and it will check for the latest version and update as required.
-
-    ### Linux Installation
-
-    If you are running Debian based distribution, you can install qsv using the following command:
-    If you are running Debian based Linux distribution on x86_64, you can quickly install qsv using the following commands:
-
-    Add the qsv repository to your sources list:
-
-      ```bash
-      echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://dathere.github.io/qsv-deb-releases ./" > qsv.list
-      ```
-
-    Import trusted GPG key:
-
-      ```bash
-    wget -O - https://dathere.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
-      ```
-
-    Install qsv:
-
-      ```bash
-      sudo apt update
-      sudo apt install qsv
-      ```
-
-    ## Option 2: Install Prebuilt qsv Binaries (Easy)
-    [Download the appropriate precompiled binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy it to the appropriate directory, e.g. for Ubuntu LTS 22.04 or 24.04:
-
-    ```bash
-    wget https://github.com/dathere/qsv/releases/download/4.0.0/qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    unzip qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    rm qsv-4.0.0-x86_64-unknown-linux-gnu.zip
-    sudo mv qsv* /usr/local/bin
-    ```
-
-    If you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library. If so, use the `qsv-4.0.0-unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+<details>
+<summary>qsv installation options (click here for more info)</summary>
 
 
-    > ℹ️ **NOTE:** qsv's prebuilt binaries have the ability to self-update to the latest version. Just run qsv with the `--update` option and it will check for the latest version and update itself as required.
-    > ```
-    > sudo qsvdp --update
-    > ```
+### Option 1: Install qsv from the Debian package
 
-    ## Option 3: Build qsv from source 
-    Finally, you can build qsvdp from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster, but may take up to 30 minutes to compile.
-    
-    ```bash
-    git clone https://github.com/dathere/qsv.git
-    cd qsv
+If you are running a Debian-based Linux distribution on x86_64, you can quickly install qsv binaries including `qsvdp` using the following commands:
 
-    # install Rust, if it's not installed
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```bash
+# Add the qsv repository to your sources list:
+echo "deb [signed-by=/etc/apt/trusted.gpg.d/qsv-deb.gpg] https://dathere.github.io/qsv-deb-releases ./" > qsv.list
+# Import trusted GPG key:
+wget -O - https://dathere.github.io/qsv-deb-releases/qsv-deb.gpg | sudo apt-key add -
+# Install qsv:
+sudo apt update -y
+sudo apt install qsv -y
+```
 
-    # build qsvdp
-    CARGO_BUILD_RUSTFLAGS='-C target-cpu=native' cargo build --release --locked --bin qsvdp -F datapusher_plus
-    sudo cp target/release/qsvdp /usr/local/bin
-    cargo clean
-    ```
+### Option 2: Install prebuilt qsv binaries
 
-6. Create an API token for the DP+ Service account. 
-   Replace `CKAN_ADMIN` with an existing CKAN user with sysadmin privileges.
+[Download the appropriate prebuilt binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
+it to the appropriate directory. For example you can use the following commands for qsv v19.1.0 on x86_64 Linux (you can update the version `19.1.0` to the latest version available on the [releases page](https://github.com/dathere/qsv/releases)):
 
-    ```
-    ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$(ckan -c /etc/ckan/default/ckan.ini user token add CKAN_ADMIN dpplus | tail -n 1 | tr -d '\t')"
-    ```
+```bash
+wget https://github.com/dathere/qsv/releases/download/19.1.0/qsv-19.1.0-x86_64-unknown-linux-gnu.zip
+unzip qsv-19.1.0-x86_64-unknown-linux-gnu.zip
+rm qsv-19.1.0-x86_64-unknown-linux-gnu.zip
+sudo mv qsv* /usr/local/bin
+```
 
-7. DataPusher+ Database Setup
+If you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library. If so, use the binaries ending with `unknown-linux-musl` instead as it they should be statically linked with the MUSL C Library.
 
-   ```
-   ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
-   ```
+> ℹ️ **NOTE:** qsv's prebuilt binaries have the ability to self-update to the latest version. Just run qsv with the `--update` option and it will check for the latest version and update itself as required.
+> ```
+> sudo qsvdp --update
+> ```
+
+### Option 3: Install qsv from source
+
+Alternatively, if you want to install qsv from source, follow
+the instructions [here](https://github.com/dathere/qsv#installation). Note that when compiling from source,
+you may want to look into the [Performance Tuning](https://github.com/dathere/qsv#performance-tuning)
+section to squeeze even more performance from qsv.
+
+Also, if you get glibc errors when starting qsv, your Linux distro may not have the required version of the GNU C Library
+(This will be the case when running Ubuntu 18.04 or older).
+If so, use the `unknown-linux-musl.zip` archive as it is statically linked with the MUSL C Library.
+
+If you already have qsv, update it to the latest release by using the --update option.
+
+`qsvdp --update`
+
+> ℹ️ **NOTE:** qsv is a general purpose CSV data-wrangling toolkit that gets regular updates. To update to the latest version, just run
+qsv with the `--update` option and it will check for the latest version and update as required.
+
+Finally, you can build `qsvdp` from source. It has the additional benefit that the resulting binary will take advantage of all the machine's CPU features, making qsv and DP+ even faster, but may take up to 30 minutes to compile.
+
+```bash
+git clone https://github.com/dathere/qsv.git
+cd qsv
+
+# install Rust, if it's not installed
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# build qsvdp
+CARGO_BUILD_RUSTFLAGS='-C target-cpu=native' cargo build --release --locked --bin qsvdp -F datapusher_plus
+sudo cp target/release/qsvdp /usr/local/bin
+cargo clean
+```
+
+</details>
+
+6. **Make sure CKAN is running** (e.g. through `ckan -c /etc/ckan/default/ckan.ini run` after activating your virtual environment) then while CKAN is running create an API token for the DP+ Service account which **this command automatically adds the relevant config `ckanext.datapusher_plus.api_token` line to your CKAN config file `/etc/ckan/default/ckan.ini`**. **Replace `CKAN_ADMIN` in the following command with an existing CKAN user with sysadmin privileges**.
+
+```
+ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$(ckan -c /etc/ckan/default/ckan.ini user token add CKAN_ADMIN dpplus | tail -n 1 | tr -d '\t')"
+```
+
+7. Add the rest of the DP+ config to your CKAN config (e.g. `/etc/ckan/default/ckan.ini`):
+
+```ini
+# datapusher-plus settings
+ckanext.datapusher_plus.use_proxy = false
+ckanext.datapusher_plus.download_proxy = 
+ckanext.datapusher_plus.ssl_verify = false
+# supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
+ckanext.datapusher_plus.upload_log_level = INFO
+ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+ckanext.datapusher_plus.pii_screening = false
+ckanext.datapusher_plus.pii_found_abort = false
+ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
+ckanext.datapusher_plus.pii_show_candidates = false
+ckanext.datapusher_plus.pii_quick_screen = false
+ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
+ckanext.datapusher_plus.preview_rows = 100
+ckanext.datapusher_plus.download_timeout = 300
+ckanext.datapusher_plus.max_content_length = 1256000000000
+ckanext.datapusher_plus.chunk_size = 16384
+ckanext.datapusher_plus.default_excel_sheet = 0
+ckanext.datapusher_plus.sort_and_dupe_check = true
+ckanext.datapusher_plus.dedup = false
+ckanext.datapusher_plus.unsafe_prefix = unsafe_
+ckanext.datapusher_plus.reserved_colnames = _id
+ckanext.datapusher_plus.prefer_dmy = false
+ckanext.datapusher_plus.ignore_file_hash = true
+ckanext.datapusher_plus.auto_index_threshold = 3
+ckanext.datapusher_plus.auto_index_dates = true
+ckanext.datapusher_plus.auto_unique_index = true
+ckanext.datapusher_plus.summary_stats_options =
+ckanext.datapusher_plus.add_summary_stats_resource = false
+ckanext.datapusher_plus.summary_stats_with_preview = false
+ckanext.datapusher_plus.qsv_stats_string_max_length = 32767
+ckanext.datapusher_plus.qsv_dates_whitelist = date,time,due,open,close,created
+ckanext.datapusher_plus.qsv_freq_limit = 10
+ckanext.datapusher_plus.auto_alias = true
+ckanext.datapusher_plus.auto_alias_unique = false
+ckanext.datapusher_plus.copy_readbuffer_size = 1048576
+ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
+ckanext.datapusher_plus.auto_spatial_simplication = true
+ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+ckanext.datapusher_plus.latitude_fields = latitude,lat
+ckanext.datapusher_plus.longitude_fields = longitude,long,lon
+ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+ckanext.datapusher_plus.auto_unzip_one_file = true
+```
+
+Also add this entry to your CKAN's `resource_formats.json` file for `ckanext.datapusher_plus.formats` to work as expected with `tab` files.
+
+```
+["TAB", "Tab Separated Values File", "text/tab-separated-values", []],
+```
+
+See the configuration section below for more information.
+
+8. **Optionally** add DRUF mode to your CKAN config:
+
+```ini
+# Enable DRUF (Dataset Resource Upload First) workflow for the DataPusher+ CKAN extension
+ckanext.datapusher_plus.enable_druf = true
+ckanext.datapusher_plus.enable_form_redirect = true
+```
+
+9. Set up the database for `datapusher_plus`:
+
+```bash
+ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
+```
+
+10. If you get `Missing value` for multiple fields as a `ckan.logic.ValidationError`, temporarily you can add `validators: ignore_missing` for those fields in their YAML schema file used in [ckanext-scheming](https://github.com/ckan/ckanext-scheming) and you may also need to set `required: False`.
+11. Make sure you enable the [FileStore](https://docs.ckan.org/en/2.11/maintaining/filestore.html) for allowing file uploads (the `ckan.uploads_enabled` variable is available in your CKAN config already and you should set it to `true`). You'll also need to update FileStore storage permissions as per the docs, for example replace the Linux username `rzmk` to your username in the following commands:
+
+```bash
+sudo chown rzmk /var/lib/ckan/default
+sudo chmod -R u+rwx /var/lib/ckan/default
+```
+
+10. Make sure you enable the [Datastore](https://docs.ckan.org/en/2.11/maintaining/datastore.html) plugin.
+11. In a separate terminal start the job queue:
+
+```bash
+ckan -c /etc/ckan/default/ckan.ini jobs worker
+```
 
 ## Configuring
 
@@ -405,13 +472,13 @@ You can also manually trigger resources to be resubmitted. When editing a resour
 Run the following command to submit all resources to datapusher, although it will skip files whose hash of the data file has not changed:
 
 ``` bash
-    ckan -c /etc/ckan/default/ckan.ini datapusher_plus resubmit
+ckan -c /etc/ckan/default/ckan.ini datapusher_plus resubmit
 ```
 
 To Resubmit a specific resource, whether or not the hash of the data file has changed:
 
 ``` bash
-    ckan -c /etc/ckan/default/ckan.ini datapusher_plus submit {dataset_id}
+ckan -c /etc/ckan/default/ckan.ini datapusher_plus submit {dataset_id}
 ```
 
 ## License
