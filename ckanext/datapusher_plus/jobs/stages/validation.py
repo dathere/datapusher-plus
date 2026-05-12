@@ -106,12 +106,15 @@ class ValidationStage(BaseStage):
 
         # Extract and store statistics
         is_sorted = bool(sortcheck_json.get("sorted", False))
-        record_count = int(sortcheck_json.get("record_count", 0))
         unsorted_breaks = int(sortcheck_json.get("unsorted_breaks", 0))
         dupe_count = int(sortcheck_json.get("dupe_count", 0))
 
         context.add_stat("IS_SORTED", is_sorted)
-        context.add_stat("RECORD_COUNT", record_count)
+        # NOTE: `qsv sortcheck`'s `record_count` field has historically counted
+        # the header row inconsistently across qsv versions (qsv ≤ 9.1.0
+        # included the header; qsv ≥ 10.0.0 does not). Don't populate
+        # RECORD_COUNT from it — let AnalysisStage compute the canonical
+        # count via `qsv count` (which is data-rows-only across all versions).
         context.add_stat("UNSORTED_BREAKS", unsorted_breaks)
         context.add_stat("DUPE_COUNT", dupe_count)
 
