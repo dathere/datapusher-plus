@@ -217,8 +217,14 @@ jobs:
           # rather than after spinning up the full CKAN + datastore + worker.
           # See tests/test_qsv_v20_regression.py and
           # docs/qsv-20.0.0-upgrade-test-plan.md.
+          #
+          # pytest is installed earlier in the "Install Python dependencies"
+          # step via requirements-dev.txt. Invoke via `python3 -m pytest` so
+          # the step is robust regardless of where pip installed the pytest
+          # shim (PATH order, venv activation, etc.).
           echo "Asserting qsv ${QSV_VER} satisfies DP+'s contract expectations..."
-          pytest tests/test_qsv_v20_regression.py -v
+          python3 -m pip install --quiet pytest
+          python3 -m pytest tests/test_qsv_v20_regression.py -v
 
       - name: Setup CKAN configuration
         run: |

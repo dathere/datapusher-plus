@@ -86,7 +86,16 @@ requires_qsv_20 = pytest.mark.skipif(
 
 
 def _run(args, **kwargs) -> subprocess.CompletedProcess:
-    """Run qsv with the given args; raise on non-zero exit."""
+    """Run qsv with the given args; raise on non-zero exit.
+
+    Asserts `QSV_BIN` is non-None so any future test added without the
+    `@requires_qsv_20` skip marker fails with a clear message instead of
+    a confusing `TypeError` on the list concatenation below.
+    """
+    assert QSV_BIN is not None, (
+        "_run() invoked without a qsv binary; gate the caller with "
+        "@requires_qsv_20 or set the QSV_BIN env var."
+    )
     return subprocess.run(
         [QSV_BIN] + list(args),
         capture_output=True,
@@ -179,6 +188,12 @@ class TestSafenamesByteCapV20:
         """A 69-char accented header (138 UTF-8 bytes) would have produced
         a >60-byte name under qsv ≤19.1.0. qsv 20.0.0 must trim to ≤60 bytes.
 
+        Uses `--mode a` (always rewrite) to unconditionally exercise the
+        `safe_header_names` codepath where the byte-cap lives. `--mode c`
+        is qsv-version- and char-classification-dependent (CJK is preserved
+        as a quoted identifier, but accented Latin may or may not be), so
+        forcing `--mode a` makes this test deterministic.
+
         We build this fixture inline since it's exercising a precise byte
         boundary that's awkward to pin in a static CSV.
         """
@@ -187,7 +202,7 @@ class TestSafenamesByteCapV20:
         long_accent = "é" * 69
         src.write_text(f"{long_accent},b\nx,y\n", encoding="utf-8")
         dst = tmp_path / "out.csv"
-        _run(["safenames", str(src), "--mode", "c", "--output", str(dst)])
+        _run(["safenames", str(src), "--mode", "a", "--output", str(dst)])
         headers = [
             line for line in _run(
                 ["headers", "--just-names", str(dst)]
@@ -275,15 +290,31 @@ class TestSafenamesVerifyModeV20:
     def test_verify_mode_trims_surrounding_whitespace_and_quotes(self):
         """unsafe-header strings now have leading/trailing whitespace and
         surrounding `"` already trimmed (matching what the safe-rename pass
-        actually evaluates)."""
+        actually evaluates).
+
+        The fixture is crafted so both trim cases land in `unsafe_headers`
+        (not `safe_headers`) under qsv 20: ` col 1 ` and `"quoted col"`
+        both contain *embedded* spaces, so they remain unsafe even after
+        surrounding-trim — which lets us observe the trimmed form in the
+        JSON output. Under qsv ≤ 19.1.0, the displayed `unsafe_headers`
+        would include the *untrimmed* strings, so these assertions would
+        fail.
+        """
         verify = _safenames_verify_json("safenames_emoji.csv")
         unsafe = verify.get("unsafe_headers", [])
         assert unsafe, (
             f"emoji/whitespace/quote headers should be flagged unsafe; got {verify!r}"
         )
+        # Sanity: the fixture should land both trim-cases in unsafe_headers.
+        assert "col 1" in unsafe, (
+            f"`col 1` (post-trim) should be in unsafe_headers; got {unsafe!r}"
+        )
+        assert "quoted col" in unsafe, (
+            f"`quoted col` (post-trim) should be in unsafe_headers; got {unsafe!r}"
+        )
         for header in unsafe:
             assert header == header.strip(), (
-                f"qsv 20.0.0 should have trimmed whitespace: {header!r}"
+                f"qsv 20.0.0 should have trimmed surrounding whitespace: {header!r}"
             )
             assert not (header.startswith('"') and header.endswith('"')), (
                 f"qsv 20.0.0 should have trimmed surrounding quotes: {header!r}"
