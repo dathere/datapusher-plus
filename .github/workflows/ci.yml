@@ -16,7 +16,7 @@ on:
       qsv_version:
         description: 'qsv version to install'
         required: false
-        default: '9.1.0'
+        default: '20.0.0'
         type: string
       polling_timeout_seconds:
         description: 'Max seconds to wait for DataPusher to process each file'
@@ -33,7 +33,7 @@ permissions:
 
 env:
   FILES_DIR: ${{ github.event.inputs.testing_directory || 'quick' }}
-  QSV_VER: ${{ github.event.inputs.qsv_version || '9.1.0' }}
+  QSV_VER: ${{ github.event.inputs.qsv_version || '20.0.0' }}
   POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '20' }}
   TESTING_REPO_RAW: 'https://raw.githubusercontent.com/dathere/datapusher-plus_testing/main'
   TESTING_REPO_API: 'https://api.github.com/repos/dathere/datapusher-plus_testing/contents'
@@ -204,6 +204,21 @@ jobs:
             echo "qsv GNU version installed successfully!"
           fi
           cd / && rm -rf /tmp/qsv-install
+
+      - name: Run qsv contract regression tests
+        env:
+          QSV_BIN: /usr/local/bin/qsvdp
+        run: |
+          set -eu
+          # Fast pre-flight: assert the installed qsv satisfies the contracts
+          # DP+ relies on (safe_header_names byte-cap, safenames verify-mode
+          # JSON shape, stats percentile-label-prefix format, etc.). If qsv
+          # ever ships a version that breaks these, fail here in <1 minute
+          # rather than after spinning up the full CKAN + datastore + worker.
+          # See tests/test_qsv_v20_regression.py and
+          # docs/qsv-20.0.0-upgrade-test-plan.md.
+          echo "Asserting qsv ${QSV_VER} satisfies DP+'s contract expectations..."
+          pytest tests/test_qsv_v20_regression.py -v
 
       - name: Setup CKAN configuration
         run: |
