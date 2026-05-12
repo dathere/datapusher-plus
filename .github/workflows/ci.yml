@@ -208,6 +208,15 @@ jobs:
       - name: Run qsv contract regression tests
         env:
           QSV_BIN: /usr/local/bin/qsvdp
+          # The ckan-dev container's site-packages registers a pytest plugin
+          # (ckan.tests.pytest_ckan.ckan_setup) that auto-loads on every
+          # pytest invocation and calls make_app(conf) in pytest_sessionstart,
+          # which requires a fully-configured CKAN (SECRET_KEY, etc.). That
+          # config isn't built until the later "Setup CKAN configuration"
+          # step. Disable pytest plugin autoload so the CKAN plugin can't
+          # hijack this standalone regression run — our tests only need core
+          # pytest (subprocess + skipif), not CKAN or any other plugin.
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
         run: |
           set -eu
           # Fast pre-flight: assert the installed qsv satisfies the contracts
@@ -217,13 +226,7 @@ jobs:
           # rather than after spinning up the full CKAN + datastore + worker.
           # See tests/test_qsv_v20_regression.py and
           # docs/qsv-20.0.0-upgrade-test-plan.md.
-          #
-          # pytest is installed earlier in the "Install Python dependencies"
-          # step via requirements-dev.txt. Invoke via `python3 -m pytest` so
-          # the step is robust regardless of where pip installed the pytest
-          # shim (PATH order, venv activation, etc.).
           echo "Asserting qsv ${QSV_VER} satisfies DP+'s contract expectations..."
-          python3 -m pip install --quiet pytest
           python3 -m pytest tests/test_qsv_v20_regression.py -v
 
       - name: Setup CKAN configuration
