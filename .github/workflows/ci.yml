@@ -169,41 +169,148 @@ jobs:
       - name: Install qsv
         run: |
           set -eu
-          QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-gnu.zip"
-          QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
 
-          echo "Downloading qsv GNU version $QSV_VER"
-          mkdir -p /tmp/qsv-install && cd /tmp/qsv-install
+          QSV_DEB_REPO_URL="https://dathere.github.io/qsv-deb-releases"
+          QSV_BIN_TARGET="/usr/local/bin/qsvdp"
 
-          wget -q "$QSV_URL" -O "$QSV_ZIP" || { echo "Failed to download qsv"; exit 1; }
-          unzip -q "$QSV_ZIP"
-          ls -lh
+          # Try the official Debian package first (qsv-datapusher-plus, which
+          # ships the qsvdp binary). The apt repo at $QSV_DEB_REPO_URL only
+          # carries the latest version per package, so we fall back to the
+          # GitHub release zip when the requested QSV_VER doesn't match the
+          # repo's candidate (or when anything else about the deb path fails).
+          # See https://github.com/dathere/qsv#debian-package
+          # On any failure inside install_via_deb, drop the qsv apt source +
+          # keyring so subsequent apt-get invocations in later steps don't
+          # keep hitting (and possibly erroring on) the qsv repo.
+          _cleanup_qsv_apt_state() {
+            rm -f /etc/apt/sources.list.d/qsv.list /usr/share/keyrings/qsv-deb.gpg
+          }
 
-          # Always install as /usr/local/bin/qsvdp so the CKAN config (qsv_bin)
-          # path is stable regardless of whether the archive ships qsvdp or qsv.
-          if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
-          elif [ -f "qsv" ]; then SRC_BIN="qsv"
-          else echo "ERROR: No qsv binary found"; ls -la; exit 1; fi
+          install_via_deb() {
+            echo "=== Attempting Debian package install (qsv-datapusher-plus) ==="
+            if _install_via_deb_inner; then
+              return 0
+            fi
+            _cleanup_qsv_apt_state
+            return 1
+          }
 
-          chmod +x "$SRC_BIN"
-          mv -f "$SRC_BIN" /usr/local/bin/qsvdp
+          _install_via_deb_inner() {
+            # Refresh the apt cache up front so the gnupg install below
+            # can't 404 on stale package files even if no earlier step has
+            # run apt-get update recently.
+            apt-get update -y \
+              || { echo "apt-get update failed before gnupg install"; return 1; }
 
-          if ! /usr/local/bin/qsvdp --version; then
-            echo "GNU version failed. Falling back to musl..."
-            rm -f /usr/local/bin/qsvdp "$QSV_ZIP"
-            QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
-            wget -q "https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}" -O "$QSV_ZIP" || exit 1
-            unzip -qo "$QSV_ZIP"
+            # gpg isn't in the ckan-dev base image; install it if missing so we
+            # can use the documented signed-by approach.
+            if ! command -v gpg >/dev/null 2>&1; then
+              apt-get install -y --no-install-recommends gnupg \
+                || { echo "Failed to install gnupg"; return 1; }
+            fi
+
+            install -d -m 0755 /usr/share/keyrings
+            # Split the wget|gpg pipeline into two checked steps: this
+            # workflow's "Install qsv" step runs under `sh -e {0}` (dash on
+            # the ckan-dev image), where `set -o pipefail` isn't reliably
+            # available, so a piped wget failure would otherwise be masked
+            # by gpg --dearmor's exit status.
+            wget -qO /tmp/qsv-deb.gpg "${QSV_DEB_REPO_URL}/qsv-deb.gpg" \
+              || { echo "Failed to download qsv repo GPG key"; return 1; }
+            gpg --dearmor -o /usr/share/keyrings/qsv-deb.gpg < /tmp/qsv-deb.gpg \
+              || { echo "Could not dearmor qsv repo GPG key"; return 1; }
+            rm -f /tmp/qsv-deb.gpg
+
+            echo "deb [signed-by=/usr/share/keyrings/qsv-deb.gpg] ${QSV_DEB_REPO_URL} ./" \
+              > /etc/apt/sources.list.d/qsv.list
+
+            apt-get update -y \
+              || { echo "apt-get update failed after adding qsv repo"; return 1; }
+
+            # Only proceed if the repo's candidate version matches QSV_VER —
+            # the apt repo carries one version per package, so older QSV_VER
+            # values must use the zip flow.
+            candidate=$(apt-cache policy qsv-datapusher-plus 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+            echo "qsv-datapusher-plus repo candidate: ${candidate:-<none>}"
+            echo "Requested QSV_VER:                  ${QSV_VER}"
+            case "$candidate" in
+              "${QSV_VER}"|"${QSV_VER}-"*) ;;
+              *)
+                echo "Repo candidate does not match QSV_VER; skipping deb install"
+                return 1
+                ;;
+            esac
+
+            apt-get install -y qsv-datapusher-plus \
+              || { echo "apt-get install qsv-datapusher-plus failed"; return 1; }
+
+            # qsv-datapusher-plus 20.0.0-1 installs the binary at
+            # /usr/local/bin/qsvdp directly (= ${QSV_BIN_TARGET}). Accept
+            # /usr/bin/qsvdp too in case a future package revision moves to
+            # the more conventional Debian path, and symlink it to the path
+            # the rest of this workflow + the CKAN config (qsv_bin) hard-code.
+            if [ -x "${QSV_BIN_TARGET}" ]; then
+              installed="${QSV_BIN_TARGET}"
+            elif [ -x /usr/bin/qsvdp ]; then
+              installed=/usr/bin/qsvdp
+              ln -sf /usr/bin/qsvdp "${QSV_BIN_TARGET}"
+            else
+              echo "ERROR: qsvdp not found on PATH after deb install. Package contents:"
+              dpkg -L qsv-datapusher-plus || true
+              return 1
+            fi
+            "${QSV_BIN_TARGET}" --version \
+              || { echo "deb-installed qsvdp failed to run (libc/libstdc++ mismatch?)"; return 1; }
+
+            echo "qsv installed via Debian package successfully (qsv-datapusher-plus ${candidate}, binary at ${installed})"
+          }
+
+          install_via_zip() {
+            QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-gnu.zip"
+            QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
+
+            echo "Downloading qsv GNU version $QSV_VER"
+            mkdir -p /tmp/qsv-install && cd /tmp/qsv-install
+
+            wget -q "$QSV_URL" -O "$QSV_ZIP" || { echo "Failed to download qsv"; return 1; }
+            unzip -q "$QSV_ZIP"
+            ls -lh
+
+            # Always install as /usr/local/bin/qsvdp so the CKAN config (qsv_bin)
+            # path is stable regardless of whether the archive ships qsvdp or qsv.
             if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
             elif [ -f "qsv" ]; then SRC_BIN="qsv"
-            else echo "ERROR: No qsv binary found in musl archive"; ls -la; exit 1; fi
+            else echo "ERROR: No qsv binary found"; ls -la; return 1; fi
+
             chmod +x "$SRC_BIN"
-            mv -f "$SRC_BIN" /usr/local/bin/qsvdp
-            /usr/local/bin/qsvdp --version || { echo "ERROR: musl qsv also failed"; exit 1; }
+            mv -f "$SRC_BIN" "${QSV_BIN_TARGET}"
+
+            if ! "${QSV_BIN_TARGET}" --version; then
+              echo "GNU version failed. Falling back to musl..."
+              rm -f "${QSV_BIN_TARGET}" "$QSV_ZIP"
+              QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
+              wget -q "https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}" -O "$QSV_ZIP" || return 1
+              unzip -qo "$QSV_ZIP"
+              if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
+              elif [ -f "qsv" ]; then SRC_BIN="qsv"
+              else echo "ERROR: No qsv binary found in musl archive"; ls -la; return 1; fi
+              chmod +x "$SRC_BIN"
+              mv -f "$SRC_BIN" "${QSV_BIN_TARGET}"
+              "${QSV_BIN_TARGET}" --version || { echo "ERROR: musl qsv also failed"; return 1; }
+            else
+              echo "qsv GNU version installed successfully!"
+            fi
+            cd / && rm -rf /tmp/qsv-install
+          }
+
+          if install_via_deb; then
+            echo "qsv install method: Debian package"
+          elif install_via_zip; then
+            echo "qsv install method: GitHub release zip"
           else
-            echo "qsv GNU version installed successfully!"
+            echo "ERROR: all qsv install methods failed"
+            exit 1
           fi
-          cd / && rm -rf /tmp/qsv-install
 
       - name: Run qsv contract regression tests
         env:
