@@ -224,6 +224,93 @@ def test_rollback_drops_datastore_when_indexing_fails(job_input, patched_depende
     delete_ds.assert_called_once_with(job_input.resource_id)
 
 
+
+# ---------------------------------------------------------------------------
+# PII review suspension
+# ---------------------------------------------------------------------------
+
+
+def test_pii_review_rejection_raises_before_database_writes(
+    job_input, patched_dependencies
+):
+    """When the PII threshold is exceeded and the reviewer rejects, the
+    flow must raise BEFORE entering the transactional write group.
+    """
+    from unittest import mock
+
+    from ckanext.datapusher_plus import utils
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    # Configure the AnalysisStage mock to flag two PII fields on the
+    # ProcessingContext that the task wrapper will then read.
+    def _set_pii(ctx):
+        ctx.pii_found = True
+        ctx.headers_dicts = [
+            {"id": "email", "type": "text", "pii": True},
+            {"id": "ssn", "type": "text", "pii": True},
+            {"id": "amount", "type": "numeric"},
+        ]
+        return ctx
+
+    prefect_flow.AnalysisStage.return_value.side_effect = _set_pii
+
+    rejection = mock.MagicMock(approve=False, reviewer="alice", notes="not ok")
+
+    job_input_real = prefect_flow.JobInput(
+        task_id=job_input.task_id,
+        resource_id=job_input.resource_id,
+        ckan_url=job_input.ckan_url,
+        input=job_input.input,
+        dry_run=False,
+    )
+
+    with mock.patch.object(
+        prefect_flow, "_pii_review_threshold", return_value=1
+    ), mock.patch(
+        "prefect.flow_runs.suspend_flow_run", return_value=rejection
+    ), mock.patch.object(
+        prefect_flow.dsu, "delete_datastore_resource"
+    ) as delete_ds:
+        with pytest.raises(utils.JobError, match="PII review rejected"):
+            prefect_flow.datapusher_plus_flow(job_input_real)
+
+    # The database task should never have run, so its rollback should not
+    # have fired either.
+    delete_ds.assert_not_called()
+
+
+def test_pii_review_approval_lets_flow_proceed(job_input, patched_dependencies):
+    """Approval continues into the transactional writes normally."""
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    def _set_pii(ctx):
+        ctx.pii_found = True
+        ctx.headers_dicts = [{"id": "email", "type": "text", "pii": True}]
+        return ctx
+
+    prefect_flow.AnalysisStage.return_value.side_effect = _set_pii
+
+    approval = mock.MagicMock(approve=True, reviewer="bob", notes="reviewed")
+
+    job_input_real = prefect_flow.JobInput(
+        task_id=job_input.task_id,
+        resource_id=job_input.resource_id,
+        ckan_url=job_input.ckan_url,
+        input=job_input.input,
+        dry_run=False,
+    )
+
+    with mock.patch.object(
+        prefect_flow, "_pii_review_threshold", return_value=0
+    ):
+        # Threshold = 0 disables suspension entirely; expected fast-path.
+        prefect_flow.datapusher_plus_flow(job_input_real)
+
+    patched_dependencies["mark_completed"].assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Early exit on datastore-managed URLs
 # ---------------------------------------------------------------------------

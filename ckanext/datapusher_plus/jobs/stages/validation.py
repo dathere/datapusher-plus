@@ -63,19 +63,62 @@ class ValidationStage(BaseStage):
         """
         Validate CSV against RFC4180 standard.
 
+        Strict validation runs first. When it fails, the stage retries
+        with quarantine capture — qsv writes the rejected rows to a
+        sibling ``<input>.invalid.csv`` and the clean subset to
+        ``<input>.valid.csv``. The clean file becomes the new ``tmp``
+        for downstream tasks; the count and path of quarantined rows
+        are recorded on the context for ``validate_task`` to enforce
+        ``max_quarantine_pct`` and attach the Prefect artifact.
+
         Args:
             context: Processing context
 
         Raises:
-            utils.JobError: If CSV is invalid
+            utils.JobError: If validation cannot complete even with
+                quarantine capture enabled.
         """
+        from pathlib import Path
+
         context.logger.info("Validating CSV...")
         try:
             context.qsv.validate(context.tmp)
-        except utils.JobError as e:
-            raise utils.JobError(f"qsv validate failed: {e}")
+            context.logger.info("Well-formed, valid CSV file confirmed...")
+            return
+        except utils.JobError as strict_err:
+            context.logger.warning(
+                f"Strict validation failed ({strict_err}); retrying with "
+                "quarantine capture so the clean rows can still be ingested"
+            )
 
-        context.logger.info("Well-formed, valid CSV file confirmed...")
+        # Quarantine pass.
+        try:
+            context.qsv.validate(
+                context.tmp, invalid_suffix="invalid", valid_suffix="valid"
+            )
+        except utils.JobError as e:
+            raise utils.JobError(f"qsv validate failed (quarantine pass): {e}")
+
+        valid_path = f"{context.tmp}.valid.csv"
+        invalid_path = f"{context.tmp}.invalid.csv"
+        if Path(invalid_path).is_file():
+            with open(invalid_path) as f:
+                # First line is the header; remaining lines are
+                # quarantined rows.
+                line_count = sum(1 for _ in f)
+            context.quarantined_rows = max(0, line_count - 1)
+            context.quarantine_csv_path = invalid_path
+            context.logger.info(
+                f"Quarantined {context.quarantined_rows} rejected rows to "
+                f"{invalid_path}"
+            )
+        if Path(valid_path).is_file():
+            context.update_tmp(valid_path)
+        context.logger.info(
+            "Validation complete (some rows quarantined)"
+            if context.quarantined_rows
+            else "Well-formed, valid CSV file confirmed..."
+        )
 
     def _check_duplicates(self, context: ProcessingContext) -> int:
         """

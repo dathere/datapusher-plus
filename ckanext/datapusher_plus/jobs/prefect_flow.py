@@ -47,7 +47,7 @@ import ckanext.datapusher_plus.datastore_utils as dsu
 import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.prefect_client as prefect_client
 import ckanext.datapusher_plus.utils as utils
-from ckanext.datapusher_plus.jobs import artifacts, events
+from ckanext.datapusher_plus.jobs import artifacts, events, quarantine
 from ckanext.datapusher_plus.jobs.caching import (
     DEFAULT_CACHE_EXPIRATION,
     DEFAULT_RESULT_STORAGE,
@@ -93,6 +93,7 @@ from ckanext.datapusher_plus.qsv_utils import QSVCommand
 
 
 def _env_int(name: str, default: int) -> int:
+    """Read an env-var-only int. Used for env-only knobs like retry counts."""
     value = os.environ.get(name)
     if value is None or value == "":
         return default
@@ -102,9 +103,48 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-_FLOW_TIMEOUT_SECONDS = _env_int("DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS", 7200)
-_TASK_RETRY_DOWNLOAD = _env_int("DATAPUSHER_PLUS_DOWNLOAD_RETRIES", 3)
-_TASK_RETRY_DATABASE = _env_int("DATAPUSHER_PLUS_DATABASE_RETRIES", 2)
+def _resolve_int(env_name: str, config_key: str, default: int) -> int:
+    """Resolve an int tunable from env var → CKAN config → default.
+
+    Env var wins so operators and CI can override per-process without
+    touching ``ckan.ini``. When the env var is unset, fall back to the
+    CKAN config key — useful for operators who manage all settings via
+    ``ckan.ini``. When neither is set, return ``default``.
+    """
+    env_value = os.environ.get(env_name)
+    if env_value is not None and env_value != "":
+        try:
+            return int(env_value)
+        except ValueError:
+            pass
+    try:
+        import ckan.plugins.toolkit as tk
+
+        v = tk.config.get(config_key)
+        if v is not None and v != "":
+            return int(v)
+    except Exception:
+        # CKAN config not loaded (e.g., when running in a bare
+        # ``prefect worker`` process) — fall through to the default.
+        pass
+    return default
+
+
+_FLOW_TIMEOUT_SECONDS = _resolve_int(
+    "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
+    "ckanext.datapusher_plus.flow_timeout",
+    7200,
+)
+_TASK_RETRY_DOWNLOAD = _resolve_int(
+    "DATAPUSHER_PLUS_DOWNLOAD_RETRIES",
+    "ckanext.datapusher_plus.download_retries",
+    3,
+)
+_TASK_RETRY_DATABASE = _resolve_int(
+    "DATAPUSHER_PLUS_DATABASE_RETRIES",
+    "ckanext.datapusher_plus.database_retries",
+    2,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -221,11 +261,25 @@ def format_convert_task(prev: DownloadResult) -> ConvertResult:
     cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def validate_task(prev: ConvertResult) -> ValidateResult:
-    """RFC-4180 validation, encoding normalization, optional dedup."""
+    """RFC-4180 validation with quarantine, encoding normalization, dedup."""
     ctx = _stage_run(ValidationStage())
+
+    # Enforce the quarantine threshold (raises if exceeded) and emit the
+    # row.quarantined event. ``apply_quarantine`` is a no-op when no rows
+    # were rejected.
+    quarantine.apply_quarantine(
+        resource_id=ctx.resource_id,
+        clean_csv_path=ctx.tmp,
+        quarantine_csv_path=ctx.quarantine_csv_path or None,
+        quarantined_rows=ctx.quarantined_rows,
+        total_rows=ctx.rows_to_copy + ctx.quarantined_rows,
+    )
+
     return ValidateResult(
         csv_path=ctx.tmp,
         rows_after_dedup=ctx.rows_to_copy,
+        quarantined_rows=ctx.quarantined_rows,
+        quarantine_csv_path=ctx.quarantine_csv_path or None,
         file_hash=prev.file_hash,
     )
 
@@ -503,6 +557,127 @@ def _resource_is_datastore_dump(ctx: RuntimeContext) -> bool:
     return ctx.resource.get("url_type") == "datastore"
 
 
+
+# ---------------------------------------------------------------------------
+# PII review suspension
+# ---------------------------------------------------------------------------
+#
+# When PII screening flags more fields than ``pii_review_threshold``, the
+# flow suspends via Prefect's ``suspend_flow_run`` and waits for an
+# operator to approve or reject via a typed form in the Prefect UI. The
+# worker shuts down during the wait — important because review may take
+# hours or days. On resume, persisted task results replay the upstream
+# stages from cache; only the suspension point and downstream tasks
+# actually re-execute.
+#
+# The feature is off by default (``pii_review_threshold = 0``). Operators
+# turn it on by raising the threshold in CKAN config.
+
+
+try:
+    # Lazy: keep these imports near their use site so the module still
+    # imports when Prefect isn't fully installed (e.g., during Alembic).
+    from prefect.input import RunInput  # type: ignore
+
+    class PIIReviewApproval(RunInput):
+        """Operator-supplied decision for a PII-flagged ingestion run.
+
+        Surfaces as a typed form on the suspended flow run's page in the
+        Prefect UI. Resuming the flow with this input drives the post-
+        suspend branch: ``approve=True`` continues into the transactional
+        datastore writes; ``approve=False`` raises a ``JobError`` so the
+        flow ends cleanly before any datastore mutation.
+        """
+
+        approve: bool = False
+        reviewer: str = ""
+        notes: str = ""
+except Exception:  # pragma: no cover - Prefect import edge cases
+    PIIReviewApproval = None  # type: ignore
+
+
+def _pii_review_threshold() -> int:
+    """Read the configured PII review threshold.
+
+    ``0`` (default) disables the feature entirely.
+    """
+    try:
+        import ckan.plugins.toolkit as tk
+
+        v = tk.config.get("ckanext.datapusher_plus.pii_review_threshold")
+        if v is not None and v != "":
+            return int(v)
+    except Exception:
+        pass
+    return _env_int("DATAPUSHER_PLUS_PII_REVIEW_THRESHOLD", 0)
+
+
+def _count_pii_fields(headers_dicts: List[Dict[str, Any]]) -> int:
+    """Count columns flagged as PII in the analysis output."""
+    return sum(
+        1
+        for h in headers_dicts
+        if isinstance(h, dict) and h.get("pii")
+    )
+
+
+def _maybe_suspend_for_pii_review(
+    runtime: RuntimeContext, analysis: AnalyzeResult, job_input: JobInput
+) -> None:
+    """Suspend the flow run for human review when PII threshold is exceeded.
+
+    Raises ``utils.JobError`` if the reviewer rejects. Returns normally
+    (and lets the flow proceed into the transactional write group) when
+    the reviewer approves or the threshold is not crossed.
+    """
+    threshold = _pii_review_threshold()
+    if threshold <= 0 or PIIReviewApproval is None:
+        return  # feature off
+    if not analysis.pii_found:
+        return
+    pii_count = _count_pii_fields(analysis.headers_dicts)
+    if pii_count <= threshold:
+        return
+
+    runtime.logger.warning(
+        f"PII review threshold exceeded: {pii_count} fields flagged "
+        f"(threshold={threshold}). Suspending flow for operator review "
+        "via the Prefect UI."
+    )
+
+    from prefect.flow_runs import suspend_flow_run
+
+    # Stable key so that on resume, ``suspend_flow_run`` returns the
+    # provided input instead of suspending again. Tying the key to the
+    # flow_run_id ensures one suspension per run — independent of any
+    # cache hits on upstream tasks.
+    flow_run_id = prefect_client.get_current_flow_run_id()
+
+    approval = suspend_flow_run(
+        wait_for_input=PIIReviewApproval.with_initial_data(
+            notes=(
+                f"DataPusher+ flagged {pii_count} PII fields in resource "
+                f"{job_input.resource_id}. Review the analysis artifact "
+                "and approve/reject before any datastore writes happen."
+            )
+        ),
+        key=f"pii-review-{flow_run_id}",
+    )
+
+    if not approval.approve:
+        reason = approval.notes or "(no reason given)"
+        runtime.logger.error(
+            f"PII review rejected by {approval.reviewer or '(unspecified)'}: "
+            f"{reason}"
+        )
+        raise utils.JobError(f"PII review rejected: {reason}")
+
+    runtime.logger.info(
+        f"PII review approved by {approval.reviewer or '(unspecified)'}: "
+        f"{approval.notes or '(no notes)'}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Flow state-change hooks
 # ---------------------------------------------------------------------------
@@ -605,6 +780,13 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
             vl = validate_task(cv)
             an = analyze_task(vl)
 
+            # Human-in-the-loop gate. When PII screening flags more
+            # fields than ``pii_review_threshold``, the flow suspends
+            # here for operator review via the Prefect UI. Approval
+            # continues; rejection raises JobError before any datastore
+            # writes happen.
+            _maybe_suspend_for_pii_review(runtime, an, job_input)
+
             # Datastore-mutating group — atomic under transaction(). If
             # any task here fails, the @on_rollback hooks registered just
             # below the task definitions clean up partial Postgres writes
@@ -625,19 +807,27 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
 
             # Observability surface for a successful run: a Data Quality
             # Markdown artifact (visible inline on the Prefect flow-run
-            # page), a one-click CKAN-resource link artifact, and a
-            # ``datapusher.resource.ingested`` event that operators wire
-            # into Automations for downstream side effects.
+            # page), a one-click CKAN-resource link artifact, an optional
+            # Quarantine Markdown artifact when validate_task rejected
+            # some rows, and a ``datapusher.resource.ingested`` event that
+            # operators wire into Automations for downstream side effects.
             artifacts.create_data_quality_artifact(
                 resource_id=job_input.resource_id,
                 rows=runtime.copied_count,
                 headers=runtime.headers_dicts,
                 pii_found=runtime.pii_found,
-                quarantined_rows=0,  # populated once validate_task wires quarantine
+                quarantined_rows=runtime.quarantined_rows,
             )
             artifacts.create_resource_link_artifact(
                 ckan_url=job_input.ckan_url, resource_id=job_input.resource_id
             )
+            if runtime.quarantined_rows > 0 and runtime.quarantine_csv_path:
+                artifacts.create_quarantine_artifact(
+                    resource_id=job_input.resource_id,
+                    quarantined_rows=runtime.quarantined_rows,
+                    total_rows=runtime.copied_count + runtime.quarantined_rows,
+                    csv_path=runtime.quarantine_csv_path,
+                )
             events.emit_resource_ingested(
                 resource_id=job_input.resource_id,
                 rows=runtime.copied_count,
