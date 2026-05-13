@@ -158,19 +158,14 @@ jobs:
           # Install core dependencies
           pip install --upgrade ckanapi
           
-          # Clone datapusher-plus and install its requirements first
-          echo "Cloning datapusher-plus from branch: $DATAPUSHER_BRANCH"
-          git clone --depth 1 --branch "$DATAPUSHER_BRANCH" https://github.com/dathere/datapusher-plus.git /tmp/datapusher-plus
-          
-          # Install datapusher-plus requirements
-          cd /tmp/datapusher-plus
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+          # Install datapusher-plus from the checked-out workspace so the
+          # current PR's code is what gets exercised — not whatever is on
+          # main. This makes the CI run a real validation of the branch.
+          echo "Installing datapusher-plus from $GITHUB_WORKSPACE"
+          if [ -f "$GITHUB_WORKSPACE/requirements.txt" ]; then
+            pip install -r "$GITHUB_WORKSPACE/requirements.txt"
           fi
-          
-          # Install datapusher-plus itself
-          pip install -e .
-          cd -
+          pip install -e "$GITHUB_WORKSPACE"
           
           # Install ckanext-scheming
           pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'
