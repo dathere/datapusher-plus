@@ -179,8 +179,28 @@ jobs:
           # GitHub release zip when the requested QSV_VER doesn't match the
           # repo's candidate (or when anything else about the deb path fails).
           # See https://github.com/dathere/qsv#debian-package
+          # On any failure inside install_via_deb, drop the qsv apt source +
+          # keyring so subsequent apt-get invocations in later steps don't
+          # keep hitting (and possibly erroring on) the qsv repo.
+          _cleanup_qsv_apt_state() {
+            rm -f /etc/apt/sources.list.d/qsv.list /usr/share/keyrings/qsv-deb.gpg
+          }
+
           install_via_deb() {
             echo "=== Attempting Debian package install (qsv-datapusher-plus) ==="
+            if _install_via_deb_inner; then
+              return 0
+            fi
+            _cleanup_qsv_apt_state
+            return 1
+          }
+
+          _install_via_deb_inner() {
+            # Refresh the apt cache up front so the gnupg install below
+            # can't 404 on stale package files even if no earlier step has
+            # run apt-get update recently.
+            apt-get update -y \
+              || { echo "apt-get update failed before gnupg install"; return 1; }
 
             # gpg isn't in the ckan-dev base image; install it if missing so we
             # can use the documented signed-by approach.
@@ -190,9 +210,17 @@ jobs:
             fi
 
             install -d -m 0755 /usr/share/keyrings
-            wget -qO - "${QSV_DEB_REPO_URL}/qsv-deb.gpg" \
-              | gpg --dearmor -o /usr/share/keyrings/qsv-deb.gpg \
-              || { echo "Could not import qsv repo GPG key"; return 1; }
+            # Split the wget|gpg pipeline into two checked steps: this
+            # workflow's "Install qsv" step runs under `sh -e {0}` (dash on
+            # the ckan-dev image), where `set -o pipefail` isn't reliably
+            # available, so a piped wget failure would otherwise be masked
+            # by gpg --dearmor's exit status.
+            wget -qO /tmp/qsv-deb.gpg "${QSV_DEB_REPO_URL}/qsv-deb.gpg" \
+              || { echo "Failed to download qsv repo GPG key"; return 1; }
+            gpg --dearmor -o /usr/share/keyrings/qsv-deb.gpg < /tmp/qsv-deb.gpg \
+              || { echo "Could not dearmor qsv repo GPG key"; return 1; }
+            rm -f /tmp/qsv-deb.gpg
+
             echo "deb [signed-by=/usr/share/keyrings/qsv-deb.gpg] ${QSV_DEB_REPO_URL} ./" \
               > /etc/apt/sources.list.d/qsv.list
 
