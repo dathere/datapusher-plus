@@ -1,7 +1,7 @@
 [project]
 name = "datapusher-plus"
-version = "2.0.0"
-description = "Next-generation, extensible Data Ingestion framework for CKAN. Accelerated by qsv."
+version = "3.0.0a0"
+description = "Next-generation, extensible Data Ingestion framework for CKAN. Accelerated by qsv and orchestrated by Prefect."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "AGPL-3.0-or-later" }

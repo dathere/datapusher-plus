@@ -1,0 +1,41 @@
+# DataPusher+ Prefect deployment manifest.
+#
+# Operators register this deployment once during setup with
+#   ckan datapusher_plus prefect-deploy
+# or directly via
+#   prefect deploy
+# from the project root.
+#
+# The default targets a local ``process`` work pool — the analogue of the
+# legacy single CKAN RQ worker — and uses the source code in the
+# ckan-extension install. For Kubernetes / ECS / Docker push pools,
+# replace the ``work_pool`` and add a ``build``/``push`` section.
+
+name: datapusher-plus
+prefect-version: ">=3.0,<4"
+
+# Where Prefect should look for the flow entrypoint when a worker
+# executes a run. ``set_working_directory`` is enough for the process
+# worker; Docker/K8s deployments override this in their own pull steps.
+pull:
+- prefect.deployments.steps.set_working_directory:
+    directory: .
+
+deployments:
+- name: datapusher-plus
+  entrypoint: ckanext/datapusher_plus/jobs/prefect_flow.py:datapusher_plus_flow
+  work_pool:
+    name: datapusher-plus
+    job_variables:
+      env:
+        # The CKAN environment file should be available to the worker
+        # process. Operators override this in their work-pool config.
+        CKAN_INI: "{{ $CKAN_INI }}"
+  tags:
+    - datapusher-plus
+    - production
+  description: |
+    DataPusher+ ingestion flow. Downloads a CKAN resource, validates
+    and analyses it with qsv, loads it into the Postgres datastore,
+    and runs Jinja2 formulas. See the DataPusher+ README for the full
+    stage descriptions and the resilience contract.

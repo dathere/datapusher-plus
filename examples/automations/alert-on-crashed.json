@@ -1,0 +1,22 @@
+{
+  "name": "datapusher-plus: alert on Crashed state",
+  "description": "Fires immediately when any DataPusher+ flow run enters the Crashed state (worker killed, OOM, infrastructure error). Wire the action to your Slack/Pagerduty webhook in the Prefect UI before applying.",
+  "trigger": {
+    "type": "event",
+    "posture": "Reactive",
+    "expect": ["prefect.flow-run.Crashed"],
+    "match": {
+      "prefect.resource.name": "datapusher-plus"
+    },
+    "threshold": 1,
+    "within": 0
+  },
+  "actions": [
+    {
+      "type": "send-notification",
+      "block_document_id": "REPLACE_WITH_NOTIFICATION_BLOCK_ID",
+      "subject": "DataPusher+ flow Crashed",
+      "body": "Flow run {{ event.resource.id }} crashed. Investigate the worker logs and re-run from the Prefect UI when ready."
+    }
+  ]
+}
