@@ -49,8 +49,10 @@ import ckanext.datapusher_plus.prefect_client as prefect_client
 import ckanext.datapusher_plus.utils as utils
 from ckanext.datapusher_plus.jobs import artifacts, events, quarantine
 from ckanext.datapusher_plus.jobs.caching import (
+    CONTENT_CACHE_POLICY,
     DEFAULT_CACHE_EXPIRATION,
     DEFAULT_RESULT_STORAGE,
+    DOWNLOAD_CACHE_POLICY,
     content_cache_key,
     download_cache_key,
 )
@@ -212,10 +214,11 @@ def _stage_run(stage) -> RuntimeContext:
     # Prefect UI replays only the failed and downstream tasks.
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    # Cross-run caching: same (resource_id, URL, ignore_hash=False) =
-    # reuse the downloaded file. Saves the actual fetch when an operator
-    # resubmits an unchanged resource within the TTL.
-    cache_key_fn=download_cache_key,
+    # Cross-run caching keyed on (resource_id, URL) when ignore_hash is
+    # False. ``DOWNLOAD_CACHE_POLICY`` composes our custom key with
+    # ``TASK_SOURCE`` so a DP+ upgrade that changes this task's body
+    # invalidates stale caches automatically.
+    cache_policy=DOWNLOAD_CACHE_POLICY,
     cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def download_task(job_input: JobInput) -> DownloadResult:
@@ -237,8 +240,8 @@ def download_task(job_input: JobInput) -> DownloadResult:
     tags=["datapusher-plus", "qsv-subprocess"],
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    # Content-based: same input file_hash = same converted output.
-    cache_key_fn=content_cache_key,
+    # Content-based: same input file_hash + same task source = same output.
+    cache_policy=CONTENT_CACHE_POLICY,
     cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def format_convert_task(prev: DownloadResult) -> ConvertResult:
@@ -257,7 +260,7 @@ def format_convert_task(prev: DownloadResult) -> ConvertResult:
     tags=["datapusher-plus", "qsv-subprocess"],
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    cache_key_fn=content_cache_key,
+    cache_policy=CONTENT_CACHE_POLICY,
     cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def validate_task(prev: ConvertResult) -> ValidateResult:
@@ -291,7 +294,7 @@ def validate_task(prev: ConvertResult) -> ValidateResult:
     tags=["datapusher-plus", "qsv-subprocess", "cpu-bound"],
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    cache_key_fn=content_cache_key,
+    cache_policy=CONTENT_CACHE_POLICY,
     cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def analyze_task(prev: ValidateResult) -> AnalyzeResult:

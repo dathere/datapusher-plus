@@ -136,3 +136,34 @@ def content_cache_key(context, parameters) -> Optional[str]:
         return None
     task_name = getattr(context.task, "name", "task")
     return f"dpp:{task_name}:{fh}"
+
+
+# ---------------------------------------------------------------------------
+# Composed cache policies
+# ---------------------------------------------------------------------------
+#
+# Prefect 3.4+ recommends ``cache_policy=...`` over the legacy
+# ``cache_key_fn=`` shorthand. Wrapping our custom keys in
+# ``CacheKeyFnPolicy`` lets us compose them with ``TASK_SOURCE`` — when
+# operators upgrade DP+ and a task body changes, the source-hash
+# component invalidates stale caches automatically. Without this, a
+# resubmit after upgrading would happily reuse output produced by the
+# old code.
+#
+# Loaded lazily so the module still imports when Prefect 3.4's
+# ``cache_policies`` module isn't available (older Prefect 3.x or
+# tooling contexts).
+
+try:
+    from prefect.cache_policies import CacheKeyFnPolicy, TASK_SOURCE
+
+    DOWNLOAD_CACHE_POLICY = (
+        CacheKeyFnPolicy(cache_key_fn=download_cache_key) + TASK_SOURCE
+    )
+    CONTENT_CACHE_POLICY = (
+        CacheKeyFnPolicy(cache_key_fn=content_cache_key) + TASK_SOURCE
+    )
+except Exception as e:  # pragma: no cover - older Prefect 3.x
+    log.debug("Falling back to bare cache_key_fn (cache_policies unavailable): %s", e)
+    DOWNLOAD_CACHE_POLICY = None  # type: ignore
+    CONTENT_CACHE_POLICY = None  # type: ignore
