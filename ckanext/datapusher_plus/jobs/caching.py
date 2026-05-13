@@ -46,17 +46,20 @@ log = logging.getLogger(__name__)
 # before workers start polling.
 
 
-def _load_default_result_storage() -> Optional[Any]:
-    try:
-        from ckanext.datapusher_plus.jobs.blocks import load_result_storage_block
-
-        return load_result_storage_block()
-    except Exception as e:
-        log.debug("Result storage block not available at module load: %s", e)
-        return None
-
-
-DEFAULT_RESULT_STORAGE = _load_default_result_storage()
+# Default result-storage configuration is left to Prefect — it will use its
+# built-in local filesystem path (``~/.prefect/storage``) when this is None.
+#
+# Deliberately NOT loaded at module import: calling ``LocalFileSystem.load(...)``
+# here would trigger a Prefect API call, and Prefect spins up a temporary
+# server when ``PREFECT_API_URL`` is unset (which happens during
+# ``ckan db init`` and other CKAN admin commands that import DP+'s plugin).
+# That temp-server bootstrap pollutes stdout with log lines and breaks any
+# tool that pipes CKAN output (e.g., ``ckan datastore set-permissions | psql``).
+#
+# Operators wanting a specific block (S3/GCS for multi-host pools) wire it in
+# via ``prefect.yaml`` deployment job_variables or a custom ``@task`` decorator
+# in their custom flow.
+DEFAULT_RESULT_STORAGE: Optional[Any] = None
 
 
 # ---------------------------------------------------------------------------
