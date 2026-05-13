@@ -245,12 +245,12 @@ sudo apt install qsv -y
 ### Option 2: Install prebuilt qsv binaries
 
 [Download the appropriate prebuilt binaries](https://github.com/dathere/qsv/releases/latest) for your platform and copy
-it to the appropriate directory. For example you can use the following commands for qsv v19.1.0 on x86_64 Linux (you can update the version `19.1.0` to the latest version available on the [releases page](https://github.com/dathere/qsv/releases)):
+it to the appropriate directory. For example you can use the following commands for qsv v20.0.0 on x86_64 Linux (you can update the version `20.0.0` to the latest version available on the [releases page](https://github.com/dathere/qsv/releases)):
 
 ```bash
-wget https://github.com/dathere/qsv/releases/download/19.1.0/qsv-19.1.0-x86_64-unknown-linux-gnu.zip
-unzip qsv-19.1.0-x86_64-unknown-linux-gnu.zip
-rm qsv-19.1.0-x86_64-unknown-linux-gnu.zip
+wget https://github.com/dathere/qsv/releases/download/20.0.0/qsv-20.0.0-x86_64-unknown-linux-gnu.zip
+unzip qsv-20.0.0-x86_64-unknown-linux-gnu.zip
+rm qsv-20.0.0-x86_64-unknown-linux-gnu.zip
 sudo mv qsv* /usr/local/bin
 ```
 
