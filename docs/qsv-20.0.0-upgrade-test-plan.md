@@ -81,13 +81,18 @@ Verify-mode count must now report **3** unsafe headers (positions 2, 3, 4 — al
 
 ### Test matrix
 
-| # | Fixture | Action | Expected |
+> [!NOTE]
+> DP+'s production path calls `safenames --mode conditional` (see `ckanext/datapusher_plus/jobs/stages/analysis.py:177`), which **preserves "quoted identifier"-safe headers verbatim** — including embedded spaces and non-ASCII alphabetic chars (CJK, accented Latin alphabetic forms). Only headers with truly-unsafe chars (emoji, leading digits, special chars) or exact duplicates get rewritten. The `safe_header_names` byte-cap still applies *when* a rewrite triggers. The qsv contract behaviors (always-rewrite path, byte-cap, etc.) are pinned in `tests/test_qsv_v20_regression.py` — this manual matrix documents what an operator sees end-to-end through DP+'s default path.
+>
+> Rows below note `[mode c]` (DP+ default) or `[mode a]` (always-rewrite, exercised only by the regression suite, not the production pipeline) where it matters.
+
+| # | Fixture | Action | Expected (under DP+'s `--mode c` path) |
 |---|---------|--------|----------|
 | 2.1 | `safenames_ascii_short.csv` | Upload via DRUF / submit via `ckan datapusher_plus submit` | Datastore table has columns `id,name,description,created_at`; no log line saying unsafe headers found |
-| 2.2 | `safenames_ascii_duplicate_long.csv` | Upload | Datastore table has 2 columns; the duplicate column name ends with `_2` and is ≤ 60 bytes total; log line "2 unsafe header names found" |
-| 2.3 | `safenames_cjk.csv` | Upload | Datastore column names are unsafe-prefixed romanized forms ≤ 60 bytes; no Postgres `column name too long` errors |
-| 2.4 | `safenames_emoji.csv` | Upload | DP+ logs `unsafe_headers` list with quotes/whitespace **trimmed** from displayed strings; column names sanitized |
-| 2.5 | `safenames_dupe_suffix.csv` | Upload | DP+ logs **3** unsafe header names found (count change vs. ≤19.1.0) |
+| 2.2 | `safenames_ascii_duplicate_long.csv` | Upload | Datastore table has 2 columns, both preserved verbatim as quoted identifiers (snake_case form + space-separated form coexist — qsv treats them as distinct). Log line "0 unsafe header names found" because both forms are valid quoted PG identifiers. (Under `--mode a` the second column would collide with the first and get `_<n>`-suffixed at ≤ 60 bytes — pinned by `test_long_ascii_duplicate_collision_fits_60_bytes`.) |
+| 2.3 | `safenames_cjk.csv` | Upload | Datastore columns are quoted Unicode identifiers (e.g. `"顧客識別子"`, `"商品名称"`, etc.) — CJK preserved verbatim. Log line "0 unsafe header names found". (Under `--mode a` the same headers would be rewritten to `unsafe_*` ASCII forms ≤ 60 bytes — pinned by `test_cjk_headers_under_always_mode_are_postgres_safe`.) |
+| 2.4 | `safenames_emoji.csv` | Upload | Mixed outcome: emoji headers → `unsafe_*` rewrite; trailing-whitespace header → trimmed-and-preserved as `whitespace`; literal-quote-wrapped header → trimmed-and-preserved. DP+ logs `unsafe_headers` (verify-mode JSON) with leading/trailing whitespace and surrounding `"` already trimmed from the displayed strings (qsv 20.0.0 contract — pinned by `test_verify_mode_trims_surrounding_whitespace_and_quotes`). |
+| 2.5 | `safenames_dupe_suffix.csv` | Upload | Datastore columns are `col, col_2, col_3, col_4` (qsv suffixes duplicates even in conditional mode). DP+ logs **3** unsafe header names found — positions 2/3/4 (qsv 20.0.0 count-correction vs. ≤ 19.1.0 which reported 0 — pinned by `test_verify_mode_counts_duplicate_suffix_renames_as_unsafe`). |
 
 ### Differential check (recommended)
 
