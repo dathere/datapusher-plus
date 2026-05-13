@@ -34,11 +34,14 @@ def confirm(yes: bool):
     click.confirm(question, abort=True)
 
 
-@click.group(short_help="Datapusher Plus commands")
+@click.group(name="datapusher_plus", short_help="Datapusher Plus commands")
 def datapusher_plus():
     """
     Datapusher Plus commands
 
+    Explicit ``name="datapusher_plus"`` to keep the underscore form the
+    README documents — Click 8 would otherwise auto-convert the function
+    name to ``datapusher-plus``.
     """
 
 
