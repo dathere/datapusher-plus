@@ -216,18 +216,25 @@ jobs:
             apt-get install -y qsv-datapusher-plus \
               || { echo "apt-get install qsv-datapusher-plus failed"; return 1; }
 
-            # The .deb installs /usr/bin/qsvdp; symlink to the path the rest
-            # of this workflow + the CKAN config (qsv_bin) hard-code.
-            if [ ! -x /usr/bin/qsvdp ]; then
-              echo "ERROR: /usr/bin/qsvdp missing after deb install. Package contents:"
+            # qsv-datapusher-plus 20.0.0-1 installs the binary at
+            # /usr/local/bin/qsvdp directly (= ${QSV_BIN_TARGET}). Accept
+            # /usr/bin/qsvdp too in case a future package revision moves to
+            # the more conventional Debian path, and symlink it to the path
+            # the rest of this workflow + the CKAN config (qsv_bin) hard-code.
+            if [ -x "${QSV_BIN_TARGET}" ]; then
+              installed="${QSV_BIN_TARGET}"
+            elif [ -x /usr/bin/qsvdp ]; then
+              installed=/usr/bin/qsvdp
+              ln -sf /usr/bin/qsvdp "${QSV_BIN_TARGET}"
+            else
+              echo "ERROR: qsvdp not found on PATH after deb install. Package contents:"
               dpkg -L qsv-datapusher-plus || true
               return 1
             fi
-            ln -sf /usr/bin/qsvdp "${QSV_BIN_TARGET}"
             "${QSV_BIN_TARGET}" --version \
               || { echo "deb-installed qsvdp failed to run (libc/libstdc++ mismatch?)"; return 1; }
 
-            echo "qsv installed via Debian package successfully (qsv-datapusher-plus ${candidate})"
+            echo "qsv installed via Debian package successfully (qsv-datapusher-plus ${candidate}, binary at ${installed})"
           }
 
           install_via_zip() {
