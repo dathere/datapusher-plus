@@ -327,44 +327,27 @@ class QSVCommand:
 
         return self._run_command(args)
 
-    def validate(
-        self,
-        input_file: str,
-        *,
-        invalid_suffix: Optional[str] = None,
-        valid_suffix: Optional[str] = None,
-    ) -> subprocess.CompletedProcess:
+    def validate(self, input_file: str) -> subprocess.CompletedProcess:
         """
-        Validate a CSV file against RFC4180.
+        Validate a CSV file against the RFC 4180 standard.
 
-        When ``invalid_suffix`` is provided, qsv writes rejected rows to
-        ``<input>.<invalid_suffix>.csv`` and exits 0 even if validation
-        errors were found. Pair with ``valid_suffix`` to also capture the
-        accepted rows to a sibling file; the caller can then continue
-        ingesting from the clean subset. This is the "quarantine"
-        mode used by the v3.0 ingestion flow.
+        Note: qsv's ``--valid`` and ``--invalid`` row-routing flags only
+        emit output files in JSON-Schema mode, not in RFC 4180 mode that
+        DP+ uses. Row-level quarantine is handled in
+        ``ValidationStage._validate_csv`` via Python's ``csv`` module
+        when this strict check fails.
 
         Args:
             input_file: Path to the CSV file
-            invalid_suffix: Suffix for the quarantine CSV
-                (e.g. ``"invalid"`` writes ``<input>.invalid.csv``)
-            valid_suffix: Suffix for the clean-subset CSV
-                (e.g. ``"valid"`` writes ``<input>.valid.csv``)
 
         Returns:
             The result of the command
 
         Raises:
-            utils.JobError: If the command fails and quarantine mode
-                isn't enabled (strict mode).
+            utils.JobError: If the command fails (i.e., RFC 4180
+                violations were found).
         """
-        args: List[Union[str, Path]] = ["validate"]
-        if valid_suffix:
-            args.extend(["--valid", valid_suffix])
-        if invalid_suffix:
-            args.extend(["--invalid", invalid_suffix])
-        args.append(input_file)
-        return self._run_command(args)
+        return self._run_command(["validate", input_file])
 
     def sortcheck(
         self,

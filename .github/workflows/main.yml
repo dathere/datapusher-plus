@@ -87,6 +87,9 @@ jobs:
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='datastore_test'" | grep -q 1 || \
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;"
+          # Prefect server backing database (shared Postgres; separate logical DB).
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='prefect_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE prefect_test OWNER postgres;"
           echo "Granting permissions (best-effort)..."
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"
@@ -286,6 +289,12 @@ jobs:
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
+          # v3.0: ingestion runs on Prefect instead of RQ.
+          ckanext.datapusher_plus.prefect_deployment_name = datapusher-plus/datapusher-plus
+          ckanext.datapusher_plus.prefect_work_pool = datapusher-plus
+          ckanext.datapusher_plus.prefect_ui_base = http://localhost:4200
+          ckanext.datapusher_plus.flow_timeout = 600
+          ckanext.datapusher_plus.max_quarantine_pct = 5.0
           EOF
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             echo "Patching selective keys in /srv/app/src/ckan/test-core.ini (only the keys you listed)..."
@@ -622,18 +631,76 @@ jobs:
           else
             echo "✗ Datastore write access failed"
           fi
+      - name: Start Prefect server (DP+ v3.0)
+        env:
+          PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:${{ env.POSTGRES_PASSWORD }}@postgres:5432/prefect_test
+          PREFECT_SERVER_API_HOST: 0.0.0.0
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          echo "PREFECT_API_URL=http://localhost:4200/api" >> $GITHUB_ENV
+          echo "Starting Prefect server (Postgres-backed) on :4200..."
+          nohup prefect server start > /tmp/prefect_server.log 2>&1 &
+          PREFECT_SERVER_PID=$!
+          echo "PREFECT_SERVER_PID=$PREFECT_SERVER_PID" >> $GITHUB_ENV
+          # Poll until the API is healthy. Server start can take 30–60s on
+          # first run as Alembic migrations apply.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4200/api/health > /dev/null 2>&1; then
+              echo "Prefect server is healthy after ${i}s"
+              break
+            fi
+            if ! kill -0 "$PREFECT_SERVER_PID" >/dev/null 2>&1; then
+              echo "Prefect server died:"
+              tail -n 80 /tmp/prefect_server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:4200/api/health || (tail -n 80 /tmp/prefect_server.log; exit 1)
+
+      - name: Register DataPusher+ deployment
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          ckan -c /srv/app/src/ckan/test-core.ini datapusher_plus prefect-deploy
+
+      - name: Start Prefect worker (DP+ v3.0)
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+          CKAN_INI: /srv/app/src/ckan/test-core.ini
+        run: |
+          set -eu
+          echo "Starting Prefect worker on the datapusher-plus pool..."
+          nohup prefect worker start --pool datapusher-plus > /tmp/prefect_worker.log 2>&1 &
+          PREFECT_WORKER_PID=$!
+          echo "PREFECT_WORKER_PID=$PREFECT_WORKER_PID" >> $GITHUB_ENV
+          sleep 5
+          if kill -0 "$PREFECT_WORKER_PID" >/dev/null 2>&1; then
+            echo "Prefect worker started"
+            head -n 30 /tmp/prefect_worker.log || true
+          else
+            echo "Prefect worker failed to start"
+            cat /tmp/prefect_worker.log
+            exit 1
+          fi
+
       - name: Start CKAN background job worker
         run: |
           set -eu
-          echo "Starting CKAN background job worker (CRITICAL for DataPusher Plus)..."
+          # Note: as of DP+ v3.0 the ingestion pipeline runs on Prefect,
+          # not RQ. We still start CKAN's RQ worker because other CKAN
+          # extensions (search reindex, mailer, etc.) rely on it.
+          echo "Starting CKAN background job worker..."
           nohup ckan -c /srv/app/src/ckan/test-core.ini jobs worker > /tmp/ckan_worker.log 2>&1 &
           WORKER_PID=$!
           echo "CKAN Worker PID=$WORKER_PID"
           echo "CKAN_WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
-          
+
           # Give worker a moment to start up
           sleep 5
-          
+
           # Verify worker is running
           if kill -0 "$WORKER_PID" >/dev/null 2>&1; then
             echo "Background job worker started successfully"
@@ -1301,5 +1368,8 @@ jobs:
         if: always()
         run: |
           echo "Stopping any running CKAN processes..."
-          pkill -f "ckan.*run"  
+          pkill -f "ckan.*run" || true
+          echo "Stopping Prefect server and worker..."
+          pkill -f "prefect server start" || true
+          pkill -f "prefect worker start" || true
           echo "Cleanup completed"

@@ -61,23 +61,34 @@ class ValidationStage(BaseStage):
 
     def _validate_csv(self, context: ProcessingContext) -> None:
         """
-        Validate CSV against RFC4180 standard.
+        Validate CSV against RFC 4180.
 
-        Strict validation runs first. When it fails, the stage retries
-        with quarantine capture — qsv writes the rejected rows to a
-        sibling ``<input>.invalid.csv`` and the clean subset to
-        ``<input>.valid.csv``. The clean file becomes the new ``tmp``
-        for downstream tasks; the count and path of quarantined rows
-        are recorded on the context for ``validate_task`` to enforce
-        ``max_quarantine_pct`` and attach the Prefect artifact.
+        Strict validation runs first (via ``qsv validate``). When it
+        fails, the stage attempts a Python-side quarantine pass: parse
+        the file row-by-row with the standard library's ``csv`` module,
+        route rows whose field count diverges from the header into a
+        sibling ``<input>.invalid.csv``, write the clean subset to
+        ``<input>.valid.csv``, and re-validate the clean subset with qsv.
+
+        qsv's own ``--valid`` / ``--invalid`` flags only emit output
+        files in JSON-Schema mode, not in RFC 4180 mode — hence the
+        Python-side pass. It covers the most common quarantine case
+        (field-count mismatch); other RFC 4180 violations (bad encoding,
+        unbalanced quotes mid-record) still fail the run and the
+        operator must fix the source.
+
+        Sets ``context.quarantined_rows`` and ``context.quarantine_csv_path``
+        for downstream consumption by ``validate_task``.
 
         Args:
             context: Processing context
 
         Raises:
-            utils.JobError: If validation cannot complete even with
-                quarantine capture enabled.
+            utils.JobError: If validation cannot complete even after the
+                quarantine pass (e.g., the clean subset still violates
+                RFC 4180 for non-row-count reasons).
         """
+        import csv
         from pathlib import Path
 
         context.logger.info("Validating CSV...")
@@ -87,37 +98,82 @@ class ValidationStage(BaseStage):
             return
         except utils.JobError as strict_err:
             context.logger.warning(
-                f"Strict validation failed ({strict_err}); retrying with "
-                "quarantine capture so the clean rows can still be ingested"
+                f"Strict RFC 4180 validation failed ({strict_err}); attempting "
+                "Python-side quarantine of malformed rows"
             )
 
-        # Quarantine pass.
+        # Python-side quarantine pass.
+        src = context.tmp
+        valid_path = f"{src}.valid.csv"
+        invalid_path = f"{src}.invalid.csv"
+        quarantined = 0
+
         try:
-            context.qsv.validate(
-                context.tmp, invalid_suffix="invalid", valid_suffix="valid"
-            )
-        except utils.JobError as e:
-            raise utils.JobError(f"qsv validate failed (quarantine pass): {e}")
+            with open(src, newline="", encoding="utf-8") as fh_in, \
+                 open(valid_path, "w", newline="", encoding="utf-8") as fh_valid, \
+                 open(invalid_path, "w", newline="", encoding="utf-8") as fh_invalid:
 
-        valid_path = f"{context.tmp}.valid.csv"
-        invalid_path = f"{context.tmp}.invalid.csv"
-        if Path(invalid_path).is_file():
-            with open(invalid_path) as f:
-                # First line is the header; remaining lines are
-                # quarantined rows.
-                line_count = sum(1 for _ in f)
-            context.quarantined_rows = max(0, line_count - 1)
-            context.quarantine_csv_path = invalid_path
-            context.logger.info(
-                f"Quarantined {context.quarantined_rows} rejected rows to "
-                f"{invalid_path}"
+                reader = csv.reader(fh_in)
+                valid_writer = csv.writer(fh_valid)
+                invalid_writer = csv.writer(fh_invalid)
+
+                try:
+                    header = next(reader)
+                except StopIteration:
+                    raise utils.JobError("CSV is empty; cannot quarantine.")
+
+                valid_writer.writerow(header)
+                # The quarantine CSV carries the same header for context,
+                # plus a synthetic ``_dpp_line`` column showing where in
+                # the source the bad row originated.
+                invalid_writer.writerow(["_dpp_line"] + header)
+
+                expected_cols = len(header)
+                # Iterate rows; csv.Error (e.g., unbalanced quotes) is
+                # rare in well-formed files but if it triggers we abort —
+                # the file is malformed beyond the row-count case the
+                # Python pass can handle.
+                for line_num, row in enumerate(reader, start=2):
+                    if len(row) != expected_cols:
+                        invalid_writer.writerow([line_num] + row)
+                        quarantined += 1
+                    else:
+                        valid_writer.writerow(row)
+        except csv.Error as e:
+            # Clean up partial sibling files and re-raise.
+            for p in (valid_path, invalid_path):
+                Path(p).unlink(missing_ok=True)
+            raise utils.JobError(
+                f"qsv validate failed and Python quarantine cannot recover: {e}"
             )
-        if Path(valid_path).is_file():
-            context.update_tmp(valid_path)
+
+        # If nothing was quarantined the strict check must have failed
+        # for a non-row-count reason; surface the original error.
+        if quarantined == 0:
+            for p in (valid_path, invalid_path):
+                Path(p).unlink(missing_ok=True)
+            raise utils.JobError(
+                "qsv validate failed but no malformed rows were detected "
+                "during the quarantine pass; the CSV may have encoding or "
+                "quoting issues that need manual repair"
+            )
+
+        # Confirm the clean subset is now well-formed.
+        try:
+            context.qsv.validate(valid_path)
+        except utils.JobError as e:
+            for p in (valid_path, invalid_path):
+                Path(p).unlink(missing_ok=True)
+            raise utils.JobError(
+                f"Clean subset still failed validation after quarantine: {e}"
+            )
+
+        context.quarantined_rows = quarantined
+        context.quarantine_csv_path = invalid_path
+        context.update_tmp(valid_path)
         context.logger.info(
-            "Validation complete (some rows quarantined)"
-            if context.quarantined_rows
-            else "Well-formed, valid CSV file confirmed..."
+            f"Quarantined {quarantined} malformed rows to {invalid_path}; "
+            f"continuing with clean subset {valid_path}"
         )
 
     def _check_duplicates(self, context: ProcessingContext) -> int:
