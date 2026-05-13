@@ -666,6 +666,12 @@ jobs:
           PREFECT_API_URL: http://localhost:4200/api
         run: |
           set -eu
+          echo "=== DP+ installation diagnostics ==="
+          pip show datapusher-plus || true
+          python3 -c "import ckanext.datapusher_plus, ckanext.datapusher_plus.cli; print('cli module loaded ok:', ckanext.datapusher_plus.cli.__file__); print('group:', ckanext.datapusher_plus.cli.datapusher_plus); print('subcommands:', list(ckanext.datapusher_plus.cli.datapusher_plus.commands.keys()))" || true
+          echo "=== CKAN top-level commands ==="
+          ckan -c /srv/app/src/ckan/test-core.ini --help 2>&1 | sed -n '/^Commands:/,$p' | head -40
+          echo "=== Attempting prefect-deploy ==="
           ckan -c /srv/app/src/ckan/test-core.ini datapusher_plus prefect-deploy
 
       - name: Start Prefect worker (DP+ v3.0)
