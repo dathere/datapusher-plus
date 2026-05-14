@@ -58,30 +58,61 @@ from typing import Any, Dict, List, Optional
 
 
 def _bootstrap_ckan_app_context() -> None:
+    """Push a Flask app context populated from ckan.ini.
+
+    ``tk.config`` is a proxy to ``flask.current_app.config``. Without an
+    app context, every ``tk.config.get(...)`` returns ``None`` and
+    DP+'s module-level config reads crash.
+
+    We deliberately avoid ``ckan.config.middleware.make_flask_stack``
+    here — it loads the full plugin chain (which re-imports DP+ and
+    triggers this same code path) and pulled in a NoneType.split error
+    in CI run 25838697116. The light Flask-only bootstrap below just
+    parses the ini and pushes its values into a bare Flask app's
+    config; that's enough for the read-only ``tk.config.get(...)``
+    pattern DP+ uses at module load.
+    """
     ini = os.environ.get("CKAN_INI")
     if not ini or not os.path.exists(ini):
         return
     try:
-        from flask import has_app_context
+        from flask import Flask, has_app_context
 
         if has_app_context():
             return
     except Exception:
-        # If flask isn't importable we have bigger problems; let the
-        # downstream DP+ imports surface the real error.
         return
+
     try:
         from ckan.cli import load_config
-        from ckan.config.middleware import make_flask_stack
 
         cfg = load_config(ini)
-        app = make_flask_stack(cfg)
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "DP+ Prefect bootstrap: ckan.cli.load_config failed (%s); "
+            "falling back to direct configparser",
+            e,
+        )
+        try:
+            import configparser
+
+            parser = configparser.ConfigParser()
+            parser.read(ini)
+            cfg = dict(parser.items("app:main")) if parser.has_section("app:main") else {}
+        except Exception as e2:
+            logging.getLogger(__name__).warning(
+                "DP+ Prefect bootstrap: direct ini parse also failed: %s", e2
+            )
+            return
+
+    try:
+        app = Flask("dpp-prefect-worker")
+        for key, value in dict(cfg).items():
+            app.config[key] = value
         app.app_context().push()
     except Exception as e:
         logging.getLogger(__name__).warning(
-            "CKAN config bootstrap failed in Prefect worker subprocess: %s. "
-            "DP+ will fall back to env-var defaults where available.",
-            e,
+            "DP+ Prefect bootstrap: Flask app context push failed: %s", e
         )
 
 
