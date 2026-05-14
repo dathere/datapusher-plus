@@ -1141,10 +1141,15 @@ jobs:
             
             if [ $total_tests -gt 0 ]; then
               # Count results by status
-              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
+              # grep -c prints "0" AND exits non-zero on no match; a
+              # trailing `|| echo "0"` would then double-emit ("0\n0"),
+              # which breaks $(( )) arithmetic. Swallow the exit code
+              # with `|| true` and default an empty value instead.
+              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || true)
+              passed=${passed:-0}
               failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
-              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
-              error_count=$(echo "$error_count" | tr -d '\n')
+              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || true)
+              error_count=${error_count:-0}
               
               # Calculate success rates
               tested_success_rate=$(( passed * 100 / total_tests ))
@@ -1230,8 +1235,10 @@ jobs:
                 echo ""
                 
                 # Add worker analysis sections
-                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
-                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
+                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv 2>/dev/null || true)
+                success_jobs=${success_jobs:-0}
+                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv 2>/dev/null || true)
+                error_jobs=${error_jobs:-0}
                 
                 # File Analysis
                 echo "## File Analysis"
