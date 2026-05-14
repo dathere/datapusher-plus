@@ -1034,14 +1034,27 @@ jobs:
             echo ""
             echo "⚠ OVERALL RESULT: PARTIAL SUCCESS"
             echo "DataPusher Plus works with some remote files but has issues with others"
+            overall_failed=1
           else
             echo ""
             echo "❌ OVERALL RESULT: ALL TESTED FILES FAILED"
             echo "DataPusher Plus is not working correctly with remote files"
+            overall_failed=1
           fi
-          
+
           echo ""
           echo "Test completed at: $(date)"
+
+          # Fail the step when any tested file did not fully ingest
+          # (upload SUCCESS + datapusher_status complete + datastore
+          # active). Previously this step only echoed the verdict and
+          # always exited 0, so CI stayed green even when every file
+          # failed. The detailed per-file breakdown is still produced by
+          # the "Generate Combined Test Results" step (if: always()).
+          if [ "${overall_failed:-0}" -ne 0 ]; then
+            echo "::error::DataPusher+ ingestion failed for $failed_files of $total_files tested file(s)"
+            exit 1
+          fi
 
       - name: Generate Combined Test Results and Worker Analysis
         if: always()

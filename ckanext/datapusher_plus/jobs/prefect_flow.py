@@ -58,116 +58,82 @@ from typing import Any, Dict, List, Optional
 
 
 def _bootstrap_ckan_app_context() -> None:
-    """Bring up just enough CKAN in a Prefect worker subprocess.
+    """Bring up the full CKAN app inside a Prefect worker subprocess.
 
     The ``process`` worker spawns a fresh Python interpreter per flow
-    run; CKAN's normal startup never happens. Three things break
-    without a bootstrap:
+    run; CKAN's normal startup never happens. Without a bootstrap there
+    is no Flask app, no populated ``tk.config``, no SQLAlchemy bind, and
+    — critically — no action registry, so ``tk.get_action(...)`` (used
+    by ``datastore_utils.get_resource`` and the metadata stage) raises.
 
-    1. ``tk.config`` — which is the module-level ``ckan.common.config``
-       singleton, NOT ``flask.current_app.config`` — is empty, so DP+
-       config reads return ``None``.
-    2. CKAN's SQLAlchemy ``model.Session`` has no engine bound, so the
-       first ``Jobs(...).save()`` raises ``UnboundExecutionError``.
-    3. Flask-context-dependent helpers have no application context.
+    Bootstrap exactly the way ``ckan``'s CLI does: ``make_app`` over the
+    config returned by ``ckan.cli.load_config``. ``make_app`` runs
+    ``load_environment`` — which populates ``ckan.common.config`` (what
+    ``tk.config`` proxies to), binds ``ckan.model``, and loads every
+    plugin + action — then builds the Flask stack. We push an
+    application context afterwards. After this, DP+'s ``config.py``
+    reads, ``Jobs(...).save()``, and local action calls all work just as
+    they do inside the CKAN web process.
 
-    We deliberately avoid ``make_flask_stack`` / ``load_environment`` —
-    they load the full plugin chain (risking recursion) and
-    ``make_flask_stack`` tripped a NoneType.split error in CI run
-    25838697116. Instead:
+    An earlier attempt used a hand-rolled lightweight bootstrap (parse
+    ini, ``ckan.common.config.update``, bare Flask context,
+    ``model.init_model``). It was insufficient: only ``load_environment``
+    populates the action registry, so the flow crashed in
+    ``get_resource`` *before* its own ``try/except`` could record the
+    error — leaving jobs stuck "running" forever. The full bootstrap is
+    the correct analogue of how ``ckan jobs worker`` ran the v2 pipeline.
 
-    * parse the ini (``ckan.cli.load_config``, ``configparser`` fallback);
-    * ``ckan.common.config.update(cfg)`` — this is what actually makes
-      ``tk.config.get(...)`` return real values;
-    * push a bare Flask app context for the Flask-context-dependent
-      code paths;
-    * build a SQLAlchemy engine from ``sqlalchemy.url`` and call
-      ``ckan.model.init_model``.
+    No-op in three cases:
 
-    All steps are individually wrapped — a failure is logged and the
-    downstream DP+ import / first DB call surfaces the real error.
-    No-op when ``CKAN_INI`` is unset or an app context already exists
-    (i.e. imported from the CKAN web process).
+    * ``CKAN_INI`` is unset — nothing to bootstrap from;
+    * an app context already exists — imported from the CKAN web process;
+    * ``ckan.common.config`` is already populated — imported from a
+      ``ckan`` CLI command (e.g. ``datapusher_plus prefect-deploy``),
+      whose ``CtxObject`` already ran ``make_app``. Re-running it would
+      load every plugin a second time.
     """
     ini = os.environ.get("CKAN_INI")
     if not ini or not os.path.exists(ini):
         return
     try:
-        from flask import Flask, has_app_context
+        from flask import has_app_context
 
         if has_app_context():
             return
     except Exception:
         return
 
-    log = logging.getLogger(__name__)
-
-    # --- parse the ini -----------------------------------------------------
-    cfg: Dict[str, Any]
-    try:
-        from ckan.cli import load_config
-
-        cfg = dict(load_config(ini))
-    except Exception as e:
-        log.warning(
-            "DP+ Prefect bootstrap: ckan.cli.load_config failed (%s); "
-            "falling back to direct configparser",
-            e,
-        )
-        try:
-            import configparser
-
-            parser = configparser.ConfigParser()
-            parser.read(ini)
-            cfg = (
-                dict(parser.items("app:main"))
-                if parser.has_section("app:main")
-                else {}
-            )
-        except Exception as e2:
-            log.warning(
-                "DP+ Prefect bootstrap: direct ini parse also failed: %s", e2
-            )
-            return
-
-    # --- populate ckan.common.config (makes tk.config.get work) -----------
-    # This is the critical step: ``tk.config`` proxies to this singleton,
-    # not to Flask's app config.
+    # The CKAN CLI builds the app via its own CtxObject before our
+    # command imports this module — ``ckan.common.config`` is populated
+    # even though no app context is pushed. ``ckan.site_url`` is a
+    # required key always present once load_environment has run, and
+    # empty in a fresh worker interpreter; use it as the discriminator.
     try:
         from ckan.common import config as ckan_config
 
-        ckan_config.update(cfg)
-    except Exception as e:
-        log.warning(
-            "DP+ Prefect bootstrap: ckan.common.config.update failed: %s", e
-        )
-        return
+        if ckan_config.get("ckan.site_url"):
+            return
+    except Exception:
+        pass
 
-    # --- push a Flask app context (for Flask-context-dependent code) ------
+    log = logging.getLogger(__name__)
     try:
-        app = Flask("dpp-prefect-worker")
-        for key, value in cfg.items():
-            app.config[key] = value
-        app.app_context().push()
-    except Exception as e:
-        log.warning(
-            "DP+ Prefect bootstrap: Flask app context push failed: %s", e
+        from ckan.cli import load_config
+        from ckan.config.middleware import make_app
+
+        ckan_app = make_app(load_config(ini))
+        ckan_app._wsgi_app.app_context().push()
+    except Exception:
+        # A worker that cannot bootstrap CKAN cannot run any DP+ flow.
+        # Fail loud with a full traceback in the worker log rather than
+        # limping on with an empty config / action registry — that mode
+        # produced silent ``exit 1`` crashes that left jobs stuck
+        # "running" forever.
+        log.error(
+            "DP+ Prefect bootstrap: make_app failed; cannot run flows",
+            exc_info=True,
         )
-
-    # --- bind CKAN's SQLAlchemy model (makes Jobs(...).save() work) --------
-    try:
-        import sqlalchemy
-
-        import ckan.model as model
-
-        engine = sqlalchemy.engine_from_config(cfg, "sqlalchemy.")
-        model.init_model(engine)
-    except Exception as e:
-        log.warning(
-            "DP+ Prefect bootstrap: ckan.model.init_model failed (%s); "
-            "DB-touching tasks will fail until this is resolved",
-            e,
-        )
+        raise
 
 
 _bootstrap_ckan_app_context()
@@ -911,9 +877,19 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
 
     errored = False
     with tempfile.TemporaryDirectory() as temp_dir:
-        runtime = _build_runtime_context(job_input, temp_dir)
-        token = set_runtime_context(runtime)
+        # ``runtime`` / ``token`` are built *inside* the try so that a
+        # failure in _build_runtime_context (e.g. get_resource raising)
+        # is caught: mark_job_as_errored runs and the error callback
+        # fires, instead of the exception escaping the flow silently and
+        # leaving the job stuck "running" (set by the announce callback
+        # above). Both stay None until successfully built; the except /
+        # finally blocks guard on that.
+        runtime = None
+        token = None
         try:
+            runtime = _build_runtime_context(job_input, temp_dir)
+            token = set_runtime_context(runtime)
+
             if _resource_is_datastore_dump(runtime):
                 runtime.logger.info("Dump files are managed with the Datastore API")
                 dph.mark_job_as_completed(job_id, {"skipped": "datastore-managed"})
@@ -992,20 +968,23 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
         except utils.JobError as e:
             errored = True
             dph.mark_job_as_errored(job_id, str(e))
-            runtime.logger.error(f"DataPusher Plus error: {e}")
+            if runtime is not None:
+                runtime.logger.error(f"DataPusher Plus error: {e}")
             prefect_logger.error(f"DataPusher Plus error: {e}")
             raise
         except Exception as e:
             errored = True
             tb = traceback.format_tb(sys.exc_info()[2])[-1] + repr(e)
             dph.mark_job_as_errored(job_id, tb)
-            runtime.logger.error(
-                f"DataPusher Plus error: {e}, {traceback.format_exc()}"
-            )
+            if runtime is not None:
+                runtime.logger.error(
+                    f"DataPusher Plus error: {e}, {traceback.format_exc()}"
+                )
             prefect_logger.error(f"DataPusher Plus error: {e}")
             raise
         finally:
-            reset_runtime_context(token)
+            if token is not None:
+                reset_runtime_context(token)
             if result_url:
                 status = "error" if errored else "complete"
                 saved_ok = callback_datapusher_hook(
