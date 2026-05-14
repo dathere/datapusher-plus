@@ -141,6 +141,9 @@ def prefect_deploy(work_pool: str | None):
         error_shout(f"Prefect is not installed: {e}")
         raise click.Abort()
 
+    from pathlib import Path
+
+    import ckanext.datapusher_plus as dp_pkg
     from ckanext.datapusher_plus import prefect_client
     from ckanext.datapusher_plus.jobs.blocks import ensure_result_storage_block
 
@@ -173,12 +176,29 @@ def prefect_deploy(work_pool: str | None):
         "datapusher-plus/datapusher-plus",
     ).split("/", 1)[-1]
 
+    if not custom:
+        # Prefect 3 ``flow.deploy()`` requires either an image OR a
+        # storage location, even for local ``process`` workers. Point at
+        # the locally-installed DP+ source via ``from_source(...)`` so
+        # the worker pulls the flow from there at run time. For a custom
+        # flow, the operator is on the hook for arranging their own
+        # storage / image (typically via prefect.yaml).
+        dp_root = Path(dp_pkg.__file__).resolve().parent.parent.parent
+        click.echo(f"Source path: {dp_root}")
+        flow_to_deploy = flow_to_deploy.from_source(
+            source=str(dp_root),
+            entrypoint=(
+                "ckanext/datapusher_plus/jobs/prefect_flow.py:datapusher_plus_flow"
+            ),
+        )
+
     deployment_id = flow_to_deploy.deploy(
         name=deployment_name,
         work_pool_name=pool,
-        # Build the deployment from local source — no Docker image required
-        # for the default ``process`` worker. Operators using k8s/ECS pools
-        # can override via prefect.yaml at the repo root.
+        # ``image=None`` and ``push=False`` because the default ``process``
+        # worker reads source from the from_source path above, not from a
+        # Docker registry. Operators on k8s/ECS push pools provide a
+        # custom flow + their own prefect.yaml.
         image=None,
         push=False,
     )
