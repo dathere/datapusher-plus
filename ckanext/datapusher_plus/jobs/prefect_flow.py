@@ -298,12 +298,37 @@ def callback_datapusher_hook(result_url: str, job_dict: Dict[str, Any]) -> bool:
 # retry would fail identically.
 
 
+class _StageAbort(Exception):
+    """A stage returned ``None`` — the BaseStage "nothing to do" signal.
+
+    Per the ``BaseStage`` contract, ``process()`` may return ``None`` to
+    stop the rest of the pipeline gracefully (e.g. the Analysis stage on
+    a zero-record file logs "Upload skipped as there are zero records"
+    and returns ``None``). The v2 pipeline stopped there and the job
+    *completed* — nothing was wrong, there was simply nothing to load.
+
+    Raised by ``_stage_run`` and caught distinctly from ``JobError`` in
+    the flow so the job is marked complete-with-skip, not errored.
+    """
+
+    def __init__(self, stage_name: str):
+        self.stage_name = stage_name
+        super().__init__(
+            f"Stage {stage_name} stopped the pipeline (nothing to do)"
+        )
+
+
 def _stage_run(stage) -> RuntimeContext:
-    """Invoke a stage on the bound RuntimeContext, propagating None-aborts."""
+    """Invoke a stage on the bound RuntimeContext.
+
+    A stage returning ``None`` is the BaseStage "skip / nothing to do"
+    signal (per its docstring) — surfaced here as ``_StageAbort`` so the
+    flow can stop cleanly and mark the job *complete*, not errored.
+    """
     ctx = get_runtime_context()
     result = stage(ctx)
     if result is None:
-        raise utils.JobError(f"Stage {stage.name} aborted the pipeline")
+        raise _StageAbort(stage.name)
     return result
 
 
@@ -979,6 +1004,18 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
             )
             return None
 
+        except _StageAbort as e:
+            # A stage signalled "nothing to do" by returning None (e.g.
+            # the Analysis stage on a zero-record file). v2 stopped the
+            # pipeline here and the job *completed* — there was simply
+            # nothing to load. Match that: complete-with-skip, not an
+            # error. ``errored`` stays False so the finally block fires
+            # the "complete" callback.
+            if runtime is not None:
+                runtime.logger.info(str(e))
+            prefect_logger.info(str(e))
+            dph.mark_job_as_completed(job_id, {"skipped": e.stage_name})
+            return None
         except utils.JobError as e:
             errored = True
             dph.mark_job_as_errored(job_id, str(e))
