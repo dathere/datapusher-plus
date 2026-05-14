@@ -1043,47 +1043,6 @@ jobs:
           echo ""
           echo "Test completed at: $(date)"
 
-      - name: Diagnostics — Prefect worker + flow-run state
-        if: always()
-        env:
-          PREFECT_API_URL: http://localhost:4200/api
-        run: |
-          set +e
-          echo "=== /tmp/prefect_server.log (tail) ==="
-          tail -n 100 /tmp/prefect_server.log || true
-          echo "=== /tmp/prefect_worker.log (full) ==="
-          cat /tmp/prefect_worker.log || true
-          echo "=== /tmp/ckan_stdout.log (tail) ==="
-          tail -n 100 /tmp/ckan_stdout.log || true
-          echo "=== Prefect flow runs ==="
-          python3 - <<'PY'
-          import json, asyncio
-          try:
-              from prefect.client.orchestration import get_client
-          except Exception as e:
-              print("prefect client unavailable:", e); raise SystemExit(0)
-
-          async def main():
-              async with get_client() as client:
-                  runs = await client.read_flow_runs(limit=20)
-                  for r in runs:
-                      print(json.dumps({
-                          "id": str(r.id),
-                          "name": r.name,
-                          "state": r.state.type.value if r.state else None,
-                          "state_msg": r.state.message if r.state else None,
-                          "deployment_id": str(r.deployment_id) if r.deployment_id else None,
-                          "work_pool_name": r.work_pool_name,
-                          "work_queue_name": r.work_queue_name,
-                          "infrastructure_pid": r.infrastructure_pid,
-                      }, default=str))
-                  pools = await client.read_work_pools()
-                  for p in pools:
-                      print("pool:", json.dumps({"name": p.name, "type": p.type, "is_paused": p.is_paused, "concurrency_limit": p.concurrency_limit}, default=str))
-
-          asyncio.run(main())
-          PY
-
       - name: Generate Combined Test Results and Worker Analysis
         if: always()
         run: |
@@ -1412,6 +1371,8 @@ jobs:
             /tmp/ckan_stdout.log
             /tmp/ckan_worker.log
             /tmp/worker_analysis.csv
+            /tmp/prefect_server.log
+            /tmp/prefect_worker.log
           retention-days: 3
           
       - name: Cleanup
