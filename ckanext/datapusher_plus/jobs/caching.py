@@ -165,7 +165,11 @@ try:
     CONTENT_CACHE_POLICY = (
         CacheKeyFnPolicy(cache_key_fn=content_cache_key) + TASK_SOURCE
     )
-except Exception as e:  # pragma: no cover - older Prefect 3.x
+except ImportError as e:  # pragma: no cover - older Prefect 3.x
+    # Only a missing module is an expected fallback. A narrower catch
+    # than bare ``Exception`` so a real bug (e.g. a bad CacheKeyFnPolicy
+    # call, an incompatible ``+`` override) propagates instead of being
+    # silently swallowed into "caching disabled".
     log.debug("Falling back to bare cache_key_fn (cache_policies unavailable): %s", e)
     DOWNLOAD_CACHE_POLICY = None  # type: ignore
     CONTENT_CACHE_POLICY = None  # type: ignore

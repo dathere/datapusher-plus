@@ -241,13 +241,14 @@ def test_pii_review_rejection_raises_before_database_writes(
     from ckanext.datapusher_plus import utils
     from ckanext.datapusher_plus.jobs import prefect_flow
 
-    # Configure the AnalysisStage mock to flag two PII fields on the
-    # ProcessingContext that the task wrapper will then read.
+    # Configure the AnalysisStage mock to report two PII candidate
+    # matches on the ProcessingContext that the task wrapper reads.
     def _set_pii(ctx):
         ctx.pii_found = True
+        ctx.pii_candidate_count = 2
         ctx.headers_dicts = [
-            {"id": "email", "type": "text", "pii": True},
-            {"id": "ssn", "type": "text", "pii": True},
+            {"id": "email", "type": "text"},
+            {"id": "ssn", "type": "text"},
             {"id": "amount", "type": "numeric"},
         ]
         return ctx
@@ -280,14 +281,20 @@ def test_pii_review_rejection_raises_before_database_writes(
 
 
 def test_pii_review_approval_lets_flow_proceed(job_input, patched_dependencies):
-    """Approval continues into the transactional writes normally."""
+    """Crossing the threshold then approving continues into the writes.
+
+    Exercises the real gate: pii_candidate_count (2) > threshold (1)
+    triggers suspend_flow_run; an approving response lets the flow
+    complete normally.
+    """
     from unittest import mock
 
     from ckanext.datapusher_plus.jobs import prefect_flow
 
     def _set_pii(ctx):
         ctx.pii_found = True
-        ctx.headers_dicts = [{"id": "email", "type": "text", "pii": True}]
+        ctx.pii_candidate_count = 2
+        ctx.headers_dicts = [{"id": "email", "type": "text"}]
         return ctx
 
     prefect_flow.AnalysisStage.return_value.side_effect = _set_pii
@@ -303,11 +310,13 @@ def test_pii_review_approval_lets_flow_proceed(job_input, patched_dependencies):
     )
 
     with mock.patch.object(
-        prefect_flow, "_pii_review_threshold", return_value=0
-    ):
-        # Threshold = 0 disables suspension entirely; expected fast-path.
+        prefect_flow, "_pii_review_threshold", return_value=1
+    ), mock.patch(
+        "prefect.flow_runs.suspend_flow_run", return_value=approval
+    ) as suspend:
         prefect_flow.datapusher_plus_flow(job_input_real)
 
+    suspend.assert_called_once()
     patched_dependencies["mark_completed"].assert_called_once()
 
 

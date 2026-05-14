@@ -258,9 +258,10 @@ groups:
         editable: true
         default: 0
         description: |
-          When > 0 and PII screening detects this many sensitive fields,
-          the flow suspends and waits for human approval via the Prefect
-          UI before continuing.
+          When > 0 and PII screening finds more than this many PII
+          candidate matches, the flow suspends and waits for human
+          approval via the Prefect UI before continuing. (Quick-screen
+          mode only detects presence, reported as a single match.)
 
       - key: ckanext.datapusher_plus.result_storage_block
         editable: true

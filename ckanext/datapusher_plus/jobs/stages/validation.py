@@ -107,6 +107,7 @@ class ValidationStage(BaseStage):
         valid_path = f"{src}.valid.csv"
         invalid_path = f"{src}.invalid.csv"
         quarantined = 0
+        valid_count = 0
 
         try:
             with open(src, newline="", encoding="utf-8") as fh_in, \
@@ -139,6 +140,7 @@ class ValidationStage(BaseStage):
                         quarantined += 1
                     else:
                         valid_writer.writerow(row)
+                        valid_count += 1
         except csv.Error as e:
             # Clean up partial sibling files and re-raise.
             for p in (valid_path, invalid_path):
@@ -170,6 +172,14 @@ class ValidationStage(BaseStage):
 
         context.quarantined_rows = quarantined
         context.quarantine_csv_path = invalid_path
+        # Stash the clean-row count so validate_task can compute
+        # total_rows = valid + quarantined for the quarantine-threshold
+        # check. Without this, rows_to_copy is still 0 at validate time
+        # (AnalysisStage sets it later), which made the quarantine
+        # percentage 100% on every run with even one quarantined row.
+        # AnalysisStage overwrites rows_to_copy with the real record
+        # count downstream.
+        context.rows_to_copy = valid_count
         context.update_tmp(valid_path)
         context.logger.info(
             f"Quarantined {quarantined} malformed rows to {invalid_path}; "

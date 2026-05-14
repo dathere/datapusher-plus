@@ -183,13 +183,20 @@ def prefect_deploy(work_pool: str | None):
         # the worker pulls the flow from there at run time. For a custom
         # flow, the operator is on the hook for arranging their own
         # storage / image (typically via prefect.yaml).
-        dp_root = Path(dp_pkg.__file__).resolve().parent.parent.parent
-        click.echo(f"Source path: {dp_root}")
+        # Anchor the deployment source at the installed DP+ package
+        # directory itself, not three levels up. Walking ``.parent`` x3
+        # happens to land on the repo root for an editable install but
+        # lands in site-packages — or the wrong namespace-package root
+        # when other ``ckanext.*`` packages are installed alongside —
+        # for a regular install, leaving the entrypoint unresolvable at
+        # run time. ``dp_pkg.__file__`` is always
+        # ``<root>/ckanext/datapusher_plus/__init__.py``; its parent is
+        # the package dir, regardless of install layout.
+        dp_pkg_dir = Path(dp_pkg.__file__).resolve().parent
+        click.echo(f"Deploying flow from local source: {dp_pkg_dir}")
         flow_to_deploy = flow_to_deploy.from_source(
-            source=str(dp_root),
-            entrypoint=(
-                "ckanext/datapusher_plus/jobs/prefect_flow.py:datapusher_plus_flow"
-            ),
+            source=str(dp_pkg_dir),
+            entrypoint="jobs/prefect_flow.py:datapusher_plus_flow",
         )
 
     deployment_id = flow_to_deploy.deploy(
@@ -253,6 +260,11 @@ def migrate_from_rq(resubmit: bool, yes: bool):
 
     session = ckan_model.Session
     reset_count = 0
+    # Snapshot the resource_ids to resubmit *before* committing. With the
+    # default ``expire_on_commit=True``, reading ``ts.entity_id`` after the
+    # commit would re-SELECT each row (N round-trips) and raise
+    # ObjectDeletedError on any concurrently-deleted row.
+    resubmit_resource_ids: list[str] = []
     pending_tasks = (
         session.query(ckan_model.TaskStatus)
         .filter_by(task_type="datapusher_plus", state="pending")
@@ -265,6 +277,8 @@ def migrate_from_rq(resubmit: bool, yes: bool):
             value = {}
         if "flow_run_id" in value:
             continue  # Already on Prefect path.
+        if ts.entity_id:
+            resubmit_resource_ids.append(ts.entity_id)
         ts.state = "error"
         ts.error = json.dumps({"message": "migrated to Prefect; please resubmit"})
         ts.last_updated = datetime.datetime.utcnow()
@@ -286,14 +300,11 @@ def migrate_from_rq(resubmit: bool, yes: bool):
 
     # Optional: resubmit each drained resource through the new path.
     if resubmit:
-        # Use the recorded TaskStatus entity_ids since they are the actual
-        # resource_ids; the regex-scraped ones from RQ descriptions are a
-        # noisy fallback.
-        resource_ids = [
-            ts.entity_id for ts in pending_tasks if ts.entity_id
-        ]
-        click.echo(f"Resubmitting {len(resource_ids)} resource(s)...")
-        _submit(resource_ids)
+        # Use the pre-commit snapshot of TaskStatus entity_ids — they are
+        # the actual resource_ids; the regex-scraped ones from RQ
+        # descriptions are a noisy fallback.
+        click.echo(f"Resubmitting {len(resubmit_resource_ids)} resource(s)...")
+        _submit(resubmit_resource_ids)
 
     click.echo(
         "Migration complete. Stop any RQ worker processes and start "

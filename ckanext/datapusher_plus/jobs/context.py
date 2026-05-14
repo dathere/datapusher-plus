@@ -60,6 +60,7 @@ class ProcessingContext:
 
     # Processing flags and results
     pii_found: bool = False
+    pii_candidate_count: int = 0
     file_hash: str = ""
     content_length: int = 0
 

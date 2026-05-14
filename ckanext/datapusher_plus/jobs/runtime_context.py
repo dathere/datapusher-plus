@@ -162,6 +162,9 @@ class AnalyzeResult:
     resource_fields_stats: Dict[str, Any]
     resource_fields_freqs: Dict[str, Any]
     pii_found: bool
+    # Count of PII candidate matches — what the PII-review suspend gate
+    # thresholds on.
+    pii_candidate_count: int = 0
     # Propagated content fingerprint for downstream caching.
     file_hash: str = ""
 

@@ -71,57 +71,72 @@ def _bootstrap_ckan_app_context() -> None:
     ``load_environment`` — which populates ``ckan.common.config`` (what
     ``tk.config`` proxies to), binds ``ckan.model``, and loads every
     plugin + action — then builds the Flask stack. We push an
-    application context afterwards. After this, DP+'s ``config.py``
-    reads, ``Jobs(...).save()``, and local action calls all work just as
-    they do inside the CKAN web process.
+    application context afterwards.
 
-    An earlier attempt used a hand-rolled lightweight bootstrap (parse
-    ini, ``ckan.common.config.update``, bare Flask context,
-    ``model.init_model``). It was insufficient: only ``load_environment``
-    populates the action registry, so the flow crashed in
-    ``get_resource`` *before* its own ``try/except`` could record the
-    error — leaving jobs stuck "running" forever. The full bootstrap is
-    the correct analogue of how ``ckan jobs worker`` ran the v2 pipeline.
+    The checks run in order so the *only* thing left after them is a
+    genuine fresh worker subprocess:
 
-    No-op in three cases:
+    1. an app context already exists — imported from the CKAN web
+       process — no-op;
+    2. ``ckan.common.config`` is already populated — imported from a
+       ``ckan`` CLI command (e.g. ``datapusher_plus prefect-deploy``),
+       whose ``CtxObject`` already ran ``make_app`` — no-op;
+    3. otherwise we are a fresh interpreter that *must* bootstrap. A
+       missing/unreadable ``CKAN_INI`` here is fatal: continuing would
+       import ``config.py`` against an empty ``tk.config`` and silently
+       run the whole pipeline on hardcoded defaults (wrong datastore
+       URL, wrong PII rules, wrong proxy). Fail loud instead.
 
-    * ``CKAN_INI`` is unset — nothing to bootstrap from;
-    * an app context already exists — imported from the CKAN web process;
-    * ``ckan.common.config`` is already populated — imported from a
-      ``ckan`` CLI command (e.g. ``datapusher_plus prefect-deploy``),
-      whose ``CtxObject`` already ran ``make_app``. Re-running it would
-      load every plugin a second time.
+    An earlier attempt used a hand-rolled lightweight bootstrap. It was
+    insufficient: only ``load_environment`` populates the action
+    registry, so the flow crashed in ``get_resource`` *before* its own
+    ``try/except`` could record the error.
     """
-    ini = os.environ.get("CKAN_INI")
-    if not ini or not os.path.exists(ini):
-        return
+    # 1. Web process (or anything that already pushed an app context).
     try:
         from flask import has_app_context
-
-        if has_app_context():
-            return
-    except Exception:
+    except ImportError:
+        # Flask not importable — not a context we can or should bootstrap.
+        return
+    if has_app_context():
         return
 
-    # The CKAN CLI builds the app via its own CtxObject before our
-    # command imports this module — ``ckan.common.config`` is populated
-    # even though no app context is pushed. ``ckan.site_url`` is a
-    # required key always present once load_environment has run, and
-    # empty in a fresh worker interpreter; use it as the discriminator.
+    # 2. ``ckan`` CLI: CtxObject already ran make_app, so ckan.common.config
+    #    is populated even though no app context is pushed. ``ckan.site_url``
+    #    is a required key always present once load_environment has run, and
+    #    empty in a fresh worker interpreter.
     try:
         from ckan.common import config as ckan_config
 
         if ckan_config.get("ckan.site_url"):
             return
-    except Exception:
+    except ImportError:
         pass
 
     log = logging.getLogger(__name__)
+
+    # 3. Fresh interpreter — a Prefect worker subprocess. CKAN_INI is
+    #    mandatory here; a silent no-op would run the pipeline on stock
+    #    defaults.
+    ini = os.environ.get("CKAN_INI")
+    if not ini or not os.path.exists(ini):
+        raise RuntimeError(
+            "DP+ Prefect worker: CKAN_INI is unset or unreadable "
+            f"({ini!r}). The worker cannot resolve DP+ configuration; "
+            "set CKAN_INI in the deployment's job-variables env so the "
+            "worker subprocess inherits it."
+        )
+
     try:
         from ckan.cli import load_config
         from ckan.config.middleware import make_app
 
         ckan_app = make_app(load_config(ini))
+        # Pushed for the lifetime of this worker subprocess and never
+        # popped: the default ``process`` work pool runs exactly one
+        # flow per interpreter and exits, so the context does not
+        # accumulate across runs. (A work-pool type that reuses the
+        # interpreter would need an atexit pop here.)
         ckan_app._wsgi_app.app_context().push()
     except Exception:
         # A worker that cannot bootstrap CKAN cannot run any DP+ flow.
@@ -234,6 +249,13 @@ def _resolve_int(env_name: str, config_key: str, default: int) -> int:
     return default
 
 
+# These are read once at module import and baked into the ``@flow`` /
+# ``@task`` decorators below. The default ``process`` work pool spawns a
+# fresh Python interpreter per flow run, so it re-imports this module —
+# and re-reads these values — every run; env-var / ckan.ini changes take
+# effect immediately there. Operators on a work-pool type that reuses a
+# long-lived interpreter must restart their workers for a change to
+# these three knobs to take effect.
 _FLOW_TIMEOUT_SECONDS = _resolve_int(
     "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
     "ckanext.datapusher_plus.flow_timeout",
@@ -456,13 +478,12 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
     ctx = _stage_run(AnalysisStage())
     if ctx.pii_found:
         # Operators wire Prefect Automations to this event for alerting.
-        pii_fields = [
-            h.get("id") or h.get("name")
-            for h in ctx.headers_dicts
-            if isinstance(h, dict) and h.get("pii")
-        ]
+        # PII screening reports a candidate-match count, not per-column
+        # results, so the event carries the count rather than field names.
         events.emit_pii_detected(
-            resource_id=ctx.resource_id, fields=[f for f in pii_fields if f]
+            resource_id=ctx.resource_id,
+            fields=[],
+            details={"candidate_count": ctx.pii_candidate_count},
         )
     return AnalyzeResult(
         headers=list(ctx.headers),
@@ -472,6 +493,7 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
         resource_fields_stats=dict(ctx.resource_fields_stats),
         resource_fields_freqs=dict(ctx.resource_fields_freqs),
         pii_found=ctx.pii_found,
+        pii_candidate_count=ctx.pii_candidate_count,
         file_hash=prev.file_hash,
     )
 
@@ -576,31 +598,31 @@ def _runtime_or_none() -> Optional[RuntimeContext]:
 
 @database_task.on_rollback
 def _rollback_database(txn) -> None:
-    """Drop the datastore table when this run created it from empty."""
+    """Drop the datastore table on transactional failure.
+
+    The database stage's path is: delete any pre-existing table, create
+    an empty one, then COPY into it. So by the time a later task in the
+    transaction fails, the original content is already gone in *both*
+    the "created from empty" and "had pre-existing content" cases — what
+    is on disk is a half-written *new* table, not recoverable original
+    data. Dropping it unconditionally is strictly better than leaving
+    polluted contents an operator may not notice. (The earlier
+    ``existing_info`` branch claimed to "preserve" the original, but the
+    delete had already destroyed it.)
+    """
     runtime = _runtime_or_none()
     if runtime is None:
         return
     resource_id = runtime.resource_id
-    logger = runtime.logger
-    existing = runtime.existing_info
-    if not existing:
-        try:
-            dsu.delete_datastore_resource(resource_id)
-            logger.info(
-                f"Rollback: dropped datastore resource {resource_id} "
-                "after transactional failure"
-            )
-        except Exception as e:
-            logger.warning(
-                f"Rollback: could not drop datastore {resource_id}: {e}"
-            )
-    else:
-        # The resource already had datastore content before this run. We
-        # cannot safely revert without a snapshot — log and leave it.
-        logger.warning(
-            f"Rollback: datastore {resource_id} had pre-existing content "
-            "before this run; leaving partial writes in place for operator "
-            "review (see Prefect UI for the failed flow run)"
+    try:
+        dsu.delete_datastore_resource(resource_id)
+        runtime.logger.info(
+            f"Rollback: dropped datastore resource {resource_id} "
+            "after transactional failure"
+        )
+    except Exception as e:
+        runtime.logger.warning(
+            f"Rollback: could not drop datastore {resource_id}: {e}"
         )
 
 
@@ -772,15 +794,6 @@ def _pii_review_threshold() -> int:
     return _env_int("DATAPUSHER_PLUS_PII_REVIEW_THRESHOLD", 0)
 
 
-def _count_pii_fields(headers_dicts: List[Dict[str, Any]]) -> int:
-    """Count columns flagged as PII in the analysis output."""
-    return sum(
-        1
-        for h in headers_dicts
-        if isinstance(h, dict) and h.get("pii")
-    )
-
-
 def _maybe_suspend_for_pii_review(
     runtime: RuntimeContext, analysis: AnalyzeResult, job_input: JobInput
 ) -> None:
@@ -789,18 +802,23 @@ def _maybe_suspend_for_pii_review(
     Raises ``utils.JobError`` if the reviewer rejects. Returns normally
     (and lets the flow proceed into the transactional write group) when
     the reviewer approves or the threshold is not crossed.
+
+    Gated on ``analysis.pii_candidate_count`` — the real match count
+    surfaced by ``screen_for_pii``. (A previous version counted a ``pii``
+    key on ``headers_dicts`` that nothing ever set, so the gate could
+    never fire.)
     """
     threshold = _pii_review_threshold()
     if threshold <= 0 or PIIReviewApproval is None:
         return  # feature off
     if not analysis.pii_found:
         return
-    pii_count = _count_pii_fields(analysis.headers_dicts)
+    pii_count = analysis.pii_candidate_count
     if pii_count <= threshold:
         return
 
     runtime.logger.warning(
-        f"PII review threshold exceeded: {pii_count} fields flagged "
+        f"PII review threshold exceeded: {pii_count} candidate matches "
         f"(threshold={threshold}). Suspending flow for operator review "
         "via the Prefect UI."
     )
@@ -903,8 +921,6 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
         f"Starting datapusher-plus flow for resource {job_input.resource_id}"
     )
 
-    _validate_input(job_input.input)
-
     flow_run_id = prefect_client.get_current_flow_run_id()
     job_id = job_input.task_id
 
@@ -915,6 +931,15 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
     except sa.exc.IntegrityError:
         raise utils.JobError("Job already exists.")
     dph.set_aps_job_id(job_id, flow_run_id)  # column repurposed for flow_run_id
+
+    # Validate the input only after the Jobs row exists, so a malformed
+    # submission is recorded as an errored job (visible via
+    # datapusher_status / the CKAN UI) instead of raising with no trace.
+    try:
+        _validate_input(job_input.input)
+    except utils.JobError as e:
+        dph.mark_job_as_errored(job_id, str(e))
+        raise
 
     # Announce running state to CKAN.
     result_url = job_input.input.get("result_url")
