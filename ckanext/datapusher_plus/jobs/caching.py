@@ -2,27 +2,26 @@
 """
 Result-persistence and cache-key configuration for the Prefect flow.
 
-The v3.0 flow turns on two distinct Prefect features:
+**Result persistence** (``persist_result=True`` + ``result_storage=...``)
+is active: every task output is checkpointed so operators can open a
+task's output from the Prefect UI to debug bad data.
 
-1. **Result persistence** (``persist_result=True`` +
-   ``result_storage=...``) — every task output is checkpointed to the
-   configured storage block. Two payoffs:
+**Content-based caching is currently DISABLED.** The cache-key
+functions and policies below are kept for when it can be safely
+re-enabled, but ``prefect_flow.py`` no longer passes ``cache_policy=``
+to any task. The reason: the stage tasks carry their real state
+(headers, file paths, row counts) in the ``RuntimeContext`` shared via
+a ``ContextVar``, *not* in their return-value dataclasses. A cache
+*hit* makes Prefect skip the task body — which is exactly the code that
+populates ``RuntimeContext`` — so a downstream task then reads empty
+state (observed as ``COPY "<table>" () FROM STDIN`` when two resources
+shared identical file content and the second hit the cache).
 
-   * "Re-run from failed task" works in the Prefect UI: only the failed
-     and downstream tasks re-execute; completed work is replayed from
-     the persisted result.
-   * Operators can open any task's output from the Prefect UI to debug
-     bad data.
-
-2. **Content-based caching** (``cache_key_fn=...``) on the read-only
-   stages (download / format-convert / validate / analyze). Same
-   resource URL + same file content = reuse the previous task's output.
-   A re-submission of an unchanged resource skips the expensive work.
-
-   The destructive stages — database load, indexing, formula evaluation,
-   metadata write-back — are **intentionally not cached**: their value
-   is the side effect on the datastore, not the return value. Caching
-   them would skip the actual ingestion.
+Re-enabling caching requires first making each per-stage result
+dataclass fully self-contained (the deferred "ProcessingContext
+retirement" work), so a cache hit reconstitutes everything the next
+task needs from the cached result rather than from shared mutable
+state.
 """
 
 from __future__ import annotations

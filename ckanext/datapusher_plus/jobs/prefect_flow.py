@@ -153,17 +153,11 @@ from prefect.transactions import transaction
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
 import ckanext.datapusher_plus.helpers as dph
+import ckanext.datapusher_plus.job_exceptions as job_exceptions
 import ckanext.datapusher_plus.prefect_client as prefect_client
 import ckanext.datapusher_plus.utils as utils
 from ckanext.datapusher_plus.jobs import artifacts, events, quarantine
-from ckanext.datapusher_plus.jobs.caching import (
-    CONTENT_CACHE_POLICY,
-    DEFAULT_CACHE_EXPIRATION,
-    DEFAULT_RESULT_STORAGE,
-    DOWNLOAD_CACHE_POLICY,
-    content_cache_key,
-    download_cache_key,
-)
+from ckanext.datapusher_plus.jobs.caching import DEFAULT_RESULT_STORAGE
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
 from ckanext.datapusher_plus.jobs.runtime_context import (
     AnalyzeResult,
@@ -313,21 +307,43 @@ def _stage_run(stage) -> RuntimeContext:
     return result
 
 
+# Both JobError hierarchies in the codebase (``utils.JobError`` and
+# ``job_exceptions.JobError``, the latter the parent of ``HTTPError`` /
+# ``LoaderError``) represent deterministic data failures — a malformed
+# CSV, a failed RFC-4180 validation, a bad COPY. Re-running the task
+# reproduces the identical failure; the only effect of a retry is to
+# delay the inevitable while tying up the single worker slot and backing
+# up the queue behind it.
+_DETERMINISTIC_ERRORS = (utils.JobError, job_exceptions.JobError)
+
+
+def _retry_if_transient(task, task_run, state) -> bool:
+    """Prefect ``retry_condition_fn``: retry transient failures only.
+
+    Invoked only on a failed task run. Returns ``False`` (no retry) for
+    the deterministic DP+ JobError hierarchies and ``True`` for anything
+    else (network blips, momentary Postgres unavailability) — those are
+    worth another attempt.
+    """
+    try:
+        state.result()
+    except _DETERMINISTIC_ERRORS:
+        return False
+    except Exception:
+        return True
+    return True
+
+
 @task(
     name="download",
     retries=_TASK_RETRY_DOWNLOAD,
     retry_delay_seconds=[10, 60, 300],
+    retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "io-bound"],
-    # Persistence: every output is checkpointed so a re-run from the
-    # Prefect UI replays only the failed and downstream tasks.
+    # Persistence: every output is checkpointed so operators can inspect
+    # a task's output from the Prefect UI.
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    # Cross-run caching keyed on (resource_id, URL) when ignore_hash is
-    # False. ``DOWNLOAD_CACHE_POLICY`` composes our custom key with
-    # ``TASK_SOURCE`` so a DP+ upgrade that changes this task's body
-    # invalidates stale caches automatically.
-    cache_policy=DOWNLOAD_CACHE_POLICY,
-    cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def download_task(job_input: JobInput) -> DownloadResult:
     """Fetch the resource file. Idempotent w.r.t. (URL, file_hash)."""
@@ -345,12 +361,10 @@ def download_task(job_input: JobInput) -> DownloadResult:
     name="format-convert",
     retries=1,
     retry_delay_seconds=30,
+    retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "qsv-subprocess"],
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    # Content-based: same input file_hash + same task source = same output.
-    cache_policy=CONTENT_CACHE_POLICY,
-    cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def format_convert_task(prev: DownloadResult) -> ConvertResult:
     """Excel/ODS/Shapefile/GeoJSON/ZIP → CSV via qsv."""
@@ -368,8 +382,6 @@ def format_convert_task(prev: DownloadResult) -> ConvertResult:
     tags=["datapusher-plus", "qsv-subprocess"],
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    cache_policy=CONTENT_CACHE_POLICY,
-    cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def validate_task(prev: ConvertResult) -> ValidateResult:
     """RFC-4180 validation with quarantine, encoding normalization, dedup."""
@@ -399,11 +411,10 @@ def validate_task(prev: ConvertResult) -> ValidateResult:
     name="analyze",
     retries=1,
     retry_delay_seconds=60,
+    retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "qsv-subprocess", "cpu-bound"],
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
-    cache_policy=CONTENT_CACHE_POLICY,
-    cache_expiration=DEFAULT_CACHE_EXPIRATION,
 )
 def analyze_task(prev: ValidateResult) -> AnalyzeResult:
     """qsv stats + frequency + type inference + PII screening."""
@@ -434,6 +445,7 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
     name="database-load",
     retries=_TASK_RETRY_DATABASE,
     retry_delay_seconds=30,
+    retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "datastore-copy"],
     # Persist so operators can inspect the row counts and existing_info
     # snapshot after a run. No cache_key_fn — the task's value is the
@@ -455,6 +467,7 @@ def database_task(prev: AnalyzeResult) -> DatabaseResult:
     name="auto-index",
     retries=1,
     retry_delay_seconds=30,
+    retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "datastore-copy"],
     # Destructive (creates Postgres indexes); persisted but not cached.
     persist_result=True,
@@ -485,6 +498,7 @@ def formula_task(prev: IndexingResult) -> FormulaResult:
     name="metadata",
     retries=1,
     retry_delay_seconds=15,
+    retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus"],
     # Writes datastore alias + dpp_suggestions back to CKAN; persisted
     # for observability, not cached.

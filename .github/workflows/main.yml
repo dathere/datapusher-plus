@@ -782,8 +782,13 @@ jobs:
           failed_files=0
           skipped_files=0
           
-          # Process each line from CSV (skip header)
-          tail -n +2 "$CSV_INPUT_FILE" | while IFS=',' read -r file_name file_url file_format file_mimetype file_desc || [ -n "$file_name" ]; do
+          # Process each line from CSV (skip header).
+          # Process substitution (not `tail | while`) keeps the loop in
+          # the main shell — a pipe would run it in a subshell and the
+          # passed_files/failed_files/total_files counters would be lost,
+          # leaving the step to report "NO FILES TESTED" and exit 0 even
+          # when every file failed.
+          while IFS=',' read -r file_name file_url file_format file_mimetype file_desc || [ -n "$file_name" ]; do
             # Skip empty lines and comments
             [ -z "$file_name" ] && continue
             case "$file_name" in
@@ -979,9 +984,9 @@ jobs:
             # Brief pause between files to avoid overwhelming the system
             echo "  Waiting 3 seconds before next file..."
             sleep 3
-            
-          done
-          
+
+          done < <(tail -n +2 "$CSV_INPUT_FILE")
+
           # Count skipped files from CSV
           if [ -f /tmp/skipped_files.csv ]; then
             skipped_count=$(tail -n +2 /tmp/skipped_files.csv | wc -l)
