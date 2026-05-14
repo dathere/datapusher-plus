@@ -835,14 +835,20 @@ def _maybe_suspend_for_pii_review(
         return  # feature off
     if not analysis.pii_found:
         return
+
     pii_count = analysis.pii_candidate_count
-    if pii_count <= threshold:
+    # Quick-screen mode only detects PII *presence* — pii_candidate_count
+    # is a degenerate 1 that no numeric threshold could ever exceed. So
+    # in quick-screen mode any detected PII crosses the gate (the
+    # threshold acts purely as the feature on/off switch). Full
+    # screening thresholds on the real candidate-match count.
+    if not conf.PII_QUICK_SCREEN and pii_count <= threshold:
         return
 
     runtime.logger.warning(
-        f"PII review threshold exceeded: {pii_count} candidate matches "
-        f"(threshold={threshold}). Suspending flow for operator review "
-        "via the Prefect UI."
+        f"PII review gate crossed: {pii_count} candidate match(es) "
+        f"(threshold={threshold}, quick_screen={conf.PII_QUICK_SCREEN}). "
+        "Suspending flow for operator review via the Prefect UI."
     )
 
     from prefect.flow_runs import suspend_flow_run

@@ -267,10 +267,12 @@ groups:
         editable: true
         default: 0
         description: |
-          When > 0 and PII screening finds more than this many PII
+          When > 0 and full PII screening finds more than this many PII
           candidate matches, the flow suspends and waits for human
-          approval via the Prefect UI before continuing. (Quick-screen
-          mode only detects presence, reported as a single match.)
+          approval via the Prefect UI before continuing. In quick-screen
+          mode (``pii_quick_screen = true``) only PII *presence* is
+          detected, so any value > 0 makes the flow suspend whenever PII
+          is found at all (the threshold acts purely as on/off there).
 
       - key: ckanext.datapusher_plus.result_storage_block
         editable: true

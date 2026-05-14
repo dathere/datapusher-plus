@@ -283,6 +283,10 @@ def migrate_from_rq(resubmit: bool, yes: bool):
             value = {}
         if "flow_run_id" in value:
             continue  # Already on Prefect path.
+        # Snapshot only the tasks being reset here. Tasks already on the
+        # Prefect path (continue'd above) are intentionally excluded so
+        # --resubmit does not double-submit a flow that is already
+        # running.
         if ts.entity_id:
             resubmit_resource_ids.append(ts.entity_id)
         ts.state = "error"

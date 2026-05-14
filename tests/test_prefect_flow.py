@@ -320,6 +320,52 @@ def test_pii_review_approval_lets_flow_proceed(job_input, patched_dependencies):
     patched_dependencies["mark_completed"].assert_called_once()
 
 
+def test_pii_review_quick_screen_suspends_on_any_pii(
+    job_input, patched_dependencies
+):
+    """In quick-screen mode the gate fires on PII presence alone.
+
+    Quick screen reports a degenerate pii_candidate_count of 1, which no
+    numeric threshold could ever exceed — so the gate must treat
+    presence alone as crossing it when conf.PII_QUICK_SCREEN is True,
+    with the threshold acting purely as the feature on/off switch.
+    """
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    def _set_pii(ctx):
+        ctx.pii_found = True
+        ctx.pii_candidate_count = 1  # quick-screen's degenerate count
+        ctx.headers_dicts = [{"id": "email", "type": "text"}]
+        return ctx
+
+    prefect_flow.AnalysisStage.return_value.side_effect = _set_pii
+    approval = mock.MagicMock(approve=True, reviewer="bob", notes="ok")
+
+    job_input_real = prefect_flow.JobInput(
+        task_id=job_input.task_id,
+        resource_id=job_input.resource_id,
+        ckan_url=job_input.ckan_url,
+        input=job_input.input,
+        dry_run=False,
+    )
+
+    # threshold=5 would NOT be exceeded by count=1 in full-screen mode;
+    # quick-screen must suspend anyway.
+    with mock.patch.object(
+        prefect_flow, "_pii_review_threshold", return_value=5
+    ), mock.patch.object(
+        prefect_flow.conf, "PII_QUICK_SCREEN", True
+    ), mock.patch(
+        "prefect.flow_runs.suspend_flow_run", return_value=approval
+    ) as suspend:
+        prefect_flow.datapusher_plus_flow(job_input_real)
+
+    suspend.assert_called_once()
+    patched_dependencies["mark_completed"].assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # Early exit on datastore-managed URLs
 # ---------------------------------------------------------------------------
