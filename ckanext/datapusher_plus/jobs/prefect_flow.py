@@ -61,25 +61,28 @@ def _bootstrap_ckan_app_context() -> None:
     """Bring up just enough CKAN in a Prefect worker subprocess.
 
     The ``process`` worker spawns a fresh Python interpreter per flow
-    run; CKAN's normal startup never happens. Two things break without
-    a bootstrap:
+    run; CKAN's normal startup never happens. Three things break
+    without a bootstrap:
 
-    1. ``tk.config`` (a proxy to ``flask.current_app.config``) is empty,
-       so DP+'s ``config.py`` module-level reads return ``None`` and
-       crash the import.
+    1. ``tk.config`` — which is the module-level ``ckan.common.config``
+       singleton, NOT ``flask.current_app.config`` — is empty, so DP+
+       config reads return ``None``.
     2. CKAN's SQLAlchemy ``model.Session`` has no engine bound, so the
-       first ``Jobs(...).save()`` raises ``UnboundExecutionError:
-       Could not locate a bind configured on mapper``.
+       first ``Jobs(...).save()`` raises ``UnboundExecutionError``.
+    3. Flask-context-dependent helpers have no application context.
 
     We deliberately avoid ``make_flask_stack`` / ``load_environment`` —
-    they load the full plugin chain (re-importing DP+ and risking
-    recursion; ``make_flask_stack`` also tripped a NoneType.split error
-    in CI run 25838697116). Instead:
+    they load the full plugin chain (risking recursion) and
+    ``make_flask_stack`` tripped a NoneType.split error in CI run
+    25838697116. Instead:
 
     * parse the ini (``ckan.cli.load_config``, ``configparser`` fallback);
-    * push a bare Flask app context populated from it (fixes #1);
+    * ``ckan.common.config.update(cfg)`` — this is what actually makes
+      ``tk.config.get(...)`` return real values;
+    * push a bare Flask app context for the Flask-context-dependent
+      code paths;
     * build a SQLAlchemy engine from ``sqlalchemy.url`` and call
-      ``ckan.model.init_model`` (fixes #2).
+      ``ckan.model.init_model``.
 
     All steps are individually wrapped — a failure is logged and the
     downstream DP+ import / first DB call surfaces the real error.
@@ -127,7 +130,20 @@ def _bootstrap_ckan_app_context() -> None:
             )
             return
 
-    # --- push a Flask app context (makes tk.config work) -------------------
+    # --- populate ckan.common.config (makes tk.config.get work) -----------
+    # This is the critical step: ``tk.config`` proxies to this singleton,
+    # not to Flask's app config.
+    try:
+        from ckan.common import config as ckan_config
+
+        ckan_config.update(cfg)
+    except Exception as e:
+        log.warning(
+            "DP+ Prefect bootstrap: ckan.common.config.update failed: %s", e
+        )
+        return
+
+    # --- push a Flask app context (for Flask-context-dependent code) ------
     try:
         app = Flask("dpp-prefect-worker")
         for key, value in cfg.items():
@@ -137,7 +153,6 @@ def _bootstrap_ckan_app_context() -> None:
         log.warning(
             "DP+ Prefect bootstrap: Flask app context push failed: %s", e
         )
-        return
 
     # --- bind CKAN's SQLAlchemy model (makes Jobs(...).save() work) --------
     try:
