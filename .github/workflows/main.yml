@@ -1467,10 +1467,12 @@ jobs:
           echo "Stopping any running CKAN processes..."
           pkill -f "ckan.*run" || true
           echo "Stopping Prefect server and worker..."
-          # Prefer the PIDs the start steps exported -- killing the
-          # process group reaps the uvicorn/scheduler children that
-          # `pkill -f "prefect server start"` misses. Fall back to pkill
-          # if the PIDs were never set (start step failed early).
+          # The start steps launch the servers with a plain `nohup ... &`,
+          # so the exported PIDs are ordinary PIDs (not process-group
+          # leaders) -- `kill "$pid"` signals only the parent. The
+          # `pkill -f` lines below are what actually sweep the
+          # uvicorn/scheduler children. On GitHub-hosted runners the VM
+          # is torn down regardless, so this is best-effort tidy-up.
           for pid in "${PREFECT_WORKER_PID:-}" "${PREFECT_SERVER_PID:-}"; do
             [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
           done
