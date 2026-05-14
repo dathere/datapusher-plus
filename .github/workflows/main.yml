@@ -783,11 +783,15 @@ jobs:
           skipped_files=0
           
           # Process each line from CSV (skip header).
-          # Process substitution (not `tail | while`) keeps the loop in
-          # the main shell — a pipe would run it in a subshell and the
-          # passed_files/failed_files/total_files counters would be lost,
-          # leaving the step to report "NO FILES TESTED" and exit 0 even
-          # when every file failed.
+          # Redirect the loop from a header-stripped temp file rather
+          # than `tail -n +2 ... | while` — a pipe runs the loop in a
+          # subshell, so passed_files/failed_files/total_files would be
+          # lost and the step would report "NO FILES TESTED" and exit 0
+          # even when every file failed. This step runs under `sh` (the
+          # container default), so bash process substitution `< <(...)`
+          # is NOT available — a plain file redirect is the portable way.
+          CSV_BODY=$(mktemp)
+          tail -n +2 "$CSV_INPUT_FILE" > "$CSV_BODY"
           while IFS=',' read -r file_name file_url file_format file_mimetype file_desc || [ -n "$file_name" ]; do
             # Skip empty lines and comments
             [ -z "$file_name" ] && continue
@@ -985,7 +989,8 @@ jobs:
             echo "  Waiting 3 seconds before next file..."
             sleep 3
 
-          done < <(tail -n +2 "$CSV_INPUT_FILE")
+          done < "$CSV_BODY"
+          rm -f "$CSV_BODY"
 
           # Count skipped files from CSV
           if [ -f /tmp/skipped_files.csv ]; then
