@@ -21,7 +21,7 @@ on:
       polling_timeout_seconds:
         description: 'Max seconds to wait for DataPusher to process each file'
         required: false
-        default: '20'
+        default: '90'
         type: string
 
 concurrency:
@@ -34,7 +34,10 @@ permissions:
 env:
   FILES_DIR: ${{ github.event.inputs.testing_directory || 'quick' }}
   QSV_VER: ${{ github.event.inputs.qsv_version || '20.0.0' }}
-  POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '20' }}
+  # 90s ceiling (45 polls x 2s): a Prefect flow run spawns a fresh interpreter
+  # and bootstraps the full CKAN app context, so per-job latency is ~20-30s --
+  # well above the old RQ path. Matches main.yml's polling window.
+  POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '90' }}
   TESTING_REPO_RAW: 'https://raw.githubusercontent.com/dathere/datapusher-plus_testing/main'
   TESTING_REPO_API: 'https://api.github.com/repos/dathere/datapusher-plus_testing/contents'
   CKAN_VERSION: "2.11"
