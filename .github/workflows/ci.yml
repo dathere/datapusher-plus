@@ -127,6 +127,9 @@ jobs:
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='datastore_test'" | grep -q 1 || \
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;"
+          # Prefect server backing database (shared Postgres; separate logical DB).
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='prefect_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE prefect_test OWNER postgres;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;"
@@ -410,6 +413,12 @@ jobs:
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_bytecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
+          # v3.0: ingestion runs on Prefect instead of RQ.
+          ckanext.datapusher_plus.prefect_deployment_name = datapusher-plus/datapusher-plus
+          ckanext.datapusher_plus.prefect_work_pool = datapusher-plus
+          ckanext.datapusher_plus.prefect_ui_base = http://localhost:4200
+          ckanext.datapusher_plus.flow_timeout = 600
+          ckanext.datapusher_plus.max_quarantine_pct = 5.0
           EOF
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             awk 'BEGIN{in_sect=0}
@@ -584,9 +593,66 @@ jobs:
             echo "Datastore write access failed"; exit 1
           fi
 
+      - name: Start Prefect server
+        env:
+          PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:${{ env.POSTGRES_PASSWORD }}@postgres:5432/prefect_test
+          PREFECT_SERVER_API_HOST: 0.0.0.0
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          echo "PREFECT_API_URL=http://localhost:4200/api" >> $GITHUB_ENV
+          echo "Starting Prefect server (Postgres-backed) on :4200..."
+          nohup prefect server start > /tmp/prefect_server.log 2>&1 &
+          PREFECT_SERVER_PID=$!
+          echo "PREFECT_SERVER_PID=$PREFECT_SERVER_PID" >> $GITHUB_ENV
+          # Server start can take 30-60s on first run while Alembic migrations apply.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4200/api/health > /dev/null 2>&1; then
+              echo "Prefect server is healthy after ${i}s"
+              break
+            fi
+            if ! kill -0 "$PREFECT_SERVER_PID" >/dev/null 2>&1; then
+              echo "Prefect server died:"
+              tail -n 80 /tmp/prefect_server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:4200/api/health || (tail -n 80 /tmp/prefect_server.log; exit 1)
+
+      - name: Register DataPusher+ deployment
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          ckan -c /srv/app/src/ckan/test-core.ini datapusher_plus prefect-deploy
+
+      - name: Start Prefect worker
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+          CKAN_INI: /srv/app/src/ckan/test-core.ini
+        run: |
+          set -eu
+          echo "Starting Prefect worker on the datapusher-plus pool..."
+          nohup prefect worker start --pool datapusher-plus > /tmp/prefect_worker.log 2>&1 &
+          PREFECT_WORKER_PID=$!
+          echo "PREFECT_WORKER_PID=$PREFECT_WORKER_PID" >> $GITHUB_ENV
+          sleep 5
+          if kill -0 "$PREFECT_WORKER_PID" >/dev/null 2>&1; then
+            echo "Prefect worker started"
+            head -n 30 /tmp/prefect_worker.log || true
+          else
+            echo "Prefect worker failed to start"
+            cat /tmp/prefect_worker.log
+            exit 1
+          fi
+
       - name: Start CKAN background job worker
         run: |
           set -eu
+          # As of DP+ v3.0 the ingestion pipeline runs on Prefect, not RQ.
+          # CKAN's RQ worker is still started because other CKAN extensions
+          # (search reindex, mailer, etc.) rely on it.
           nohup ckan -c /srv/app/src/ckan/test-core.ini jobs worker > /tmp/ckan_worker.log 2>&1 &
           WORKER_PID=$!
           echo "CKAN Worker PID=$WORKER_PID"
@@ -821,9 +887,13 @@ jobs:
             fi
             total_files_in_dir=$((total_tests + skipped_count))
             if [ $total_tests -gt 0 ]; then
-              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
+              # `grep -c` always prints the count to stdout, then exits 1 when
+              # there are zero matches. `|| true` swallows that exit status
+              # while keeping grep's "0"; `|| echo "0"` would instead append a
+              # SECOND line, yielding a two-line value that breaks $(( )) below.
+              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || true)
               failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
-              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
+              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || true)
               error_count=$(echo "$error_count" | tr -d '\n')
               tested_success_rate=$(( passed * 100 / total_tests ))
               [ $total_files_in_dir -gt 0 ] && overall_success_rate=$(( passed * 100 / total_files_in_dir ))
@@ -904,8 +974,8 @@ jobs:
                 done
                 echo ""
 
-                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
-                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
+                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || true)
+                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || true)
 
                 echo "## File Analysis"
                 echo ""
@@ -1020,6 +1090,8 @@ jobs:
             /tmp/ckan_stdout.log
             /tmp/ckan_worker.log
             /tmp/worker_analysis.csv
+            /tmp/prefect_server.log
+            /tmp/prefect_worker.log
           retention-days: 7
 
       - name: Cleanup
@@ -1027,6 +1099,16 @@ jobs:
         run: |
           kill $CKAN_PID 2>/dev/null || true
           kill $CKAN_WORKER_PID 2>/dev/null || true
+          echo "Stopping Prefect server and worker..."
+          # The start steps launch the servers with a plain `nohup ... &`, so the
+          # exported PIDs are ordinary PIDs (not process-group leaders) -- `kill`
+          # signals only the parent. The `pkill -f` lines sweep the
+          # uvicorn/scheduler children.
+          for pid in "${PREFECT_WORKER_PID:-}" "${PREFECT_SERVER_PID:-}"; do
+            [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+          done
+          pkill -f "prefect server start" || true
+          pkill -f "prefect worker start" || true
           echo "Cleanup completed"
 
       - name: Check test results
