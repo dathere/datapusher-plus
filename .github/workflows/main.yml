@@ -400,24 +400,32 @@ jobs:
             echo "ckan db init returned non-zero; continuing (may already be initialized)."
           fi
           echo "Setting datastore permissions..."
-          # pipefail so a crash in `ckan` (or grep) fails the step too --
-          # without it only psql's exit status is checked, and psql
-          # succeeds happily on an empty stream.
-          set -o pipefail
+          # This step's shell is `sh` (dash) on the ckan-dev image, which has
+          # no `set -o pipefail`. To still catch a crash in `ckan` (without it
+          # only psql's exit status is checked, and psql succeeds happily on an
+          # empty stream), capture the SQL to a file and check `ckan`'s exit
+          # status directly before piping it into psql.
+          PERMS_SQL="$(mktemp)"
+          if ! ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions > "$PERMS_SQL"; then
+            echo "ckan datastore set-permissions failed."
+            cat "$PERMS_SQL"
+            rm -f "$PERMS_SQL"
+            exit 1
+          fi
           # CKAN 2.11 emits a CSRF deprecation warning to stdout before the
           # SQL output, which would otherwise be piped into psql and trip a
           # syntax error on the timestamp prefix. Strip only lines matching
           # CKAN's actual log-line format (ISO-8601 timestamp + level), so a
           # future SQL line that merely starts with a date is not dropped.
-          if ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions \
-              | grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}' \
+          if grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}' "$PERMS_SQL" \
               | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
             echo "Datastore permissions set."
           else
             echo "Datastore permission step failed."
+            rm -f "$PERMS_SQL"
             exit 1
           fi
-          set +o pipefail
+          rm -f "$PERMS_SQL"
       - name: Start CKAN server
         run: |
           set -eu
