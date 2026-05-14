@@ -68,6 +68,17 @@ def __getattr__(name: str):
     )
 
 
+def __dir__():
+    """Surface the PEP 562 lazy names in introspection.
+
+    Without this, ``dir(...)`` / REPL tab-completion / reflection-based
+    discovery miss the lazily-resolved names even though they are in
+    ``__all__`` — and listing them here does not force the Prefect
+    import (only attribute *access* does).
+    """
+    return sorted({*globals(), *__all__})
+
+
 __all__ = [
     "datapusher_plus_flow",
     "datapusher_plus_to_datastore",

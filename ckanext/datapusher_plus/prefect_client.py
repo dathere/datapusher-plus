@@ -273,7 +273,12 @@ def ensure_work_pool(name: str, pool_type: str = "process") -> None:
         from prefect.client.orchestration import get_client
         from prefect.client.schemas.actions import WorkPoolCreate
         from prefect.exceptions import ObjectAlreadyExists
-    except Exception as e:
+    except ImportError as e:
+        # Only a missing module is the expected "Prefect not installed"
+        # case. A broader catch would swallow a real fault (e.g. a
+        # renamed WorkPoolCreate on a Prefect major bump) and let
+        # flow.deploy() fail later with the cryptic ObjectNotFound this
+        # helper exists to prevent.
         log.warning("Prefect client unavailable for work-pool ensure: %s", e)
         return
 
@@ -289,4 +294,16 @@ def ensure_work_pool(name: str, pool_type: str = "process") -> None:
 
     import asyncio
 
-    asyncio.run(_ensure())
+    # Sync-only: this helper is called from the synchronous
+    # ``prefect-deploy`` CLI. Invoking it from inside a running event
+    # loop would make ``asyncio.run`` raise an opaque RuntimeError;
+    # detect that and fail with a clear message instead.
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        asyncio.run(_ensure())
+    else:
+        raise RuntimeError(
+            "ensure_work_pool() is synchronous and cannot be called from "
+            "within a running event loop."
+        )

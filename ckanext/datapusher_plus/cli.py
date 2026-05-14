@@ -150,10 +150,16 @@ def prefect_deploy(work_pool: str | None):
     pool = work_pool or tk.config.get(
         "ckanext.datapusher_plus.prefect_work_pool", "datapusher-plus"
     )
+    pool_type = tk.config.get(
+        "ckanext.datapusher_plus.prefect_work_pool_type", "process"
+    )
     # Auto-create the work pool if missing; Prefect 3 ``flow.deploy``
-    # does not bootstrap pools on its own.
-    prefect_client.ensure_work_pool(pool)
-    click.echo(f"Work pool: {pool}")
+    # does not bootstrap pools on its own. The type defaults to
+    # ``process`` — operators on k8s/Docker/ECS set
+    # ``ckanext.datapusher_plus.prefect_work_pool_type`` so the pool is
+    # created with the right topology rather than a silent ``process``.
+    prefect_client.ensure_work_pool(pool, pool_type=pool_type)
+    click.echo(f"Work pool: {pool} (type: {pool_type})")
     block_id = ensure_result_storage_block()
     click.echo(f"Result-storage block: {block_id}")
 

@@ -361,7 +361,19 @@ def _stage_run(stage) -> RuntimeContext:
 # reproduces the identical failure; the only effect of a retry is to
 # delay the inevitable while tying up the single worker slot and backing
 # up the queue behind it.
+#
+# ``job_exceptions.HTTPError`` is the exception: the download stage
+# wraps *both* deterministic 4xx responses *and* genuinely transient
+# failures (connection resets, DNS, timeouts -> status_code is None;
+# 5xx server errors) in it. ``_retry_if_transient`` therefore special-
+# cases HTTPError ahead of the deterministic catch so download retries
+# are not a dead no-op.
 _DETERMINISTIC_ERRORS = (utils.JobError, job_exceptions.JobError)
+
+# HTTP status codes worth retrying — transient server-side / rate-limit
+# conditions. A status of ``None`` (connection/DNS/timeout) is likewise
+# retried; deterministic 4xx (404/401/403) is not.
+_RETRYABLE_HTTP_STATUS = {408, 429, 500, 502, 503, 504}
 
 
 def _retry_if_transient(task, task_run, state) -> bool:
@@ -374,16 +386,26 @@ def _retry_if_transient(task, task_run, state) -> bool:
       to hit the identical abort after a pointless backoff delay before
       the flow's ``except _StageAbort`` handler can mark the job
       complete-with-skip.
+    * deterministic 4xx ``HTTPError`` (404/401/403/...) — the resource
+      URL is wrong/forbidden; re-fetching changes nothing.
     * the deterministic DP+ ``JobError`` hierarchies — re-running
       produces the identical error.
 
-    Returns ``True`` for anything else (network blips, momentary
-    Postgres unavailability) — those are worth another attempt.
+    Returns ``True`` (retry) for transient ``HTTPError`` — a ``None``
+    status (connection/DNS/timeout) or a retryable server status — and
+    for anything else (momentary Postgres unavailability, etc.).
     """
     try:
         state.result()
     except _StageAbort:
         return False
+    except job_exceptions.HTTPError as e:
+        # The download stage wraps transient network failures in
+        # HTTPError too, so it cannot be treated as wholesale
+        # deterministic.
+        if e.status_code is None:
+            return True
+        return e.status_code in _RETRYABLE_HTTP_STATUS
     except _DETERMINISTIC_ERRORS:
         return False
     except Exception:

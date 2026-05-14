@@ -37,8 +37,9 @@ def _make_qsv():
     """Build a QSVCommand without running its binary-probing __init__.
 
     ``QSVCommand.__init__`` checks the qsv binary exists and runs a
-    version check; ``sniff`` only needs ``self._run_command`` (mocked
-    here) and ``self.logger``.
+    version check; ``sniff`` itself only calls ``self._run_command``
+    (mocked here). ``logger`` / ``qsv_bin`` are set defensively for the
+    ``__init__``-bypassed instance, not because ``sniff`` reads them.
     """
     import logging
 

@@ -401,33 +401,53 @@ def test_stage_run_raises_stage_abort_on_none():
     assert exc_info.value.stage_name == "Analysis"
 
 
-def test_retry_if_transient_does_not_retry_stage_abort():
-    """``_StageAbort`` is a control-flow signal, not a transient failure.
+def test_retry_if_transient_classification():
+    """``_retry_if_transient`` classifies each failure class correctly.
 
-    ``_retry_if_transient`` must return ``False`` for it — otherwise a
-    retrying task (e.g. ``analyze_task``) re-runs the stage and hits the
-    identical abort after a pointless backoff before the flow's
-    ``except _StageAbort`` handler can mark the job complete-with-skip.
-    Deterministic ``JobError``s are likewise not retried; everything else
-    (network blips, momentary DB unavailability) is.
+    * ``_StageAbort`` — control-flow signal, never retried (otherwise a
+      retrying task re-runs the stage and hits the identical abort after
+      a pointless backoff before the flow's handler can mark the job
+      complete-with-skip).
+    * deterministic ``JobError`` — never retried (re-running fails
+      identically).
+    * ``HTTPError`` — retried only when transient: a ``None`` status
+      (connection/DNS/timeout) or a retryable server status; a
+      deterministic 4xx is not. The download stage wraps *all* download
+      failures in ``HTTPError``, so without this split the download
+      task's retries would be a dead no-op.
+    * anything else — retried.
     """
-    from ckanext.datapusher_plus import utils
+    from ckanext.datapusher_plus import job_exceptions, utils
     from ckanext.datapusher_plus.jobs.prefect_flow import (
         _StageAbort,
         _retry_if_transient,
     )
 
-    abort_state = mock.MagicMock()
-    abort_state.result.side_effect = _StageAbort("Analysis")
-    assert _retry_if_transient(None, None, abort_state) is False
+    def _state(exc):
+        s = mock.MagicMock()
+        s.result.side_effect = exc
+        return s
 
-    joberror_state = mock.MagicMock()
-    joberror_state.result.side_effect = utils.JobError("deterministic bad data")
-    assert _retry_if_transient(None, None, joberror_state) is False
+    def _http(status):
+        return job_exceptions.HTTPError(
+            "boom", status_code=status, request_url="http://x", response=b""
+        )
 
-    transient_state = mock.MagicMock()
-    transient_state.result.side_effect = ConnectionError("network blip")
-    assert _retry_if_transient(None, None, transient_state) is True
+    # Not retried.
+    assert _retry_if_transient(None, None, _state(_StageAbort("Analysis"))) is False
+    assert _retry_if_transient(
+        None, None, _state(utils.JobError("deterministic bad data"))
+    ) is False
+    assert _retry_if_transient(None, None, _state(_http(404))) is False
+    assert _retry_if_transient(None, None, _state(_http(403))) is False
+
+    # Retried.
+    assert _retry_if_transient(None, None, _state(_http(None))) is True
+    assert _retry_if_transient(None, None, _state(_http(503))) is True
+    assert _retry_if_transient(None, None, _state(_http(429))) is True
+    assert _retry_if_transient(
+        None, None, _state(ConnectionError("network blip"))
+    ) is True
 
 
 def test_flow_marks_skipped_when_a_stage_aborts(job_input, patched_dependencies):

@@ -202,6 +202,15 @@ groups:
           Prefect work-pool name. Workers subscribe to this pool with
           ``prefect worker start -p <name>``.
 
+      - key: ckanext.datapusher_plus.prefect_work_pool_type
+        editable: true
+        default: process
+        description: |
+          Work-pool type ``prefect-deploy`` creates the pool with when
+          it does not already exist. Defaults to ``process`` (a worker
+          on the same host as CKAN). Operators on Kubernetes / Docker /
+          ECS push pools set this to the matching type.
+
       - key: ckanext.datapusher_plus.prefect_flow
         editable: true
         default: ""

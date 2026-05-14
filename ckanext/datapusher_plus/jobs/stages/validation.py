@@ -110,7 +110,16 @@ class ValidationStage(BaseStage):
         valid_count = 0
 
         try:
-            with open(src, newline="", encoding="utf-8") as fh_in, \
+            # ``errors="replace"`` on the source: an encoding problem is
+            # one of the reasons strict qsv validation fails, so opening
+            # in strict text mode would raise UnicodeDecodeError here and
+            # mask ``strict_err`` with a far less useful traceback.
+            # Replacing undecodable bytes with U+FFFD mirrors qsv input's
+            # own lossy-UTF-8 default and lets the row-count quarantine
+            # still run.
+            with open(
+                src, newline="", encoding="utf-8", errors="replace"
+            ) as fh_in, \
                  open(valid_path, "w", newline="", encoding="utf-8") as fh_valid, \
                  open(invalid_path, "w", newline="", encoding="utf-8") as fh_invalid:
 
@@ -125,9 +134,11 @@ class ValidationStage(BaseStage):
 
                 valid_writer.writerow(header)
                 # The quarantine CSV carries the same header for context,
-                # plus a synthetic ``_dpp_line`` column showing where in
-                # the source the bad row originated.
-                invalid_writer.writerow(["_dpp_line"] + header)
+                # plus a synthetic ``__dpp_source_line__`` column showing
+                # where in the source the bad row originated. The
+                # dunder-style name keeps collisions with a real source
+                # column vanishingly unlikely.
+                invalid_writer.writerow(["__dpp_source_line__"] + header)
 
                 expected_cols = len(header)
                 # Iterate rows; csv.Error (e.g., unbalanced quotes) is
@@ -164,10 +175,14 @@ class ValidationStage(BaseStage):
         try:
             context.qsv.validate(valid_path)
         except utils.JobError as e:
-            for p in (valid_path, invalid_path):
-                Path(p).unlink(missing_ok=True)
+            # Keep invalid_path on failure: it is the diagnostic showing
+            # exactly which rows were quarantined — the breadcrumb the
+            # operator needs to triage why the clean subset still fails
+            # RFC 4180. Only the unusable valid_path is removed.
+            Path(valid_path).unlink(missing_ok=True)
             raise utils.JobError(
-                f"Clean subset still failed validation after quarantine: {e}"
+                f"Clean subset still failed validation after quarantine "
+                f"({e}); quarantined rows saved to {invalid_path}"
             )
 
         context.quarantined_rows = quarantined
