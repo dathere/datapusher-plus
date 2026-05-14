@@ -147,6 +147,10 @@ def prefect_deploy(work_pool: str | None):
     pool = work_pool or tk.config.get(
         "ckanext.datapusher_plus.prefect_work_pool", "datapusher-plus"
     )
+    # Auto-create the work pool if missing; Prefect 3 ``flow.deploy``
+    # does not bootstrap pools on its own.
+    prefect_client.ensure_work_pool(pool)
+    click.echo(f"Work pool: {pool}")
     block_id = ensure_result_storage_block()
     click.echo(f"Result-storage block: {block_id}")
 

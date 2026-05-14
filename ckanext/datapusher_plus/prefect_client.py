@@ -251,3 +251,42 @@ def resolve_flow():
             f"Module {module_path!r} has no attribute {flow_name!r} "
             f"(expected a @flow-decorated function)"
         ) from e
+
+
+
+def ensure_work_pool(name: str, pool_type: str = "process") -> None:
+    """Idempotently create a Prefect work pool by name.
+
+    Operators run ``ckan datapusher_plus prefect-deploy`` once during
+    setup; before that command can ``flow.deploy(work_pool_name=name)``
+    the pool must exist. This helper creates it if missing, so the
+    setup is one command instead of two.
+
+    The default pool type is ``process``, which matches DP+'s default
+    topology (a worker process on the same host as CKAN). Operators
+    using Kubernetes / Docker / ECS push pools override the type via
+    a custom ``prefect.yaml``.
+
+    No-op when the pool already exists.
+    """
+    try:
+        from prefect.client.orchestration import get_client
+        from prefect.client.schemas.actions import WorkPoolCreate
+        from prefect.exceptions import ObjectAlreadyExists
+    except Exception as e:
+        log.warning("Prefect client unavailable for work-pool ensure: %s", e)
+        return
+
+    async def _ensure() -> None:
+        async with get_client() as client:
+            try:
+                await client.create_work_pool(
+                    WorkPoolCreate(name=name, type=pool_type)
+                )
+                log.info("Created Prefect work pool %r (type=%s)", name, pool_type)
+            except ObjectAlreadyExists:
+                log.debug("Work pool %r already exists", name)
+
+    import asyncio
+
+    asyncio.run(_ensure())
