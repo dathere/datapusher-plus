@@ -58,19 +58,33 @@ from typing import Any, Dict, List, Optional
 
 
 def _bootstrap_ckan_app_context() -> None:
-    """Push a Flask app context populated from ckan.ini.
+    """Bring up just enough CKAN in a Prefect worker subprocess.
 
-    ``tk.config`` is a proxy to ``flask.current_app.config``. Without an
-    app context, every ``tk.config.get(...)`` returns ``None`` and
-    DP+'s module-level config reads crash.
+    The ``process`` worker spawns a fresh Python interpreter per flow
+    run; CKAN's normal startup never happens. Two things break without
+    a bootstrap:
 
-    We deliberately avoid ``ckan.config.middleware.make_flask_stack``
-    here — it loads the full plugin chain (which re-imports DP+ and
-    triggers this same code path) and pulled in a NoneType.split error
-    in CI run 25838697116. The light Flask-only bootstrap below just
-    parses the ini and pushes its values into a bare Flask app's
-    config; that's enough for the read-only ``tk.config.get(...)``
-    pattern DP+ uses at module load.
+    1. ``tk.config`` (a proxy to ``flask.current_app.config``) is empty,
+       so DP+'s ``config.py`` module-level reads return ``None`` and
+       crash the import.
+    2. CKAN's SQLAlchemy ``model.Session`` has no engine bound, so the
+       first ``Jobs(...).save()`` raises ``UnboundExecutionError:
+       Could not locate a bind configured on mapper``.
+
+    We deliberately avoid ``make_flask_stack`` / ``load_environment`` —
+    they load the full plugin chain (re-importing DP+ and risking
+    recursion; ``make_flask_stack`` also tripped a NoneType.split error
+    in CI run 25838697116). Instead:
+
+    * parse the ini (``ckan.cli.load_config``, ``configparser`` fallback);
+    * push a bare Flask app context populated from it (fixes #1);
+    * build a SQLAlchemy engine from ``sqlalchemy.url`` and call
+      ``ckan.model.init_model`` (fixes #2).
+
+    All steps are individually wrapped — a failure is logged and the
+    downstream DP+ import / first DB call surfaces the real error.
+    No-op when ``CKAN_INI`` is unset or an app context already exists
+    (i.e. imported from the CKAN web process).
     """
     ini = os.environ.get("CKAN_INI")
     if not ini or not os.path.exists(ini):
@@ -83,12 +97,16 @@ def _bootstrap_ckan_app_context() -> None:
     except Exception:
         return
 
+    log = logging.getLogger(__name__)
+
+    # --- parse the ini -----------------------------------------------------
+    cfg: Dict[str, Any]
     try:
         from ckan.cli import load_config
 
-        cfg = load_config(ini)
+        cfg = dict(load_config(ini))
     except Exception as e:
-        logging.getLogger(__name__).warning(
+        log.warning(
             "DP+ Prefect bootstrap: ckan.cli.load_config failed (%s); "
             "falling back to direct configparser",
             e,
@@ -98,21 +116,42 @@ def _bootstrap_ckan_app_context() -> None:
 
             parser = configparser.ConfigParser()
             parser.read(ini)
-            cfg = dict(parser.items("app:main")) if parser.has_section("app:main") else {}
+            cfg = (
+                dict(parser.items("app:main"))
+                if parser.has_section("app:main")
+                else {}
+            )
         except Exception as e2:
-            logging.getLogger(__name__).warning(
+            log.warning(
                 "DP+ Prefect bootstrap: direct ini parse also failed: %s", e2
             )
             return
 
+    # --- push a Flask app context (makes tk.config work) -------------------
     try:
         app = Flask("dpp-prefect-worker")
-        for key, value in dict(cfg).items():
+        for key, value in cfg.items():
             app.config[key] = value
         app.app_context().push()
     except Exception as e:
-        logging.getLogger(__name__).warning(
+        log.warning(
             "DP+ Prefect bootstrap: Flask app context push failed: %s", e
+        )
+        return
+
+    # --- bind CKAN's SQLAlchemy model (makes Jobs(...).save() work) --------
+    try:
+        import sqlalchemy
+
+        import ckan.model as model
+
+        engine = sqlalchemy.engine_from_config(cfg, "sqlalchemy.")
+        model.init_model(engine)
+    except Exception as e:
+        log.warning(
+            "DP+ Prefect bootstrap: ckan.model.init_model failed (%s); "
+            "DB-touching tasks will fail until this is resolved",
+            e,
         )
 
 
