@@ -2,6 +2,7 @@
 # flake8: noqa: E501
 
 import csv
+import json
 import psycopg2
 from psycopg2 import sql
 import shutil
@@ -302,6 +303,7 @@ class QSVCommand:
         input_file: str,
         trim_headers: bool = True,
         output_file: Optional[str] = None,
+        delimiter: Optional[str] = None,
     ) -> subprocess.CompletedProcess:
         """
         Normalize and transcode a CSV/TSV/TAB file to UTF-8.
@@ -310,6 +312,9 @@ class QSVCommand:
             input_file: Path to the input file
             trim_headers: Whether to trim headers
             output_file: Path to the output file
+            delimiter: Input delimiter override (e.g. ``";"`` or a tab).
+                When ``None``, qsv assumes comma. The output is always
+                comma-delimited regardless.
 
         Returns:
             The result of the command
@@ -319,6 +324,9 @@ class QSVCommand:
         """
         args = ["input", input_file]
 
+        if delimiter:
+            args.extend(["--delimiter", delimiter])
+
         if trim_headers:
             args.append("--trim-headers")
 
@@ -326,6 +334,30 @@ class QSVCommand:
             args.extend(["--output", output_file])
 
         return self._run_command(args)
+
+    def sniff(self, input_file: str) -> Optional[Dict[str, Any]]:
+        """
+        Sniff a CSV's metadata (delimiter, header row, ...) via ``qsv sniff``.
+
+        Best-effort: returns the parsed ``qsv sniff --json`` dict, or
+        ``None`` when sniffing fails or the output is not valid JSON.
+        Callers should treat ``None`` as "could not determine" and fall
+        back to qsv's defaults.
+
+        Args:
+            input_file: Path to the file to sniff
+
+        Returns:
+            The sniff result dict, or ``None`` on failure
+        """
+        result = self._run_command(["sniff", "--json", input_file], check=False)
+        stdout = getattr(result, "stdout", None)
+        if not stdout:
+            return None
+        try:
+            return json.loads(stdout)
+        except (ValueError, TypeError):
+            return None
 
     def validate(self, input_file: str) -> subprocess.CompletedProcess:
         """

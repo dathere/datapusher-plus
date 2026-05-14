@@ -316,9 +316,30 @@ class FormatConverterStage(BaseStage):
         else:
             source_file = context.tmp
 
+        # Sniff the delimiter so non-comma CSVs (semicolon-, tab-, or
+        # pipe-delimited) normalize correctly. ``qsv input`` assumes a
+        # comma delimiter, which silently mis-parses — or outright
+        # rejects — files using another delimiter. Comma files and files
+        # qsv cannot sniff fall through unchanged (delimiter=None).
+        input_delimiter = None
+        sniffed = context.qsv.sniff(source_file)
+        if sniffed:
+            detected = sniffed.get("delimiter_char")
+            if detected in (";", "\t", "|"):
+                input_delimiter = detected
+                shown = "tab" if detected == "\t" else detected
+                context.logger.info(
+                    f"Detected '{shown}' delimiter; normalizing to comma-delimited CSV"
+                )
+
         # Normalize using qsv input
         try:
-            context.qsv.input(source_file, trim_headers=True, output_file=qsv_input_csv)
+            context.qsv.input(
+                source_file,
+                trim_headers=True,
+                output_file=qsv_input_csv,
+                delimiter=input_delimiter,
+            )
         except utils.JobError as e:
             raise utils.JobError(
                 f"Job aborted as the file cannot be normalized/transcoded: {e}."
