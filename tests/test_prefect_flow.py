@@ -357,3 +357,86 @@ def test_flow_short_circuits_for_datastore_dumps(job_input):
 
     assert result is None
     mark_completed.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Graceful stage abort (a stage returns None == "nothing to do")
+# ---------------------------------------------------------------------------
+
+
+def test_stage_run_raises_stage_abort_on_none():
+    """A stage returning ``None`` surfaces as ``_StageAbort`` from ``_stage_run``.
+
+    Per the BaseStage contract a stage may return ``None`` to stop the
+    pipeline gracefully (e.g. Analysis on a zero-record file). ``_stage_run``
+    converts that into the ``_StageAbort`` control-flow signal carrying the
+    stage name.
+    """
+    from ckanext.datapusher_plus.jobs.prefect_flow import _StageAbort, _stage_run
+    from ckanext.datapusher_plus.jobs.runtime_context import (
+        reset_runtime_context,
+        set_runtime_context,
+    )
+
+    fake_stage = mock.MagicMock()
+    fake_stage.name = "Analysis"
+    fake_stage.side_effect = lambda ctx: None  # graceful "nothing to do"
+
+    token = set_runtime_context(mock.MagicMock())
+    try:
+        with pytest.raises(_StageAbort) as exc_info:
+            _stage_run(fake_stage)
+    finally:
+        reset_runtime_context(token)
+
+    assert exc_info.value.stage_name == "Analysis"
+
+
+def test_retry_if_transient_does_not_retry_stage_abort():
+    """``_StageAbort`` is a control-flow signal, not a transient failure.
+
+    ``_retry_if_transient`` must return ``False`` for it — otherwise a
+    retrying task (e.g. ``analyze_task``) re-runs the stage and hits the
+    identical abort after a pointless backoff before the flow's
+    ``except _StageAbort`` handler can mark the job complete-with-skip.
+    Deterministic ``JobError``s are likewise not retried; everything else
+    (network blips, momentary DB unavailability) is.
+    """
+    from ckanext.datapusher_plus import utils
+    from ckanext.datapusher_plus.jobs.prefect_flow import (
+        _StageAbort,
+        _retry_if_transient,
+    )
+
+    abort_state = mock.MagicMock()
+    abort_state.result.side_effect = _StageAbort("Analysis")
+    assert _retry_if_transient(None, None, abort_state) is False
+
+    joberror_state = mock.MagicMock()
+    joberror_state.result.side_effect = utils.JobError("deterministic bad data")
+    assert _retry_if_transient(None, None, joberror_state) is False
+
+    transient_state = mock.MagicMock()
+    transient_state.result.side_effect = ConnectionError("network blip")
+    assert _retry_if_transient(None, None, transient_state) is True
+
+
+def test_flow_marks_skipped_when_a_stage_aborts(job_input, patched_dependencies):
+    """A stage returning ``None`` mid-flow completes the job, not errors it.
+
+    The Analysis stage returns ``None`` (zero-record file). The flow must
+    catch ``_StageAbort``, mark the job completed with ``{"skipped": <stage>}``,
+    and never call ``mark_job_as_errored``.
+    """
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    prefect_flow.AnalysisStage.return_value.name = "Analysis"
+    prefect_flow.AnalysisStage.return_value.side_effect = lambda ctx: None
+
+    result = prefect_flow.datapusher_plus_flow(job_input)
+
+    assert result is None  # graceful skip returns None, same as success
+    patched_dependencies["mark_completed"].assert_called_once()
+    args, _ = patched_dependencies["mark_completed"].call_args
+    assert args[1] == {"skipped": "Analysis"}
+    patched_dependencies["mark_errored"].assert_not_called()

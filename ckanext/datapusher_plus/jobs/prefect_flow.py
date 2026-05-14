@@ -345,13 +345,23 @@ _DETERMINISTIC_ERRORS = (utils.JobError, job_exceptions.JobError)
 def _retry_if_transient(task, task_run, state) -> bool:
     """Prefect ``retry_condition_fn``: retry transient failures only.
 
-    Invoked only on a failed task run. Returns ``False`` (no retry) for
-    the deterministic DP+ JobError hierarchies and ``True`` for anything
-    else (network blips, momentary Postgres unavailability) — those are
-    worth another attempt.
+    Invoked only on a failed task run. Returns ``False`` (no retry) for:
+
+    * ``_StageAbort`` — a control-flow signal (a stage returned ``None``,
+      "nothing to do"), not a failure. Retrying re-runs the stage only
+      to hit the identical abort after a pointless backoff delay before
+      the flow's ``except _StageAbort`` handler can mark the job
+      complete-with-skip.
+    * the deterministic DP+ ``JobError`` hierarchies — re-running
+      produces the identical error.
+
+    Returns ``True`` for anything else (network blips, momentary
+    Postgres unavailability) — those are worth another attempt.
     """
     try:
         state.result()
+    except _StageAbort:
+        return False
     except _DETERMINISTIC_ERRORS:
         return False
     except Exception:
