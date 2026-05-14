@@ -36,6 +36,63 @@ import traceback
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+
+# ---------------------------------------------------------------------------
+# CKAN app-context bootstrap (runs at module import)
+# ---------------------------------------------------------------------------
+#
+# When this module is imported inside a Prefect worker subprocess (the
+# ``process`` worker spawns a fresh Python interpreter for each flow run),
+# CKAN's normal startup hasn't happened — no Flask app, no ``tk.config``.
+# DP+'s ``config.py`` reads its module-level constants via ``tk.config.get``,
+# which returns ``None`` for everything in that context, and ``Path(None)``
+# crashes the import.
+#
+# Bootstrap CKAN here by loading the ini pointed to by ``CKAN_INI``, building
+# a Flask app stack, and pushing its application context. After this,
+# subsequent ``tk.config.get(...)`` calls return the real values.
+#
+# When ``CKAN_INI`` is unset or we're already inside an app context (e.g.,
+# this module is being imported from the CKAN web process), the bootstrap
+# is a no-op.
+
+
+def _bootstrap_ckan_app_context() -> None:
+    ini = os.environ.get("CKAN_INI")
+    if not ini or not os.path.exists(ini):
+        return
+    try:
+        from flask import has_app_context
+
+        if has_app_context():
+            return
+    except Exception:
+        # If flask isn't importable we have bigger problems; let the
+        # downstream DP+ imports surface the real error.
+        return
+    try:
+        from ckan.cli import load_config
+        from ckan.config.middleware import make_flask_stack
+
+        cfg = load_config(ini)
+        app = make_flask_stack(cfg)
+        app.app_context().push()
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "CKAN config bootstrap failed in Prefect worker subprocess: %s. "
+            "DP+ will fall back to env-var defaults where available.",
+            e,
+        )
+
+
+_bootstrap_ckan_app_context()
+
+
+# ---------------------------------------------------------------------------
+# DP+ imports (CKAN context is now available)
+# ---------------------------------------------------------------------------
+
+
 import requests
 import sqlalchemy as sa
 from prefect import flow, task
