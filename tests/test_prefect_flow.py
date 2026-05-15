@@ -15,6 +15,7 @@ Docker compose, not pytest in a vacuum.
 
 from __future__ import annotations
 
+import logging
 from unittest import mock
 
 import pytest
@@ -56,6 +57,8 @@ def patched_dependencies():
       * ``datastore_utils.get_resource`` to return a non-datastore resource.
       * ``helpers.add_pending_job`` / ``mark_job_as_*`` to no-op.
       * ``QSVCommand`` constructor + the ``QSV_BIN`` path check.
+      * ``utils.StoringHandler`` → a ``NullHandler`` so the task logger
+        does not write to the ``Logs`` table (no DB bind in unit tests).
       * ``callback_datapusher_hook`` so no HTTP POST goes out.
     """
     patches = [
@@ -109,6 +112,10 @@ def patched_dependencies():
         ),
         mock.patch(
             "ckanext.datapusher_plus.jobs.prefect_flow.dph.mark_job_as_failed_to_post_result"
+        ),
+        mock.patch(
+            "ckanext.datapusher_plus.jobs.prefect_flow.utils.StoringHandler",
+            return_value=logging.NullHandler(),
         ),
         mock.patch(
             "ckanext.datapusher_plus.jobs.prefect_flow.QSVCommand"
@@ -389,6 +396,13 @@ def test_flow_short_circuits_for_datastore_dumps(job_input):
         stack.enter_context(mock.patch.object(prefect_flow.dph, "set_aps_job_id"))
         mark_completed = stack.enter_context(
             mock.patch.object(prefect_flow.dph, "mark_job_as_completed")
+        )
+        stack.enter_context(
+            mock.patch.object(
+                prefect_flow.utils,
+                "StoringHandler",
+                return_value=logging.NullHandler(),
+            )
         )
         stack.enter_context(
             mock.patch.object(prefect_flow.QSVCommand, "__init__", return_value=None)
