@@ -6,22 +6,25 @@ Result-persistence and cache-key configuration for the Prefect flow.
 is active: every task output is checkpointed so operators can open a
 task's output from the Prefect UI to debug bad data.
 
-**Content-based caching is currently DISABLED.** The cache-key
-functions and policies below are kept for when it can be safely
-re-enabled, but ``prefect_flow.py`` no longer passes ``cache_policy=``
-to any task. The reason: the stage tasks carry their real state
-(headers, file paths, row counts) in the ``RuntimeContext`` shared via
-a ``ContextVar``, *not* in their return-value dataclasses. A cache
-*hit* makes Prefect skip the task body — which is exactly the code that
-populates ``RuntimeContext`` — so a downstream task then reads empty
-state (observed as ``COPY "<table>" () FROM STDIN`` when two resources
-shared identical file content and the second hit the cache).
+**Content-based caching is currently DISABLED** — ``prefect_flow.py``
+does not pass ``cache_policy=`` to any task. The cache-key functions
+and policies below are kept for when it can be safely re-enabled.
 
-Re-enabling caching requires first making each per-stage result
-dataclass fully self-contained (the deferred "ProcessingContext
-retirement" work), so a cache hit reconstitutes everything the next
-task needs from the cached result rather than from shared mutable
-state.
+The original blocker is now cleared: each per-stage result dataclass is
+self-contained (it nests its ``upstream`` result), and every task
+``rehydrate``-s the ``RuntimeContext`` from its input result before
+running its stage. So a cache *hit* — which skips the task body — no
+longer leaves a downstream stage reading empty state (the
+``COPY "<table>" () FROM STDIN`` failure that first forced caching off).
+
+What still blocks re-enabling it: the result dataclasses carry working
+*file paths* (``downloaded_path``, ``csv_path``) that point into a
+per-flow-run ``TemporaryDirectory``. A cached result from an earlier
+run references a tempdir that no longer exists, so the consuming stage
+would fail on a missing file. Safely re-enabling content caching needs
+the working files persisted to stable ``result_storage`` (and rehydra-
+tion to stage them back into the current tempdir) — the next step of
+the ProcessingContext-retirement work.
 """
 
 from __future__ import annotations
@@ -122,10 +125,10 @@ def download_cache_key(context, parameters) -> Optional[str]:
 def content_cache_key(context, parameters) -> Optional[str]:
     """Cache by the content fingerprint propagated through the chain.
 
-    Each downstream result dataclass exposes a ``file_hash`` field that
-    each task copies forward from its input. When the upstream content is
-    identical across runs, every read-only stage finds its cached output
-    and skips the qsv subprocess.
+    Each downstream result dataclass exposes a ``file_hash`` property that
+    walks its ``upstream`` chain to the root ``DownloadResult``. When the
+    upstream content is identical across runs, every read-only stage finds
+    its cached output and skips the qsv subprocess.
 
     Returns ``None`` (no cache) when the propagated hash is missing —
     safer than caching by path, which would silently miss across runs.

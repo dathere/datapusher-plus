@@ -515,3 +515,124 @@ def test_flow_marks_skipped_when_a_stage_aborts(job_input, patched_dependencies)
     args, _ = patched_dependencies["mark_completed"].call_args
     assert args[1] == {"skipped": "Analysis"}
     patched_dependencies["mark_errored"].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Result-chain rehydration (ProcessingContext retirement)
+# ---------------------------------------------------------------------------
+
+
+def test_rehydrate_reconstitutes_context_from_nested_results():
+    """``rehydrate`` walks a nested result chain and repopulates the
+    RuntimeContext root-first, so a downstream stage sees correct state
+    even though no upstream *task body* ran in this process.
+
+    This is the invariant that lets Prefect skip a cached / persisted
+    task body without leaving the next stage reading empty context.
+    """
+    from ckanext.datapusher_plus.jobs.context import ProcessingContext
+    from ckanext.datapusher_plus.jobs.runtime_context import (
+        AnalyzeResult,
+        ConvertResult,
+        DownloadResult,
+        ValidateResult,
+        rehydrate,
+    )
+
+    download = DownloadResult(
+        resource={"id": "r1", "format": "CSV"},
+        resource_url="http://x/r1.csv",
+        file_hash="abc123",
+        content_length=4096,
+        downloaded_path="/tmp/run/r1.csv",
+    )
+    convert = ConvertResult(upstream=download, csv_path="/tmp/run/r1.converted.csv")
+    validate = ValidateResult(
+        upstream=convert,
+        csv_path="/tmp/run/r1.clean.csv",
+        rows_after_dedup=42,
+        quarantined_rows=3,
+        quarantine_csv_path="/tmp/run/r1.errors.csv",
+    )
+    analyze = AnalyzeResult(
+        upstream=validate,
+        csv_path="/tmp/run/r1.clean.csv",
+        headers=["a", "b"],
+        headers_dicts=[{"id": "a"}, {"id": "b"}],
+        original_header_dict={0: "A", 1: "B"},
+        dataset_stats={"rows": 42},
+        resource_fields_stats={"a": {}},
+        resource_fields_freqs={"a": {}},
+        pii_found=True,
+        pii_candidate_count=2,
+    )
+
+    # A bare context, as _build_runtime_context hands to the first task:
+    # only build-time fields are set, everything else is at its default.
+    ctx = ProcessingContext(task_id="t1", input={})
+
+    rehydrate(ctx, analyze)
+
+    # Root DownloadResult fields.
+    assert ctx.resource == {"id": "r1", "format": "CSV"}
+    assert ctx.resource_url == "http://x/r1.csv"
+    assert ctx.file_hash == "abc123"
+    assert ctx.content_length == 4096
+    # Working path: each layer overwrites it, analysis' value wins.
+    assert ctx.tmp == "/tmp/run/r1.clean.csv"
+    # ValidateResult fields.
+    assert ctx.rows_to_copy == 42
+    assert ctx.quarantined_rows == 3
+    assert ctx.quarantine_csv_path == "/tmp/run/r1.errors.csv"
+    # AnalyzeResult fields.
+    assert ctx.headers == ["a", "b"]
+    assert ctx.headers_dicts == [{"id": "a"}, {"id": "b"}]
+    assert ctx.pii_found is True
+    assert ctx.pii_candidate_count == 2
+    # The file_hash property walks the chain back to the root.
+    assert analyze.file_hash == "abc123"
+    assert validate.file_hash == "abc123"
+    assert convert.file_hash == "abc123"
+
+
+def test_stage_run_rehydrates_context_from_prev():
+    """``_stage_run(stage, prev)`` applies ``prev`` onto the bound context
+    *before* invoking the stage — the cache-hit safety net.
+
+    Simulates a skipped upstream task body (cache hit / persisted-result
+    replay): the only way the stage gets correct state is rehydration.
+    """
+    from ckanext.datapusher_plus.jobs import prefect_flow
+    from ckanext.datapusher_plus.jobs.context import ProcessingContext
+    from ckanext.datapusher_plus.jobs.runtime_context import (
+        DownloadResult,
+        reset_runtime_context,
+        set_runtime_context,
+    )
+
+    prev = DownloadResult(
+        resource={"id": "r1"},
+        resource_url="http://x/r1.csv",
+        file_hash="hash-xyz",
+        content_length=10,
+        downloaded_path="/tmp/run/r1.csv",
+    )
+    # Bare context — as if the download task body was skipped.
+    ctx = ProcessingContext(task_id="t1", input={})
+    seen = {}
+
+    def _stage(c):
+        # The stage must observe a rehydrated context, not the bare one.
+        seen["tmp"] = c.tmp
+        seen["file_hash"] = c.file_hash
+        return c
+
+    stage = mock.MagicMock(side_effect=_stage)
+    token = set_runtime_context(ctx)
+    try:
+        prefect_flow._stage_run(stage, prev)
+    finally:
+        reset_runtime_context(token)
+
+    assert seen["tmp"] == "/tmp/run/r1.csv"
+    assert seen["file_hash"] == "hash-xyz"
