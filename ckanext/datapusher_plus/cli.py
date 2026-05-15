@@ -214,6 +214,13 @@ def prefect_deploy(work_pool: str | None):
         # custom flow + their own prefect.yaml.
         image=None,
         push=False,
+        # Sentinel read by ``prefect_flow._bootstrap_ckan_app_context`` so
+        # it can tell a real worker subprocess apart from pytest / ad-hoc
+        # imports / tooling, and only call ``make_app()`` for the former.
+        # Prefect merges these vars into the worker subprocess's env at
+        # flow-run start; ``CKAN_INI`` continues to come from the worker's
+        # own environment (operator-set per deployment).
+        job_variables={"env": {"DPP_PREFECT_WORKER": "1"}},
     )
     click.echo(f"Deployed to work-pool '{pool}': {deployment_id}")
 

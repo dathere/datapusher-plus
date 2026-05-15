@@ -81,7 +81,12 @@ def _bootstrap_ckan_app_context() -> None:
     2. ``ckan.common.config`` is already populated — imported from a
        ``ckan`` CLI command (e.g. ``datapusher_plus prefect-deploy``),
        whose ``CtxObject`` already ran ``make_app`` — no-op;
-    3. otherwise we are a fresh interpreter that *must* bootstrap. A
+    3. ``DPP_PREFECT_WORKER`` sentinel is unset — we are not inside a
+       genuine Prefect worker subprocess (pytest, ad-hoc imports,
+       tooling that loads this plugin) — no-op. ``prefect-deploy`` sets
+       ``DPP_PREFECT_WORKER=1`` on the deployment's job-variables env so
+       every worker subprocess inherits it;
+    4. otherwise we are a fresh worker subprocess that *must* bootstrap. A
        missing/unreadable ``CKAN_INI`` here is fatal: continuing would
        import ``config.py`` against an empty ``tk.config`` and silently
        run the whole pipeline on hardcoded defaults (wrong datastore
@@ -115,9 +120,17 @@ def _bootstrap_ckan_app_context() -> None:
 
     log = logging.getLogger(__name__)
 
-    # 3. Fresh interpreter — a Prefect worker subprocess. CKAN_INI is
-    #    mandatory here; a silent no-op would run the pipeline on stock
-    #    defaults.
+    # 3. ``DPP_PREFECT_WORKER`` sentinel: ``prefect-deploy`` sets this on
+    #    the deployment's job-variables env, so every worker subprocess
+    #    Prefect spawns for this deployment inherits ``DPP_PREFECT_WORKER=1``.
+    #    Anywhere else (pytest, ad-hoc imports, tooling) it stays unset
+    #    and the bootstrap is a no-op — guarding against an expensive /
+    #    fragile ``make_app()`` call against an unconfigured CKAN env.
+    if os.environ.get("DPP_PREFECT_WORKER") != "1":
+        return
+
+    # 4. Fresh worker interpreter. CKAN_INI is mandatory here; a silent
+    #    no-op would run the pipeline on stock defaults.
     ini = os.environ.get("CKAN_INI")
     if not ini or not os.path.exists(ini):
         raise RuntimeError(
