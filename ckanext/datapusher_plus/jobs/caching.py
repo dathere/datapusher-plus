@@ -125,10 +125,18 @@ def download_cache_key(context, parameters) -> Optional[str]:
 def content_cache_key(context, parameters) -> Optional[str]:
     """Cache by the content fingerprint propagated through the chain.
 
-    Each downstream result dataclass exposes a ``file_hash`` property that
-    walks its ``upstream`` chain to the root ``DownloadResult``. When the
-    upstream content is identical across runs, every read-only stage finds
-    its cached output and skips the qsv subprocess.
+    The read-only-stage results (``ConvertResult``, ``ValidateResult``,
+    ``AnalyzeResult``) expose a ``file_hash`` property that walks the
+    ``upstream`` chain to the root ``DownloadResult`` — these are the
+    candidates for content caching. ``DatabaseResult`` exposes it too for
+    chain-traversal symmetry, though the database task is side-effecting
+    and not itself cached. The terminal side-effecting results
+    (``IndexingResult`` / ``FormulaResult`` / ``MetadataResult``)
+    intentionally don't expose ``file_hash``: caching their outputs would
+    skip the actual side effect.
+
+    When the upstream content is identical across runs, every read-only
+    stage finds its cached output and skips the qsv subprocess.
 
     Returns ``None`` (no cache) when the propagated hash is missing —
     safer than caching by path, which would silently miss across runs.

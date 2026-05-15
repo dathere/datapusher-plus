@@ -252,7 +252,12 @@ def _apply_result(ctx: RuntimeContext, result: Any) -> None:
     stage consumes via the context, so they have none.
     """
     if isinstance(result, DownloadResult):
-        ctx.resource = result.resource
+        # Defensive copy: later stages mutate ``ctx.resource`` in place
+        # (e.g. ``FormulaStage`` adds ``dpp_suggestions``), so without a
+        # copy here that mutation would also mutate the ``DownloadResult``
+        # stored in the result chain — making it no longer a true snapshot
+        # of the download stage's output.
+        ctx.resource = dict(result.resource)
         ctx.resource_url = result.resource_url
         ctx.file_hash = result.file_hash
         ctx.content_length = result.content_length
@@ -277,7 +282,10 @@ def _apply_result(ctx: RuntimeContext, result: Any) -> None:
     elif isinstance(result, DatabaseResult):
         ctx.rows_to_copy = result.rows_to_copy
         ctx.copied_count = result.copied_count
-        ctx.existing_info = result.existing_info
+        # Defensive copy — same rationale as ``DownloadResult.resource``.
+        ctx.existing_info = (
+            dict(result.existing_info) if result.existing_info else None
+        )
 
 
 def rehydrate(ctx: RuntimeContext, result: Any) -> None:
