@@ -1,0 +1,23 @@
+{
+  "name": "datapusher-plus: alert on consecutive failures",
+  "description": "Fires once when the same DataPusher+ resource fails 3 times within an hour. Wire the action to your Slack/Pagerduty webhook in the Prefect UI before applying.",
+  "trigger": {
+    "type": "event",
+    "posture": "Reactive",
+    "expect": ["prefect.flow-run.Failed"],
+    "match": {
+      "prefect.resource.name": "datapusher-plus"
+    },
+    "for_each": ["ckan.resource.id"],
+    "threshold": 3,
+    "within": 3600
+  },
+  "actions": [
+    {
+      "type": "send-notification",
+      "block_document_id": "REPLACE_WITH_NOTIFICATION_BLOCK_ID",
+      "subject": "DataPusher+ failed 3x for {{ event.related.ckan.resource.id }}",
+      "body": "Resource {{ event.related.ckan.resource.id }} failed 3 times in the past hour. Open the flow run: {{ event.resource.id }}"
+    }
+  ]
+}

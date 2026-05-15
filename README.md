@@ -481,6 +481,169 @@ To Resubmit a specific resource, whether or not the hash of the data file has ch
 ckan -c /etc/ckan/default/ckan.ini datapusher_plus submit {dataset_id}
 ```
 
+## Prefect orchestration (v3.0+)
+
+DataPusher+ v3.0 replaces the v2 RQ-based background worker with a [Prefect 3](https://docs.prefect.io/v3/) flow. RQ is no longer used by DP+ itself (CKAN continues to ship RQ for unrelated extensions).
+
+### Why Prefect
+
+* **Customizable workflows** — operators compose their own ingestion flows from DP+'s `@task` primitives without forking the code.
+* **Graceful failure & recoverable ingestion** — per-task retries with exponential backoff, transactional rollback of partial datastore writes, result persistence so the Prefect UI's "Re-run from failed task" replays only the failed and downstream tasks, content-based caching that skips re-downloading unchanged resources.
+* **Observability** — every flow run, every task, every retry, every log line is visible in the Prefect UI. Each successful run attaches a Markdown "Data Quality Report" artifact and emits a `datapusher.resource.ingested` event that operators can wire into Automations (Slack, PagerDuty, search reindex, DCAT refresh) without DP+ hard-coding a specific alerting backend.
+* **Horizontal scaling** — add Prefect workers on additional hosts to scale ingestion throughput. Tag-based concurrency limits cap concurrent Postgres COPY operations so a burst of submissions doesn't flatten the datastore.
+
+### Topology
+
+```
++--------+      submit_flow_run      +----------------+      poll        +-----------------+
+|  CKAN  | ------------------------> | Prefect server | <--------------- | Prefect worker  |
++--------+      datapusher_hook      |  (UI on 4200)  |     flow runs    | (runs the flow) |
+    ^             POST callback      +----------------+                  +-----------------+
+    |                                        |
+    +----------------------------------------+
+                       Postgres (shared)
+```
+
+The CKAN web request handler synchronously POSTs the run to the Prefect server and returns immediately with a `flow_run_id`. A separately-managed worker process executes the flow. Prefect 3's default Postgres-backed server is sufficient — no Redis required.
+
+### Quick start (dev / demo)
+
+```bash
+# 1. Bring up Prefect server + worker + Postgres
+docker compose -f docker-compose.prefect.yaml up -d
+
+# 2. Register the DataPusher+ deployment with the Prefect server
+ckan -c /etc/ckan/default/ckan.ini datapusher_plus prefect-deploy
+
+# 3. Submit a resource via the CKAN UI — you should now see the flow
+#    run in the Prefect UI at http://localhost:4200
+```
+
+For production, run your own Prefect server (or use Prefect Cloud) and configure `PREFECT_API_URL` to point at it.
+
+### Worker lifecycle
+
+The CKAN-side RQ worker (`ckan jobs worker`) is no longer used for DP+ jobs. Replace it with:
+
+```bash
+PREFECT_API_URL=http://prefect-server:4200/api \
+CKAN_INI=/etc/ckan/default/ckan.ini \
+prefect worker start --pool datapusher-plus
+```
+
+Scale horizontally by starting workers on additional hosts pointed at the same Prefect server and work pool. Workers must have the `datapusher-plus` Python package installed and CKAN configuration accessible (it's read at flow-run start for resource metadata and the qsv binary path).
+
+### Upgrading from v2.0
+
+A one-shot CLI helper handles the cutover:
+
+```bash
+ckan -c /etc/ckan/default/ckan.ini datapusher_plus migrate-from-rq --resubmit
+```
+
+What it does:
+
+1. Drains any pending DP+ jobs from CKAN's RQ queue.
+2. Resets any `pending` task_status rows on the CKAN side so the UI no longer falsely shows in-flight ingestions.
+3. Verifies the configured Prefect server is reachable.
+4. With `--resubmit`, re-submits each affected resource_id through the new Prefect path.
+
+After it finishes: stop your CKAN-side `ckan jobs worker` process (or leave it if other extensions use RQ — DP+ jobs no longer flow through it), then start `prefect worker start -p datapusher-plus`.
+
+Historical `Jobs`/`Logs` rows from the RQ era remain queryable through `datapusher_status` and the CKAN UI without modification — the v2 database schema needs no migration.
+
+### Observability features
+
+Each successful flow run attaches:
+
+* A **Data Quality Markdown artifact** — row count, inferred schema, PII findings, quarantine count.
+* A **CKAN resource link artifact** — one-click jump back to the resource page in CKAN.
+* A **`datapusher.resource.ingested` custom event** with payload `{rows, file_hash, duration_seconds}` — wire this into Prefect Automations for downstream side effects.
+
+The validation and PII tasks emit additional events (`datapusher.row.quarantined`, `datapusher.pii.detected`).
+
+Two example automations ship in `examples/automations/`:
+
+```bash
+# Alert on 3 consecutive failures for the same resource within an hour
+prefect automation create -f examples/automations/alert-on-consecutive-failures.json
+
+# Alert on Crashed state (worker killed, OOM, infrastructure error)
+prefect automation create -f examples/automations/alert-on-crashed.json
+```
+
+Replace `REPLACE_WITH_NOTIFICATION_BLOCK_ID` in those files with the ID of a notification Block (Slack, PagerDuty, email) you've registered in the Prefect UI before applying.
+
+### Custom flows
+
+Operators compose their own ingestion flow by importing DP+'s `@task` primitives and registering the flow via config:
+
+```python
+# my_plugin/flows.py
+from prefect import flow
+
+from ckanext.datapusher_plus.jobs.prefect_flow import (
+    download_task, format_convert_task, validate_task, analyze_task,
+    database_task, indexing_task, formula_task, metadata_task,
+)
+from prefect.transactions import transaction
+
+
+@flow(name="my-custom-datapusher")
+def my_custom_flow(job_input):
+    dl = download_task(job_input)
+    cv = format_convert_task(dl)
+
+    # ... insert your own redaction / enrichment / spatial tasks here ...
+    vl = validate_task(cv)
+    an = analyze_task(vl)
+    with transaction():
+        db = database_task(an)
+        idx = indexing_task(db)
+        fm = formula_task(idx)
+        md = metadata_task(fm)
+```
+
+Then point DP+ at it in `ckan.ini`:
+
+```ini
+ckanext.datapusher_plus.prefect_flow = my_plugin.flows:my_custom_flow
+```
+
+…and re-run `ckan datapusher_plus prefect-deploy`. Submissions via the CKAN UI now invoke your flow. The existing `IDataPusher.can_upload` / `after_upload` plugin hooks continue to fire — custom flows are additive, not exclusive.
+
+### Configuration reference (new in v3.0)
+
+| Key | Default | Purpose |
+|---|---|---|
+| `ckanext.datapusher_plus.prefect_deployment_name` | `datapusher-plus/datapusher-plus` | Fully-qualified Prefect deployment name (`<flow>/<deployment>`). |
+| `ckanext.datapusher_plus.prefect_work_pool` | `datapusher-plus` | Work-pool name workers subscribe to. |
+| `ckanext.datapusher_plus.prefect_flow` | _(unset)_ | `module.path:flow_name` entrypoint of a custom flow. |
+| `ckanext.datapusher_plus.prefect_ui_base` | _(unset)_ | Base URL of the Prefect UI (e.g. `http://prefect-server:4200`) — when set, `datapusher_status` returns a `job_url` that deep-links into the run page. |
+| `ckanext.datapusher_plus.flow_timeout` | `7200` | Outer flow-run timeout in seconds. Replaces v2's `ckan.datapusher.timeout`. |
+| `ckanext.datapusher_plus.max_quarantine_pct` | `5.0` | Maximum percentage of rows that may be quarantined before the flow fails. |
+| `ckanext.datapusher_plus.pii_review_threshold` | `0` | When `> 0` and PII screening detects this many sensitive fields, the flow suspends for human approval via the Prefect UI. |
+| `ckanext.datapusher_plus.result_storage_block` | `local-file-system/datapusher-plus-results` | Prefect Block for task-result persistence. Swap to S3/GCS for multi-host worker pools. |
+
+Worker-process env-var fallbacks (read when CKAN config isn't loaded in the worker):
+
+* `DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS`
+* `DATAPUSHER_PLUS_DOWNLOAD_RETRIES`
+* `DATAPUSHER_PLUS_DATABASE_RETRIES`
+* `DATAPUSHER_PLUS_CACHE_TTL_HOURS` (default 24)
+* `DATAPUSHER_PLUS_MAX_QUARANTINE_PCT`
+* `DATAPUSHER_PLUS_RESULT_STORAGE_BLOCK`
+
+### Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `datapusher_submit` returns `False` with a Prefect connection error in the CKAN log | The Prefect server is unreachable from CKAN | Check `PREFECT_API_URL` and that the Prefect server is healthy at `<API>/health`. |
+| Flow run sits in `Scheduled` forever | No worker is polling the configured work pool | Start `prefect worker start -p datapusher-plus` on a host with the `datapusher-plus` package installed. |
+| Flow run goes straight to `Failed` with "QSV binary not found" | The worker process can't see the qsv binary | Set `ckanext.datapusher_plus.qsv_bin` in the CKAN config the worker reads, or install qsv in the worker's PATH. |
+| Re-run from a failed task re-downloads the file | Result storage block isn't registered, so persisted results aren't being read | Re-run `ckan datapusher_plus prefect-deploy` — it calls `ensure_result_storage_block`. |
+| Pre-existing partial table after a failed run | Database `on_rollback` couldn't drop it (e.g., Postgres unreachable at rollback time) | Drop manually with `datastore_delete`; the next submit recreates from scratch. |
+
 ## License
 
 This material is copyright (c) 2025, datHere, Open Knowledge Foundation and other contributors

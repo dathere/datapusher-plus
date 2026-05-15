@@ -571,7 +571,7 @@ class AnalysisStage(BaseStage):
         """
         if conf.PII_SCREENING:
             piiscreening_start = time.perf_counter()
-            context.pii_found = screen_for_pii(
+            context.pii_found, context.pii_candidate_count = screen_for_pii(
                 context.tmp,
                 context.resource,
                 context.qsv,

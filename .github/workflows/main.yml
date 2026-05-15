@@ -87,6 +87,9 @@ jobs:
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='datastore_test'" | grep -q 1 || \
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;"
+          # Prefect server backing database (shared Postgres; separate logical DB).
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='prefect_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE prefect_test OWNER postgres;"
           echo "Granting permissions (best-effort)..."
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"
@@ -155,19 +158,14 @@ jobs:
           # Install core dependencies
           pip install --upgrade ckanapi
           
-          # Clone datapusher-plus and install its requirements first
-          echo "Cloning datapusher-plus from branch: $DATAPUSHER_BRANCH"
-          git clone --depth 1 --branch "$DATAPUSHER_BRANCH" https://github.com/dathere/datapusher-plus.git /tmp/datapusher-plus
-          
-          # Install datapusher-plus requirements
-          cd /tmp/datapusher-plus
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
+          # Install datapusher-plus from the checked-out workspace so the
+          # current PR's code is what gets exercised — not whatever is on
+          # main. This makes the CI run a real validation of the branch.
+          echo "Installing datapusher-plus from $GITHUB_WORKSPACE"
+          if [ -f "$GITHUB_WORKSPACE/requirements.txt" ]; then
+            pip install -r "$GITHUB_WORKSPACE/requirements.txt"
           fi
-          
-          # Install datapusher-plus itself
-          pip install -e .
-          cd -
+          pip install -e "$GITHUB_WORKSPACE"
           
           # Install ckanext-scheming
           pip install -e 'git+https://github.com/ckan/ckanext-scheming.git#egg=ckanext-scheming'
@@ -286,6 +284,12 @@ jobs:
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
+          # v3.0: ingestion runs on Prefect instead of RQ.
+          ckanext.datapusher_plus.prefect_deployment_name = datapusher-plus/datapusher-plus
+          ckanext.datapusher_plus.prefect_work_pool = datapusher-plus
+          ckanext.datapusher_plus.prefect_ui_base = http://localhost:4200
+          ckanext.datapusher_plus.flow_timeout = 600
+          ckanext.datapusher_plus.max_quarantine_pct = 5.0
           EOF
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             echo "Patching selective keys in /srv/app/src/ckan/test-core.ini (only the keys you listed)..."
@@ -396,11 +400,32 @@ jobs:
             echo "ckan db init returned non-zero; continuing (may already be initialized)."
           fi
           echo "Setting datastore permissions..."
-          if ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
+          # This step's shell is `sh` (dash) on the ckan-dev image, which has
+          # no `set -o pipefail`. To still catch a crash in `ckan` (without it
+          # only psql's exit status is checked, and psql succeeds happily on an
+          # empty stream), capture the SQL to a file and check `ckan`'s exit
+          # status directly before piping it into psql.
+          PERMS_SQL="$(mktemp)"
+          if ! ckan -c /srv/app/src/ckan/test-core.ini datastore set-permissions > "$PERMS_SQL"; then
+            echo "ckan datastore set-permissions failed."
+            cat "$PERMS_SQL"
+            rm -f "$PERMS_SQL"
+            exit 1
+          fi
+          # CKAN 2.11 emits a CSRF deprecation warning to stdout before the
+          # SQL output, which would otherwise be piped into psql and trip a
+          # syntax error on the timestamp prefix. Strip only lines matching
+          # CKAN's actual log-line format (ISO-8601 timestamp + level), so a
+          # future SQL line that merely starts with a date is not dropped.
+          if grep -vE '^[0-9]{4}-[0-9]{2}-[0-9]{2}[ T][0-9]{2}:[0-9]{2}:[0-9]{2}' "$PERMS_SQL" \
+              | PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres --set ON_ERROR_STOP=1; then
             echo "Datastore permissions set."
           else
-            echo "Datastore permission step returned non-zero; continuing."
+            echo "Datastore permission step failed."
+            rm -f "$PERMS_SQL"
+            exit 1
           fi
+          rm -f "$PERMS_SQL"
       - name: Start CKAN server
         run: |
           set -eu
@@ -622,18 +647,76 @@ jobs:
           else
             echo "✗ Datastore write access failed"
           fi
+      - name: Start Prefect server (DP+ v3.0)
+        env:
+          PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:${{ env.POSTGRES_PASSWORD }}@postgres:5432/prefect_test
+          PREFECT_SERVER_API_HOST: 0.0.0.0
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          echo "PREFECT_API_URL=http://localhost:4200/api" >> $GITHUB_ENV
+          echo "Starting Prefect server (Postgres-backed) on :4200..."
+          nohup prefect server start > /tmp/prefect_server.log 2>&1 &
+          PREFECT_SERVER_PID=$!
+          echo "PREFECT_SERVER_PID=$PREFECT_SERVER_PID" >> $GITHUB_ENV
+          # Poll until the API is healthy. Server start can take 30–60s on
+          # first run as Alembic migrations apply.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4200/api/health > /dev/null 2>&1; then
+              echo "Prefect server is healthy after ${i}s"
+              break
+            fi
+            if ! kill -0 "$PREFECT_SERVER_PID" >/dev/null 2>&1; then
+              echo "Prefect server died:"
+              tail -n 80 /tmp/prefect_server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:4200/api/health || (tail -n 80 /tmp/prefect_server.log; exit 1)
+
+      - name: Register DataPusher+ deployment
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          ckan -c /srv/app/src/ckan/test-core.ini datapusher_plus prefect-deploy
+
+      - name: Start Prefect worker (DP+ v3.0)
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+          CKAN_INI: /srv/app/src/ckan/test-core.ini
+        run: |
+          set -eu
+          echo "Starting Prefect worker on the datapusher-plus pool..."
+          nohup prefect worker start --pool datapusher-plus > /tmp/prefect_worker.log 2>&1 &
+          PREFECT_WORKER_PID=$!
+          echo "PREFECT_WORKER_PID=$PREFECT_WORKER_PID" >> $GITHUB_ENV
+          sleep 5
+          if kill -0 "$PREFECT_WORKER_PID" >/dev/null 2>&1; then
+            echo "Prefect worker started"
+            head -n 30 /tmp/prefect_worker.log || true
+          else
+            echo "Prefect worker failed to start"
+            cat /tmp/prefect_worker.log
+            exit 1
+          fi
+
       - name: Start CKAN background job worker
         run: |
           set -eu
-          echo "Starting CKAN background job worker (CRITICAL for DataPusher Plus)..."
+          # Note: as of DP+ v3.0 the ingestion pipeline runs on Prefect,
+          # not RQ. We still start CKAN's RQ worker because other CKAN
+          # extensions (search reindex, mailer, etc.) rely on it.
+          echo "Starting CKAN background job worker..."
           nohup ckan -c /srv/app/src/ckan/test-core.ini jobs worker > /tmp/ckan_worker.log 2>&1 &
           WORKER_PID=$!
           echo "CKAN Worker PID=$WORKER_PID"
           echo "CKAN_WORKER_PID=$WORKER_PID" >> $GITHUB_ENV
-          
+
           # Give worker a moment to start up
           sleep 5
-          
+
           # Verify worker is running
           if kill -0 "$WORKER_PID" >/dev/null 2>&1; then
             echo "Background job worker started successfully"
@@ -653,7 +736,7 @@ jobs:
           echo "=== Testing DataPusher Plus Functionality - Remote Files from CSV ==="
           
           # Initialize results tracking
-          echo "timestamp,file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message" > /tmp/test_results.csv
+          echo "timestamp,file_name,upload_status,resource_id,datapusher_status,datastore_active,rows_imported,processing_time,error_message,expected,actual" > /tmp/test_results.csv
           
           # Initialize skipped files tracking
           echo "file_name,reason_skipped" > /tmp/skipped_files.csv
@@ -713,8 +796,17 @@ jobs:
           failed_files=0
           skipped_files=0
           
-          # Process each line from CSV (skip header)
-          tail -n +2 "$CSV_INPUT_FILE" | while IFS=',' read -r file_name file_url file_format file_mimetype file_desc || [ -n "$file_name" ]; do
+          # Process each line from CSV (skip header).
+          # Redirect the loop from a header-stripped temp file rather
+          # than `tail -n +2 ... | while` — a pipe runs the loop in a
+          # subshell, so passed_files/failed_files/total_files would be
+          # lost and the step would report "NO FILES TESTED" and exit 0
+          # even when every file failed. This step runs under `sh` (the
+          # container default), so bash process substitution `< <(...)`
+          # is NOT available — a plain file redirect is the portable way.
+          CSV_BODY=$(mktemp)
+          tail -n +2 "$CSV_INPUT_FILE" > "$CSV_BODY"
+          while IFS=',' read -r file_name file_url file_format file_mimetype file_desc expected || [ -n "$file_name" ]; do
             # Skip empty lines and comments
             [ -z "$file_name" ] && continue
             case "$file_name" in
@@ -731,7 +823,16 @@ jobs:
             file_format=$(echo "$file_format" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             file_mimetype=$(echo "$file_mimetype" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             file_desc=$(echo "$file_desc" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-            
+            expected=$(echo "$expected" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '\r')
+            # Expected ingestion outcome for this file:
+            #   complete - file should fully ingest into the datastore
+            #   skipped  - DP+ completes the job but loads no table
+            #              (zero-record / header-only file)
+            #   error    - DP+ should reject it (e.g. malformed CSV)
+            #   declined - DP+ should not even submit it (unsupported
+            #              format, empty/nested archive)
+            [ -z "$expected" ] && expected="complete"
+
             # Validate required fields
             if [ -z "$file_url" ]; then
               echo "SKIP: Missing URL for file: $file_name"
@@ -762,7 +863,8 @@ jobs:
             echo "URL: $file_url"
             echo "Format: $file_format"
             echo "Description: $file_desc"
-            
+            echo "Expected outcome: $expected"
+
             # Try to get file size
             file_size=$(curl -sI "$file_url" | grep -i content-length | cut -d' ' -f2 | tr -d '\r' || echo "unknown")
             echo "File size: $file_size bytes"
@@ -803,8 +905,18 @@ jobs:
               if [ -n "$resource_id" ] && [ "$resource_id" != "null" ]; then
                 # Monitor DataPusher Plus processing
                 echo "Monitoring DataPusher Plus processing for $file_name..."
-                max_attempts=90  # 3 minutes max per file
-                
+                # Flows now finish in ~20-30s (no caching backup, no
+                # deterministic retries), so 45 attempts x 2s = 90s is a
+                # generous ceiling. A 'declined' file is never submitted,
+                # so DP+ has no task_status row to ever return 'complete'
+                # -- poll it only briefly to confirm it stays unsubmitted
+                # rather than burning the full window.
+                if [ "$expected" = "declined" ]; then
+                  max_attempts=8
+                else
+                  max_attempts=45
+                fi
+
                 for attempt in $(seq 1 $max_attempts); do
                   sleep 2
                   
@@ -892,17 +1004,46 @@ jobs:
             end_time=$(date +%s)
             processing_time=$((end_time - start_time))
             
-            # Log results for this file
-            timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-            echo "$timestamp,$file_name,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message\"" >> /tmp/test_results.csv
-            
-            # Update counters
+            # Classify the observed outcome:
+            #   complete   - fully ingested into the datastore
+            #   skipped    - DP+ completed the job but loaded no table
+            #                (e.g. a zero-record / header-only file)
+            #   error      - DP+ submitted a flow and it errored
+            #   declined   - DP+ never submitted a flow (no task_status
+            #                row; the status API returns success=false)
+            #   incomplete - still running / stuck, or resource creation
+            #                failed -- always a real problem
             if [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "true" ]; then
+              actual="complete"
+            elif [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "complete" ] && [ "$datastore_active" = "false" ]; then
+              actual="skipped"
+            elif [ "$datapusher_status" = "error" ]; then
+              actual="error"
+            elif [ "$upload_status" = "SUCCESS" ] && [ "$datapusher_status" = "N/A" ]; then
+              actual="declined"
+            else
+              actual="incomplete"
+            fi
+
+            # Log results for this file. `expected`/`actual` are kept as
+            # the trailing columns so the awk summary counters can anchor
+            # on $(NF-1)/$NF — but the IFS=',' `read` loops that consume
+            # this file are not quote-aware, so strip commas from the
+            # free-text error_message to keep every column aligned.
+            timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+            error_message_csv=$(echo "$error_message" | tr ',' ';')
+            echo "$timestamp,$file_name,$upload_status,$resource_id,$datapusher_status,$datastore_active,$rows_imported,$processing_time,\"$error_message_csv\",$expected,$actual" >> /tmp/test_results.csv
+
+            # Update counters: a file passes when its observed outcome
+            # matches the outcome declared in base_files.csv's `expected`
+            # column -- so a correctly-declined unsupported format or a
+            # correctly-rejected malformed file counts as a PASS.
+            if [ "$actual" = "$expected" ]; then
               passed_files=$((passed_files + 1))
-              echo "  🎉 PASS: $file_name processed successfully"
+              echo "  ✅ PASS: $file_name -> $actual (as expected)"
             else
               failed_files=$((failed_files + 1))
-              echo "  ❌ FAIL: $file_name had issues"
+              echo "  ❌ FAIL: $file_name -> expected '$expected', got '$actual'"
             fi
             
             echo "  Processing time: ${processing_time}s"
@@ -910,9 +1051,10 @@ jobs:
             # Brief pause between files to avoid overwhelming the system
             echo "  Waiting 3 seconds before next file..."
             sleep 3
-            
-          done
-          
+
+          done < "$CSV_BODY"
+          rm -f "$CSV_BODY"
+
           # Count skipped files from CSV
           if [ -f /tmp/skipped_files.csv ]; then
             skipped_count=$(tail -n +2 /tmp/skipped_files.csv | wc -l)
@@ -951,12 +1093,17 @@ jobs:
           # Determine overall result
           if [ $total_files -eq 0 ] && [ $skipped_files -gt 0 ]; then
             echo ""
-            echo "⚠ OVERALL RESULT: NO TESTABLE FILES"
+            echo "❌ OVERALL RESULT: NO TESTABLE FILES"
             echo "All files in CSV were skipped - check URLs and accessibility"
+            # "nothing was tested" must not be indistinguishable from
+            # success: a run where every file was skipped/unreachable is
+            # a test-infra/URL-rot failure, not a pass.
+            overall_failed=1
           elif [ $total_files -eq 0 ]; then
             echo ""
-            echo "⚠ OVERALL RESULT: NO FILES TESTED"
+            echo "❌ OVERALL RESULT: NO FILES TESTED"
             echo "No valid entries found in CSV file"
+            overall_failed=1
           elif [ $failed_files -eq 0 ] && [ $passed_files -gt 0 ]; then
             echo ""
             echo "🎉 OVERALL RESULT: ALL TESTED FILES PASSED"
@@ -965,14 +1112,27 @@ jobs:
             echo ""
             echo "⚠ OVERALL RESULT: PARTIAL SUCCESS"
             echo "DataPusher Plus works with some remote files but has issues with others"
+            overall_failed=1
           else
             echo ""
             echo "❌ OVERALL RESULT: ALL TESTED FILES FAILED"
             echo "DataPusher Plus is not working correctly with remote files"
+            overall_failed=1
           fi
-          
+
           echo ""
           echo "Test completed at: $(date)"
+
+          # Fail the step when any tested file did not fully ingest
+          # (upload SUCCESS + datapusher_status complete + datastore
+          # active). Previously this step only echoed the verdict and
+          # always exited 0, so CI stayed green even when every file
+          # failed. The detailed per-file breakdown is still produced by
+          # the "Generate Combined Test Results" step (if: always()).
+          if [ "${overall_failed:-0}" -ne 0 ]; then
+            echo "::error::DataPusher+ ingestion failed for $failed_files of $total_files tested file(s)"
+            exit 1
+          fi
 
       - name: Generate Combined Test Results and Worker Analysis
         if: always()
@@ -1030,11 +1190,19 @@ jobs:
             total_files_in_dir=$((total_tests + skipped_count))
             
             if [ $total_tests -gt 0 ]; then
-              # Count results by status
-              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
-              failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
-              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
-              error_count=$(echo "$error_count" | tr -d '\n')
+              # Count results by expected-vs-actual outcome. A row
+              # passes when its last two CSV columns (expected,actual)
+              # are equal -- so a correctly-declined or correctly-
+              # rejected file counts as a pass, same as the gating logic
+              # in the test step above.
+              passed=$(tail -n +2 /tmp/test_results.csv 2>/dev/null | awk -F',' '$(NF-1)==$NF' | wc -l)
+              passed=${passed:-0}
+              failed=$(tail -n +2 /tmp/test_results.csv 2>/dev/null | awk -F',' '$(NF-1)!=$NF' | wc -l)
+              failed=${failed:-0}
+              # error_count: rows whose actual outcome is a hard error
+              # (DP+ submitted a flow that failed), expected or not.
+              error_count=$(tail -n +2 /tmp/test_results.csv 2>/dev/null | awk -F',' '$NF=="error"' | wc -l)
+              error_count=${error_count:-0}
               
               # Calculate success rates
               tested_success_rate=$(( passed * 100 / total_tests ))
@@ -1120,8 +1288,10 @@ jobs:
                 echo ""
                 
                 # Add worker analysis sections
-                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
-                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
+                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv 2>/dev/null || true)
+                success_jobs=${success_jobs:-0}
+                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv 2>/dev/null || true)
+                error_jobs=${error_jobs:-0}
                 
                 # File Analysis
                 echo "## File Analysis"
@@ -1252,7 +1422,7 @@ jobs:
               echo ""
               echo "### All Failed Files:"
               if [ -f /tmp/test_results.csv ]; then
-                tail -n +2 /tmp/test_results.csv | while IFS=',' read -r timestamp file_name upload_status resource_id datapusher_status datastore_active rows_imported processing_time error_message; do
+                tail -n +2 /tmp/test_results.csv | while IFS=',' read -r timestamp file_name upload_status resource_id datapusher_status datastore_active rows_imported processing_time error_message expected actual; do
                   clean_error=$(echo "$error_message" | sed 's/^"//;s/"$//')
                   echo "- **$file_name**: $clean_error"
                 done
@@ -1295,11 +1465,25 @@ jobs:
             /tmp/ckan_stdout.log
             /tmp/ckan_worker.log
             /tmp/worker_analysis.csv
+            /tmp/prefect_server.log
+            /tmp/prefect_worker.log
           retention-days: 3
           
       - name: Cleanup
         if: always()
         run: |
           echo "Stopping any running CKAN processes..."
-          pkill -f "ckan.*run"  
+          pkill -f "ckan.*run" || true
+          echo "Stopping Prefect server and worker..."
+          # The start steps launch the servers with a plain `nohup ... &`,
+          # so the exported PIDs are ordinary PIDs (not process-group
+          # leaders) -- `kill "$pid"` signals only the parent. The
+          # `pkill -f` lines below are what actually sweep the
+          # uvicorn/scheduler children. On GitHub-hosted runners the VM
+          # is torn down regardless, so this is best-effort tidy-up.
+          for pid in "${PREFECT_WORKER_PID:-}" "${PREFECT_SERVER_PID:-}"; do
+            [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+          done
+          pkill -f "prefect server start" || true
+          pkill -f "prefect worker start" || true
           echo "Cleanup completed"
