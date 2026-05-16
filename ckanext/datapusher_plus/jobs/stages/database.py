@@ -96,8 +96,26 @@ class DatabaseStage(BaseStage):
         )
 
     def _copy_data(self, context: ProcessingContext) -> int:
-        """
-        Copy data to datastore using PostgreSQL COPY.
+        """Copy data to datastore using PostgreSQL COPY.
+
+        Two strategies, controlled by
+        ``ckanext.datapusher_plus.use_truncate_freeze`` (default
+        ``True``):
+
+        * **TRUNCATE + COPY ... WITH FREEZE in one transaction.** The
+          FREEZE flag tells PostgreSQL the new rows are already
+          vacuum-clean, so subsequent VACUUMs can skip them — a real
+          speedup on multi-million-row loads. The catch is that
+          TRUNCATE's ``AccessExclusive`` lock is held for the duration
+          of the COPY, blocking any concurrent ``SELECT`` on the table
+          (see #258).
+        * **TRUNCATE + commit, then COPY (without FREEZE) in a fresh
+          transaction.** TRUNCATE's AccessExclusive lock is released
+          after a millisecond-scale commit; the COPY only acquires
+          ``RowExclusive``, so concurrent reads keep working. FREEZE
+          speedup is lost (the closing VACUUM ANALYZE picks up the
+          slack), but ingestions on a read-heavy datastore no longer
+          block dashboard queries.
 
         Args:
             context: Processing context
@@ -116,20 +134,41 @@ class DatabaseStage(BaseStage):
         try:
             cur = raw_connection.cursor()
 
-            # Truncate table for COPY FREEZE optimization
+            # Truncate the table. Required for FREEZE; useful even
+            # without it (gives a clean slate matching the new schema).
             self._truncate_table(cur, context.resource_id)
 
-            # Prepare COPY SQL
+            if not conf.USE_TRUNCATE_FREEZE:
+                # Release the AccessExclusive lock from TRUNCATE before
+                # the long COPY. Subsequent COPY runs in a new
+                # transaction and only grabs RowExclusive — concurrent
+                # SELECTs on the table proceed normally.
+                raw_connection.commit()
+
+            # Prepare COPY SQL. ``FREEZE 1`` only valid in the same
+            # transaction as the TRUNCATE/CREATE that emptied the table,
+            # so skip the option entirely when we just committed.
             col_names_list = [h["id"] for h in context.headers_dicts]
-            column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
-            copy_sql = sql.SQL(
-                "COPY {} ({}) FROM STDIN "
-                "WITH (FORMAT CSV, FREEZE 1, "
-                "HEADER 1, ENCODING 'UTF8');"
-            ).format(
-                sql.Identifier(context.resource_id),
-                column_names,
+            column_names = sql.SQL(",").join(
+                sql.Identifier(c) for c in col_names_list
             )
+            if conf.USE_TRUNCATE_FREEZE:
+                copy_sql = sql.SQL(
+                    "COPY {} ({}) FROM STDIN "
+                    "WITH (FORMAT CSV, FREEZE 1, "
+                    "HEADER 1, ENCODING 'UTF8');"
+                ).format(
+                    sql.Identifier(context.resource_id),
+                    column_names,
+                )
+            else:
+                copy_sql = sql.SQL(
+                    "COPY {} ({}) FROM STDIN "
+                    "WITH (FORMAT CSV, HEADER 1, ENCODING 'UTF8');"
+                ).format(
+                    sql.Identifier(context.resource_id),
+                    column_names,
+                )
 
             # Execute COPY
             with open(context.tmp, "rb", conf.COPY_READBUFFER_SIZE) as f:
@@ -141,7 +180,10 @@ class DatabaseStage(BaseStage):
 
             raw_connection.commit()
 
-            # VACUUM ANALYZE for performance
+            # VACUUM ANALYZE for performance. Cheap when FREEZE was used
+            # (most pages already marked clean), more substantial work
+            # when it wasn't — but the ingestion has already returned
+            # from the operator's point of view.
             self._vacuum_analyze(raw_connection, context.resource_id)
 
             return copied_count

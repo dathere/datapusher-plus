@@ -660,6 +660,7 @@ The **default** DP+ flow does NOT call these subflows — it inlines the underly
 | `ckanext.datapusher_plus.max_quarantine_pct` | `5.0` | Maximum percentage of rows that may be quarantined before the flow fails. |
 | `ckanext.datapusher_plus.pii_review_threshold` | `0` | When `> 0` and PII screening detects this many sensitive fields, the flow suspends for human approval via the Prefect UI. |
 | `ckanext.datapusher_plus.result_storage_block` | `local-file-system/datapusher-plus-results` | Prefect Block for task-result persistence. Swap to S3/GCS for multi-host worker pools. |
+| `ckanext.datapusher_plus.use_truncate_freeze` | `true` | When `true`, run `TRUNCATE` + `COPY ... WITH FREEZE` in one transaction (faster ingestion via FREEZE, but holds `AccessExclusive` lock for the full COPY). Set to `false` on read-heavy datastores to release the lock between TRUNCATE and COPY — concurrent `SELECT`s keep working at the cost of losing the FREEZE speedup. |
 
 Worker-process env-var fallbacks (read when CKAN config isn't loaded in the worker):
 

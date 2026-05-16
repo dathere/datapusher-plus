@@ -148,6 +148,27 @@ COPY_READBUFFER_SIZE = tk.asint(
     tk.config.get("ckanext.datapusher_plus.copy_readbuffer_size", "1048576")
 )
 
+# TRUNCATE + COPY ... WITH FREEZE strategy.
+#
+# When ``True`` (default), DP+ runs ``TRUNCATE TABLE`` and ``COPY ... WITH
+# FREEZE`` in the same transaction. ``WITH FREEZE`` marks the new rows as
+# already-vacuumed, so a subsequent VACUUM doesn't have to rewrite them —
+# substantial speedup on multi-million-row loads. The cost is that the
+# ``AccessExclusive`` lock acquired by ``TRUNCATE`` is held for the
+# full duration of the COPY, blocking *any* concurrent read of the
+# datastore table. Fine for write-heavy workloads; painful for read-heavy
+# workloads where the datastore is queried while an ingestion is running.
+#
+# When ``False``, DP+ commits the TRUNCATE immediately (brief
+# ``AccessExclusive``), then runs the COPY *without* ``FREEZE`` in a
+# separate transaction (only ``RowExclusive`` — allows concurrent
+# ``SELECT``s). The FREEZE speedup is lost; the subsequent
+# ``VACUUM ANALYZE`` still happens at the end, so eventual page state
+# is identical, just paid later. See #258 for the motivating case.
+USE_TRUNCATE_FREEZE = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.use_truncate_freeze", True)
+)
+
 # Datastore URLs
 DATASTORE_URLS = {
     "datastore_delete": "{ckan_url}/api/action/datastore_delete",
