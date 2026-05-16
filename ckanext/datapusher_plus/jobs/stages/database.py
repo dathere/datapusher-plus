@@ -182,8 +182,11 @@ class DatabaseStage(BaseStage):
 
             # VACUUM ANALYZE for performance. Cheap when FREEZE was used
             # (most pages already marked clean), more substantial work
-            # when it wasn't — but the ingestion has already returned
-            # from the operator's point of view.
+            # when it wasn't — but the COPY has already committed by
+            # this point, so concurrent reads of the table proceed
+            # while VACUUM runs. The operator's flow run blocks until
+            # VACUUM finishes, which is the right trade-off for
+            # write-once / read-many ingestion patterns.
             self._vacuum_analyze(raw_connection, context.resource_id)
 
             return copied_count
@@ -200,30 +203,50 @@ class DatabaseStage(BaseStage):
     ) -> None:
         """Truncate table to enable COPY FREEZE optimization.
 
-        Intentionally non-fatal: if the table doesn't exist yet (a brand
-        new resource), TRUNCATE raises and we want the subsequent
-        ``_create_datastore_table`` / COPY path to proceed anyway. But
-        a failed TRUNCATE leaves the transaction in the
-        ``InFailedSqlTransaction`` state — every subsequent statement
-        on the same connection (including the explicit ``commit()`` in
-        the opt-out branch of ``_copy_data``) raises until a
-        ``rollback()``. Roll back here so callers always observe a
-        clean transaction state on return, regardless of which branch
-        of ``_copy_data`` invoked us.
+        Intentionally non-fatal *only* when the table doesn't exist yet
+        (a brand-new resource) — TRUNCATE raises ``UndefinedTable`` and
+        we want the subsequent ``_create_datastore_table`` / COPY path
+        to proceed anyway. Every other ``psycopg2.Error`` (permission
+        denied, lock timeout, disk full, etc.) propagates as a
+        ``JobError`` so the job fails loudly rather than COPYing into a
+        non-truncated table that might already hold rows from a prior
+        run.
+
+        On the swallowed ``UndefinedTable`` path, we ``rollback()`` to
+        clear the aborted-transaction state so the caller's subsequent
+        ``commit()`` (in the opt-out branch of ``_copy_data``) doesn't
+        trip over ``InFailedSqlTransaction``.
 
         Args:
-            cursor: Database cursor
-            connection: Owning connection (for the rollback on failure)
-            resource_id: Resource ID (table name)
+            cursor: Database cursor.
+            connection: Owning connection (for the rollback on the
+                non-fatal branch).
+            resource_id: Resource ID (table name).
+
+        Raises:
+            utils.JobError: For any ``psycopg2.Error`` other than the
+                expected ``UndefinedTable`` ("relation does not exist").
         """
         try:
             cursor.execute(
                 sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(resource_id))
             )
-        except psycopg2.Error:
-            # Non-fatal: clear the aborted-transaction state so the
-            # caller's subsequent commit / COPY doesn't trip over it.
+        except psycopg2.errors.UndefinedTable:
+            # Expected: brand-new resource, table doesn't exist yet.
+            # Clear the aborted-transaction state so the caller's
+            # subsequent commit / COPY doesn't trip over it.
             connection.rollback()
+        except psycopg2.Error as e:
+            # Anything else (permission denied, lock timeout, disk
+            # full, ...) is not safe to silently swallow: continuing
+            # would COPY into a table that may already hold rows from
+            # a prior run. Rollback to leave the txn clean, then
+            # re-raise as a JobError so the flow's exception path
+            # records the failure on the Jobs row.
+            connection.rollback()
+            raise utils.JobError(
+                f"TRUNCATE TABLE {resource_id} failed: {e}"
+            ) from e
 
     def _vacuum_analyze(
         self, connection: psycopg2.extensions.connection, resource_id: str
