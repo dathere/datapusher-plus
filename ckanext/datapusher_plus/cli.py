@@ -27,6 +27,21 @@ requires_confirmation = click.option(
     "--yes", "-y", is_flag=True, help="Always answer yes to questions"
 )
 
+# Shared between ``resubmit`` and ``submit``. Default ``True`` preserves
+# the legacy "drain the list" behaviour (every resource gets a turn,
+# even after earlier ones fail). ``--stop-on-error`` is for users
+# wiring this into CI who want to bail on the first failure.
+continue_on_error_option = click.option(
+    "--continue-on-error/--stop-on-error",
+    "continue_on_error",
+    default=True,
+    show_default=True,
+    help=(
+        "When a resource fails or errors, continue submitting the rest "
+        "(default) or stop at the first non-OK outcome."
+    ),
+)
+
 
 def confirm(yes: bool):
     if yes:
@@ -54,22 +69,31 @@ def datapusher_plus():
 
 @datapusher_plus.command()
 @requires_confirmation
-def resubmit(yes: bool):
-    """Resubmit updated datastore resources."""
+@continue_on_error_option
+def resubmit(yes: bool, continue_on_error: bool):
+    """Resubmit updated datastore resources.
+
+    Exits non-zero when at least one resource didn't successfully
+    submit, so this can be wired into CI / cron with proper error
+    surfacing.
+    """
     confirm(yes)
 
     resource_ids = datastore_backend.get_all_resources_ids_in_datastore()
-    _submit(resource_ids)
+    if not _submit(resource_ids, continue_on_error=continue_on_error):
+        raise click.exceptions.Exit(code=1)
 
 
 @datapusher_plus.command()
 @click.argument("package", required=False)
 @requires_confirmation
-def submit(package: str, yes: bool):
+@continue_on_error_option
+def submit(package: str, yes: bool, continue_on_error: bool):
     """Submits resources from package.
 
     If no package ID/name specified, submits all resources from all
-    packages.
+    packages. Exits non-zero when at least one resource didn't
+    successfully submit (across all packages).
     """
     confirm(yes)
 
@@ -80,6 +104,7 @@ def submit(package: str, yes: bool):
     else:
         ids = [package]
 
+    any_failures = False
     for id in ids:
         package_show = tk.get_action("package_show")
         try:
@@ -100,25 +125,125 @@ def submit(package: str, yes: bool):
         if not pkg["resources"]:
             continue
         resource_ids = [r["id"] for r in pkg["resources"]]
-        _submit(resource_ids)
+        if not _submit(resource_ids, continue_on_error=continue_on_error):
+            any_failures = True
+            if not continue_on_error:
+                # stop processing further packages too
+                break
+
+    if any_failures:
+        raise click.exceptions.Exit(code=1)
 
 
-def _submit(resources: list[str]):
-    click.echo("Submitting {} datastore resources".format(len(resources)))
+def _submit(
+    resources: list[str],
+    *,
+    continue_on_error: bool = True,
+) -> bool:
+    """Submit a batch of resources to the datapusher-plus pipeline.
+
+    Each resource lands in exactly one of three buckets:
+
+    * ``ok``    — ``datapusher_submit`` returned truthy.
+    * ``fail``  — ``datapusher_submit`` returned falsy (declined / a
+      precondition such as the resource format gate wasn't met).
+    * ``error`` — ``datapusher_submit`` raised. The exception is
+      recorded against the resource id but doesn't bring the whole
+      batch down (so a single auth/network blip on one resource
+      doesn't lose all subsequent submissions).
+
+    Returns ``True`` iff every resource ended up in ``ok``. Callers
+    use this to set a non-zero exit status when at least one resource
+    didn't successfully submit — the prior implementation always
+    exited 0 regardless of how many "Fail" lines it printed, which
+    made `resubmit` impossible to wire into CI / monitoring.
+
+    Args:
+        resources: Resource ids to submit, in order.
+        continue_on_error: When ``False``, the first non-ok outcome
+            stops the loop. Default ``True`` (legacy behaviour: drain
+            the list).
+    """
+    total = len(resources)
+    click.echo(f"Submitting {total} datastore resource(s)")
+    if total == 0:
+        return True
+
     user = tk.get_action("get_site_user")(
         cast(Context, {"model": model, "ignore_auth": True}), {}
     )
     datapusher_submit = tk.get_action("datapusher_submit")
-    for id in resources:
-        click.echo("Submitting {}...".format(id), nl=False)
-        data_dict = {
-            "resource_id": id,
-            "ignore_hash": True,
-        }
-        if datapusher_submit({"user": user["name"]}, data_dict):
+
+    ok: list[str] = []
+    failed: list[str] = []
+    errored: list[tuple[str, str]] = []
+    stopped_early = False
+
+    for idx, resource_id in enumerate(resources, 1):
+        click.echo(f"[{idx}/{total}] Submitting {resource_id}... ", nl=False)
+        data_dict = {"resource_id": resource_id, "ignore_hash": True}
+        try:
+            submitted = datapusher_submit({"user": user["name"]}, data_dict)
+        except Exception as exc:
+            click.echo(f"ERROR: {exc}")
+            log.exception(
+                "datapusher_submit raised for resource %s", resource_id
+            )
+            errored.append((resource_id, str(exc)))
+            if not continue_on_error:
+                stopped_early = True
+                break
+            continue
+
+        if submitted:
             click.echo("OK")
+            ok.append(resource_id)
         else:
             click.echo("Fail")
+            failed.append(resource_id)
+            if not continue_on_error:
+                stopped_early = True
+                break
+
+    _print_submit_summary(
+        total, ok, failed, errored, stopped_early=stopped_early
+    )
+    return not failed and not errored
+
+
+def _print_submit_summary(
+    total: int,
+    ok: list[str],
+    failed: list[str],
+    errored: list[tuple[str, str]],
+    *,
+    stopped_early: bool,
+) -> None:
+    """Render the end-of-batch summary block.
+
+    Split out so unit tests can assert on the per-bucket lists
+    without driving the whole submit loop.
+    """
+    attempted = len(ok) + len(failed) + len(errored)
+    not_attempted = total - attempted
+
+    click.echo("")
+    click.echo("Submit summary:")
+    click.echo(f"  OK:      {len(ok)} / {total}")
+    click.echo(f"  Fail:    {len(failed)}")
+    click.echo(f"  Error:   {len(errored)}")
+    if stopped_early and not_attempted:
+        click.echo(f"  Skipped: {not_attempted} (stopped on first failure)")
+
+    if failed:
+        click.echo("Failed resources (declined / preconditions not met):")
+        for rid in failed:
+            click.echo(f"  - {rid}")
+
+    if errored:
+        click.echo("Errored resources (exception raised):")
+        for rid, message in errored:
+            click.echo(f"  - {rid}: {message}")
 
 
 @datapusher_plus.command(name="prefect-deploy")
