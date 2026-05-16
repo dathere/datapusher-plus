@@ -511,10 +511,12 @@ class MetadataStage(BaseStage):
             * stats aren't available, or
             * the lat/lon detection heuristic doesn't match.
 
-        Match shape mirrors ``FormatConverterStage._upload_simplified_resource``
-        (``format_converter.py:240``) so the existing jinja2 helpers
-        (``spatial_extent_wkt`` / ``spatial_extent_feature_collection``)
-        keep working unchanged.
+        Output shape mirrors
+        ``FormatConverterStage._upload_simplified_resource``
+        (``format_converter.py:240``): a GeoJSON-ish BoundingBox dict
+        whose ``coordinates`` is ``[[min_lon, min_lat], [max_lon,
+        max_lat]]``. Same shape ``spatial_extent_wkt`` and
+        ``spatial_extent_feature_collection`` consume.
 
         Args:
             context: Processing context
@@ -531,9 +533,13 @@ class MetadataStage(BaseStage):
 
         try:
             lat_field, lon_field = j2h.detect_lat_lon_fields(stats)
-        except Exception as e:
-            context.logger.warning(
-                f"Skipping CSV dpp_spatial_extent: lat/lon detection raised {e}"
+        except Exception:
+            # Unexpected — the helper is pure data manipulation. Log
+            # with traceback so an operator can see what shape of
+            # stats blew it up, then skip rather than fail the whole
+            # pipeline over an optional metadata field.
+            context.logger.exception(
+                "Skipping CSV dpp_spatial_extent: lat/lon detection raised"
             )
             return
 

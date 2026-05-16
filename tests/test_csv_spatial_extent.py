@@ -219,3 +219,55 @@ def test_maybe_write_csv_spatial_extent_empty_stats(stage, context_factory):
         stage._maybe_write_csv_spatial_extent(ctx)
 
     assert "dpp_spatial_extent" not in ctx.resource
+
+
+# ---------- jinja2 helpers round-trip from persisted shape ----------
+#
+# Together with the persistence path above, these guard the contract
+# that anything written by ``_maybe_write_csv_spatial_extent`` (or by
+# FormatConverterStage on the shapefile path, which writes the same
+# BoundingBox dict shape) can be consumed by the existing jinja2
+# helpers without manual flattening. Originally caught by Copilot's
+# review on PR #298 — ``spatial_extent_feature_collection`` had been
+# silently producing invalid GeoJSON for any resource carrying a
+# persisted ``dpp_spatial_extent``.
+
+
+def _persisted_bbox():
+    return {"type": "BoundingBox", "coordinates": [[-74.5, 40.5], [-73.5, 41.5]]}
+
+
+def test_spatial_extent_wkt_reads_persisted_bbox(helpers):
+    """``spatial_extent_wkt`` must accept the BoundingBox dict shape
+    that ``_maybe_write_csv_spatial_extent`` and FormatConverterStage
+    actually persist."""
+    ctx = {"resource": {"dpp_spatial_extent": _persisted_bbox()}}
+    wkt = helpers.spatial_extent_wkt(ctx)
+    # Constructed from min_lon/lat=-74.5/40.5, max_lon/lat=-73.5/41.5.
+    assert "POLYGON((-74.5 40.5" in wkt
+    assert "-73.5 41.5" in wkt
+
+
+def test_spatial_extent_feature_collection_reads_persisted_bbox(helpers):
+    """``spatial_extent_feature_collection`` must flatten the persisted
+    nested-list ``coordinates`` to ``[min_lon, min_lat, max_lon,
+    max_lat]`` before slotting into the format string. Before PR #298
+    fixed this it was indexing ``[min_lon, min_lat]`` as a scalar."""
+    ctx = {"resource": {"dpp_spatial_extent": _persisted_bbox()}}
+    geojson = helpers.spatial_extent_feature_collection(ctx)
+    # All four scalars must appear individually — if the helper still
+    # treated ``coordinates`` as flat we'd see Python-list reprs like
+    # ``[-74.5, 40.5]`` in the output instead.
+    assert "-74.5,40.5" in geojson
+    assert "-73.5,41.5" in geojson
+    assert "[-74.5, 40.5]" not in geojson  # regression guard
+    assert "FeatureCollection" in geojson
+
+
+def test_spatial_extent_feature_collection_rejects_wrong_shape(helpers):
+    """Defence in depth: if some future code persists
+    ``dpp_spatial_extent`` without a ``type`` of ``"BoundingBox"``,
+    fail loudly rather than emit malformed GeoJSON."""
+    ctx = {"resource": {"dpp_spatial_extent": {"type": "Polygon", "coordinates": []}}}
+    with pytest.raises(ValueError):
+        helpers.spatial_extent_feature_collection(ctx)

@@ -550,8 +550,24 @@ def spatial_extent_feature_collection(
         else:
             bbox = [float(coord) for coord in bbox]
     else:
-        if context.get("resource").get("dpp_spatial_extent"):
-            bbox = context.get("resource").get("dpp_spatial_extent").get("coordinates")
+        extent = context.get("resource").get("dpp_spatial_extent")
+        if extent:
+            # ``dpp_spatial_extent`` is persisted as a GeoJSON-ish
+            # BoundingBox: ``{"type": "BoundingBox", "coordinates":
+            # [[min_lon, min_lat], [max_lon, max_lat]]}``. Flatten to
+            # the [min_lon, min_lat, max_lon, max_lat] order this
+            # function's format-string expects. Same shape that
+            # ``spatial_extent_wkt`` consumes.
+            if extent.get("type") == "BoundingBox":
+                coords = extent.get("coordinates")
+                bbox = [
+                    float(coords[0][0]),
+                    float(coords[0][1]),
+                    float(coords[1][0]),
+                    float(coords[1][1]),
+                ]
+            else:
+                raise ValueError("Spatial extent is not a BoundingBox")
         else:
             if context.get("dpp").get("NO_LAT_LON_FIELDS"):
                 raise ValueError("No latitude or longitude fields found")
