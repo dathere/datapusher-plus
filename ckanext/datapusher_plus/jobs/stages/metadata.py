@@ -82,10 +82,15 @@ class MetadataStage(BaseStage):
             if raw_connection:
                 raw_connection.close()
 
-        # Update resource metadata
-        self._update_resource_metadata(context)
-
-        # Set alias and calculate record count
+        # Datastore-create FIRST, then update resource metadata. Order
+        # matters because ``send_resource_to_datastore`` (with
+        # ``calculate_record_count=True``) internally calls
+        # ``datastore_create``, which overwrites the resource dict in
+        # CKAN with its own derived fields (``datastore_active``,
+        # ``total_record_count``). Doing our own resource-update FIRST
+        # then having datastore_create stomp over it was silently
+        # dropping the ``preview`` / ``preview_rows`` fields the UI
+        # uses to decide whether to show a preview pane.
         dsu.send_resource_to_datastore(
             resource=None,
             resource_id=context.resource["id"],
@@ -97,6 +102,11 @@ class MetadataStage(BaseStage):
 
         if alias:
             context.logger.info(f'Created alias "{alias}" for "{context.resource_id}"...')
+
+        # Now update resource metadata; ``_update_resource_metadata``
+        # re-fetches the latest resource dict from CKAN before writing,
+        # so our updates land on top of datastore_create's changes.
+        self._update_resource_metadata(context)
 
         metadata_elapsed = time.perf_counter() - metadata_start
         context.logger.info(
@@ -388,13 +398,24 @@ class MetadataStage(BaseStage):
                 raise utils.JobError(f"Postgres COPY failed: {e}")
 
     def _update_resource_metadata(self, context: ProcessingContext) -> None:
-        """
-        Update resource metadata fields.
+        """Update resource metadata fields.
+
+        Re-fetches the resource from CKAN before writing because the
+        caller (``process``) runs this AFTER ``send_resource_to_datastore``,
+        which calls ``datastore_create`` and mutates the persisted
+        resource dict. Without the refetch we'd be writing over a stale
+        snapshot from before the datastore-create stage, silently
+        dropping fields like ``datastore_active`` /
+        ``total_record_count`` that ``datastore_create`` just set.
 
         Args:
             context: Processing context
         """
         record_count = context.dataset_stats.get("RECORD_COUNT", 0)
+
+        # Re-fetch to pick up datastore_create's side effects before
+        # layering our preview-related fields on top.
+        context.resource = dsu.get_resource(context.resource_id)
 
         context.resource["datastore_active"] = True
         context.resource["total_record_count"] = record_count
