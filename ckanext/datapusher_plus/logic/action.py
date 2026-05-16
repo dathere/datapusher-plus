@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-import ckan.lib.jobs as rq_jobs
-
 import logging
 import json
 import datetime
 
+from dataclasses import asdict
 from dateutil.parser import parse as parse_date
 from six.moves.urllib.parse import urljoin  # type: ignore # noqa
 
@@ -19,8 +18,9 @@ import ckan.plugins as p
 from ckan.common import config
 import ckanext.datapusher_plus.logic.schema as dpschema
 import ckanext.datapusher_plus.interfaces as interfaces
-import ckanext.datapusher_plus.jobs as jobs
+import ckanext.datapusher_plus.prefect_client as prefect_client
 import ckanext.datapusher_plus.utils as utils
+from ckanext.datapusher_plus.jobs.runtime_context import JobInput
 
 from ckanext.datapusher_plus.model import get_job_details
 
@@ -29,7 +29,6 @@ _get_or_bust = logic.get_or_bust
 _validate = ckan.lib.navl.dictization_functions.validate
 
 tk = p.toolkit
-get_queue = rq_jobs.get_queue
 side_effect_free = logic.side_effect_free
 
 if tk.check_ckan_version("2.10"):
@@ -124,19 +123,9 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
             seconds=tk.asint(config.get("ckan.datapusher.assume_task_stillborn_after", 5))
         )
         if existing_task.get("state") == "pending":
-            import re
-
-            # Two bugs were fixed here: (a) .group()[0] returns the first
-            # character of the whole match, not the captured group — the
-            # intent is .group(1); (b) re.search returns None on no-match,
-            # which would AttributeError on .group(). Now we skip non-matches.
-            queued_res_ids = []
-            for job in get_queue().get_jobs():
-                if "push_to_datastore" not in job.description:
-                    continue
-                m = re.search(r"'resource_id': u?'([^']+)'", job.description)
-                if m:
-                    queued_res_ids.append(m.group(1))
+            # Query Prefect for resource_ids currently in non-terminal flow
+            # runs. Replaces the v2 RQ-queue regex scan.
+            queued_res_ids = prefect_client.get_running_resource_ids()
             updated = datetime.datetime.strptime(
                 existing_task["last_updated"], "%Y-%m-%dT%H:%M:%S.%f"
             )
@@ -145,13 +134,12 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
                 res_id not in queued_res_ids
                 and time_since_last_updated > assume_task_stillborn_after
             ):
-                # it's not on the queue (and if it had just been started then
-                # its taken too long to update the task_status from pending -
-                # the first thing it should do in the datapusher job).
-                # Let it be restarted.
+                # The resource isn't being processed by any Prefect flow run,
+                # and the task_status hasn't been updated past the stillborn
+                # threshold — let the new submission restart it.
                 log.info(
-                    "A pending task was found %r, but its not found in "
-                    "the queue %r and is %s hours old",
+                    "A pending task was found %r, but it is not in Prefect "
+                    "(%r) and is %s old",
                     existing_task["id"],
                     queued_res_ids,
                     time_since_last_updated,
@@ -202,18 +190,41 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
             "original_url": resource_dict.get("url"),
         },
     }
-    dp_timeout = tk.config.get("ckan.datapusher.timeout", 3000)
+    # The flow envelope timeout. ``ckan.datapusher.timeout`` is honored for
+    # backward compatibility; new deployments should use
+    # ``ckanext.datapusher_plus.flow_timeout`` directly.
+    dp_timeout = int(
+        tk.config.get(
+            "ckanext.datapusher_plus.flow_timeout",
+            tk.config.get("ckan.datapusher.timeout", 7200),
+        )
+    )
+
+    # The DP+ job_id (== task_id) is generated here, before submission, so
+    # CKAN's task_status row references the same id the flow will write
+    # into the Jobs table via ``add_pending_job``.
+    import uuid
+
+    job_id = str(uuid.uuid4())
+    job_input = JobInput(
+        task_id=job_id,
+        resource_id=res_id,
+        ckan_url=site_url,
+        input=data,
+        dry_run=False,
+    )
     try:
-        job = tk.enqueue_job(
-            jobs.datapusher_plus_to_datastore,
-            [data],
-            rq_kwargs=dict(timeout=dp_timeout),
+        flow_run_id = prefect_client.submit_flow_run(
+            asdict(job_input), timeout=dp_timeout
         )
     except Exception as e:
         log.error("Error submitting job to DataPusher: %s", e)
         return False
 
-    value = json.dumps({"job_id": job.id})
+    # Public contract: ``job_id`` keeps working for v2 consumers (CKAN UI's
+    # status page reads it). ``flow_run_id`` is the new field for clients
+    # that want to deep-link into the Prefect UI.
+    value = json.dumps({"job_id": job_id, "flow_run_id": flow_run_id})
     task["value"] = value
     task["state"] = "pending"
     task["last_updated"] = str(datetime.datetime.utcnow())
@@ -340,12 +351,18 @@ def datapusher_status(context: Context, data_dict: dict[str, Any]) -> dict[str, 
     value = json.loads(task["value"])
     job_key = value.get("job_key")
     job_id = value.get("job_id")
-    url = None
+    flow_run_id = value.get("flow_run_id")
+    # ``job_url`` is now a Prefect-UI deep-link when available, so the CKAN
+    # status page can jump straight into the run graph.
+    prefect_ui_base = config.get("ckanext.datapusher_plus.prefect_ui_base")
+    url = (
+        f"{prefect_ui_base.rstrip('/')}/runs/flow-run/{flow_run_id}"
+        if (prefect_ui_base and flow_run_id)
+        else None
+    )
     job_detail = None
 
     if job_id:
-        # db.init(config)
-        # job_detail = db.get_job(job_id)
         job_detail = get_job_details(job_id)
 
         if job_detail and job_detail.get("logs"):
@@ -362,6 +379,7 @@ def datapusher_status(context: Context, data_dict: dict[str, Any]) -> dict[str, 
     return {
         "status": task["state"],
         "job_id": job_id,
+        "flow_run_id": flow_run_id,
         "job_url": url,
         "last_updated": task["last_updated"],
         "job_key": job_key,

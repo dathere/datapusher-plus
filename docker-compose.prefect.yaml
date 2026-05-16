@@ -1,0 +1,74 @@
+# Development / demo topology for DataPusher+ on Prefect.
+#
+# Brings up:
+#   * postgres        — shared by Prefect server AND CKAN datastore in dev.
+#   * prefect-server  — UI on http://localhost:4200, no Redis dependency.
+#   * prefect-worker  — process worker subscribed to the ``datapusher-plus``
+#                       work pool.
+#
+# Operators in production should run their own Postgres and either point
+# Prefect at it or use Prefect Cloud. This compose file is for getting
+# the stack up locally in one command:
+#
+#   docker compose -f docker-compose.prefect.yaml up
+
+services:
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: prefect
+      POSTGRES_PASSWORD: prefect
+      POSTGRES_DB: prefect
+    volumes:
+      - prefect-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prefect"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect@postgres:5432/prefect
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_UI_API_URL: http://localhost:4200/api
+    command: prefect server start
+    ports:
+      - "4200:4200"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  prefect-worker:
+    # The worker image must have CKAN + datapusher-plus installed so it can
+    # import the flow entrypoint and reach the datastore. In production
+    # this is a custom image; for the dev compose we bind-mount the source
+    # tree and install editable so changes are picked up on worker restart.
+    image: prefecthq/prefect:3-latest
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      # CKAN config must be reachable to the worker — point this at the
+      # operator's ckan.ini. The dev compose assumes ./ckan.ini is bind-
+      # mounted into the worker.
+      CKAN_INI: /etc/ckan/default/ckan.ini
+    volumes:
+      - ./:/opt/datapusher-plus
+    command: >
+      bash -c "
+        pip install -e /opt/datapusher-plus &&
+        prefect worker start --pool datapusher-plus
+      "
+    restart: on-failure
+
+volumes:
+  prefect-postgres:

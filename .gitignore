@@ -37,3 +37,7 @@ datapusher/config_local.py
 *.pybak*
 
 .vscode
+
+# qsv stats/freq cache files (auto-generated since qsv 17.0.0 next to inputs)
+tests/static/*.stats.csv
+tests/static/*.freq.csv

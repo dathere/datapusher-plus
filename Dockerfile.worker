@@ -1,0 +1,35 @@
+# DataPusher+ Prefect worker image.
+#
+# Extends the base Prefect 3 image with qsv (the data-wrangling toolkit
+# DP+ stages call as a subprocess) and the datapusher-plus Python
+# package itself. Used by both the dev compose stack and integration
+# tests.
+#
+# Build from the repo root:
+#   docker build -f Dockerfile.worker -t datapusher-plus-worker:dev .
+
+FROM prefecthq/prefect:3-latest
+
+ARG QSV_VERSION=20.0.0
+ARG QSV_RELEASE=https://github.com/dathere/qsv/releases/download
+
+# qsvdp is the datapusher-tuned qsv build that DP+ expects at the path
+# configured by ckanext.datapusher_plus.qsv_bin.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL "${QSV_RELEASE}/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.zip" -o /tmp/qsv.zip \
+    && unzip -j /tmp/qsv.zip 'qsvdp' -d /usr/local/bin/ \
+    && chmod +x /usr/local/bin/qsvdp \
+    && rm /tmp/qsv.zip
+
+# Install DP+ from the bind-mounted source tree. The compose file mounts
+# the repo at /opt/datapusher-plus so editable installs pick up local
+# changes on worker restart.
+WORKDIR /opt/datapusher-plus
+COPY requirements.txt /opt/datapusher-plus/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# The worker's actual command is provided by docker-compose; this is the
+# default fallback.
+CMD ["prefect", "worker", "start", "--pool", "datapusher-plus"]

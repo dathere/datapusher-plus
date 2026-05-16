@@ -60,11 +60,18 @@ class ProcessingContext:
 
     # Processing flags and results
     pii_found: bool = False
+    pii_candidate_count: int = 0
     file_hash: str = ""
     content_length: int = 0
 
     # Intermediate files (for tracking)
     qsv_index_file: str = ""
+
+    # Quarantine state set by ValidationStage when qsv flags bad rows;
+    # consumed by validate_task to enforce ``max_quarantine_pct`` and
+    # attach the Prefect Quarantine artifact.
+    quarantined_rows: int = 0
+    quarantine_csv_path: str = ""
 
     @property
     def metadata(self) -> Dict[str, Any]:

@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+* **BREAKING** Bumped `MINIMUM_QSV_VERSION` from `4.0.0` to `20.0.0`. Operators must upgrade their `qsv` binary at the path configured by `ckanext.datapusher_plus.qsv_bin` before deploying this version — DP+ will refuse to start otherwise. See [qsv 20.0.0 release notes](https://github.com/dathere/qsv/releases/tag/20.0.0) and the migration notes below. ([README install snippet](README.md#option-2-install-prebuilt-qsv-binaries) updated accordingly.)
+
+### qsv 20.0.0 migration notes (operator-facing)
+The new minimum brings the following user-visible changes from qsv 4.0.0 → 20.0.0 that may affect existing CKAN deployments:
+
+* **Postgres column names may shift for edge-case headers.** qsv's `safe_header_names` now enforces a 60-**byte** cap on the *final* sanitized column name (including any duplicate-disambiguation suffix like `_2`), snapping at UTF-8 char boundaries. Previously the cap was char-based and could produce names up to ~240 bytes, exceeding Postgres' default `NAMEDATALEN` of 63 bytes.
+  * **ASCII-only headers without duplicates:** unchanged.
+  * **ASCII headers with duplicate names** that previously landed at 61–63 chars: now 1–2 chars shorter.
+  * **CJK / accented / emoji headers** that previously produced names > 60 bytes: now aggressively trimmed to fit.
+  * Resources ingested under qsv ≤ 19.1.0 whose sanitized column names fell in either of the latter two buckets will get **different** column names on resubmit under qsv 20.0.0. After upgrading, re-submit affected resources (or drop the old datastore table first) so schema and `dpp_suggestions` stay in sync.
+* **`qsv stats --percentiles` consolidated column format changed.** When `--percentiles` is enabled (via `ckanext.datapusher_plus.summary_stats_options`), the single `percentiles` column now emits entries as `<N>: <value>` joined by `|` (e.g. `"5: 1|10: 1|40: 2|60: 3|90: 5|95: 5"`) instead of bare values joined by `|` (qsv 12.0.0). DP+ does not pass `--percentiles` by default (`SUMMARY_STATS_OPTIONS` in `config.py` is unset), so default deployments are unaffected. **Risk surface:** deployments that have set `summary_stats_options = "--percentiles"` AND parse the consolidated `percentiles` column in scheming `formula:` / `suggest_formula:` expressions. Audit those formulas before upgrading and update parsers to handle the `<N>: ` prefix in each pipe-delimited entry.
+* **`qsv stats` cache fingerprint changed from SHA256 to BLAKE3** (qsv 9.1.0). On first run after upgrade, any qsv stats caches are silently regenerated. No action required.
+* **`qsv stats` output adds `n_negative`/`n_zero`/`n_positive` columns** for numeric fields (qsv 11.0.2) and weighted-stats columns (qsv 12.0.0). DP+ consumes the stats CSV via `csv.DictReader` and only reads named columns, so the additions are transparent.
+* **`qsv safenames` verify-mode JSON output corrections** (qsv 20.0.0): `unsafe_headers` strings now have surrounding `"` and whitespace trimmed; `duplicate_headers` is sorted alphabetically; verify counts now correctly include duplicate-suffix renames. DP+ only reads `unsafe_headers` length and logs the list, so these corrections are benign for the plugin.
+
+See `docs/qsv-20.0.0-upgrade-test-plan.md` for the regression-test checklist used to validate the bump.
+
 ## What's Changed
 * Update README with some fixes by @tino097 in https://github.com/dathere/datapusher-plus/pull/178
 * Druf apr2025 by @jqnatividad in https://github.com/dathere/datapusher-plus/pull/180

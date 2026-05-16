@@ -21,7 +21,7 @@ def screen_for_pii(
     qsv: QSVCommand,
     temp_dir: str,
     logger: logging.Logger,
-) -> bool:
+) -> tuple[bool, int]:
     """
     Screen a file for Personally Identifiable Information (PII) using qsv's searchset command.
 
@@ -33,7 +33,9 @@ def screen_for_pii(
         logger: Logger instance
 
     Returns:
-        bool: True if PII is found, False otherwise
+        tuple[bool, int]: ``(pii_found, pii_candidate_count)``. The
+        non-quick path reports an exact match count; the quick path can
+        only detect presence and reports a degenerate ``1``.
     """
 
     pii_found_abort = conf.PII_FOUND_ABORT
@@ -65,6 +67,9 @@ def screen_for_pii(
         p = Path(__file__).with_name(pii_regex_file)
 
     pii_found = False
+    # Count of PII candidate matches, surfaced to the caller so the
+    # v3.0 PII-review suspend gate has a real number to threshold on.
+    pii_candidate_count = 0
     pii_regex_fname = p.absolute()
 
     if conf.PII_QUICK_SCREEN:
@@ -81,6 +86,8 @@ def screen_for_pii(
         pii_candidate_row = str(qsv_searchset.stderr)
         if pii_candidate_row:
             pii_found = True
+            # Quick screen only detects presence, not a count.
+            pii_candidate_count = 1
 
     else:
         logger.info("Scanning for PII using %s...", pii_regex_file)
@@ -102,6 +109,7 @@ def screen_for_pii(
         pii_rows_with_matches = int(pii_json["rows_with_matches"])
         if pii_total_matches > 0:
             pii_found = True
+            pii_candidate_count = pii_total_matches
 
     if pii_found and pii_found_abort and not conf.PII_SHOW_CANDIDATES:
         logger.error("PII Candidate/s Found!")
@@ -246,4 +254,4 @@ def screen_for_pii(
     elif not pii_found:
         logger.info("PII Scan complete. No PII candidate/s found.")
 
-    return pii_found
+    return pii_found, pii_candidate_count

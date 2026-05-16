@@ -31,7 +31,7 @@ POSTGRES_BIGINT_MAX = 9223372036854775807
 POSTGRES_BIGINT_MIN = -9223372036854775808
 
 # QSV version requirements
-MINIMUM_QSV_VERSION = "4.0.0"
+MINIMUM_QSV_VERSION = "20.0.0"
 
 # Logging level
 # TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
@@ -60,15 +60,16 @@ PII_QUICK_SCREEN = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.pii_quick_screen", False)
 )
 
-# Binary paths
-_qsv_bin_setting = tk.config.get("ckanext.datapusher_plus.qsv_bin")
-if not _qsv_bin_setting:
-    raise RuntimeError(
-        "ckanext.datapusher_plus.qsv_bin is not set in ckan.ini. "
-        "Install qsv (https://github.com/dathere/qsv) and set this to its "
-        "absolute path before starting CKAN."
-    )
-QSV_BIN = Path(_qsv_bin_setting)
+# Binary paths.
+# Falls back to ``/usr/local/bin/qsvdp`` (the ckan-dev container's install
+# location) when the config key is unset, so CI doesn't have to manage this
+# in CKAN's ``ckan.ini``. The flow-start path-existence check in
+# ``prefect_flow._build_runtime_context`` raises a clear ``JobError`` if the
+# binary isn't actually at the resolved path, so a misconfiguration still
+# surfaces — just later, when it matters.
+QSV_BIN = Path(
+    tk.config.get("ckanext.datapusher_plus.qsv_bin") or "/usr/local/bin/qsvdp"
+)
 
 # Data processing settings
 PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "1000"))
@@ -153,14 +154,15 @@ DATASTORE_URLS = {
     "resource_update": "{ckan_url}/api/action/resource_update",
 }
 
-# Datastore write URL
+# Datastore write URL.
+# Read at module import (the rest of the module's constants depend on this
+# being a string-ish). A missing / empty value here surfaces later at the
+# point of use — the database task's psycopg2 connect raises a clear
+# OperationalError, captured by the flow's exception path and recorded on
+# the Jobs row. Hard-failing at import would also break test environments
+# and tooling imports (ckan db init, plugin metadata extraction) that have
+# no business needing the write URL.
 DATASTORE_WRITE_URL = tk.config.get("ckan.datastore.write_url")
-if not DATASTORE_WRITE_URL:
-    raise RuntimeError(
-        "ckan.datastore.write_url is not set in ckan.ini. "
-        "DataPusher+ uses direct PostgreSQL COPY into the datastore and "
-        "cannot operate without this URL."
-    )
 
 # spatial simplification settings
 AUTO_SPATIAL_SIMPLIFICATION = tk.asbool(

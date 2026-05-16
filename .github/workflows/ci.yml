@@ -16,12 +16,12 @@ on:
       qsv_version:
         description: 'qsv version to install'
         required: false
-        default: '9.1.0'
+        default: '20.0.0'
         type: string
       polling_timeout_seconds:
         description: 'Max seconds to wait for DataPusher to process each file'
         required: false
-        default: '20'
+        default: '90'
         type: string
 
 concurrency:
@@ -33,8 +33,11 @@ permissions:
 
 env:
   FILES_DIR: ${{ github.event.inputs.testing_directory || 'quick' }}
-  QSV_VER: ${{ github.event.inputs.qsv_version || '9.1.0' }}
-  POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '20' }}
+  QSV_VER: ${{ github.event.inputs.qsv_version || '20.0.0' }}
+  # 90s ceiling (45 polls x 2s): a Prefect flow run spawns a fresh interpreter
+  # and bootstraps the full CKAN app context, so per-job latency is ~20-30s --
+  # well above the old RQ path. Matches main.yml's polling window.
+  POLLING_TIMEOUT: ${{ github.event.inputs.polling_timeout_seconds || '90' }}
   TESTING_REPO_RAW: 'https://raw.githubusercontent.com/dathere/datapusher-plus_testing/main'
   TESTING_REPO_API: 'https://api.github.com/repos/dathere/datapusher-plus_testing/contents'
   CKAN_VERSION: "2.11"
@@ -127,6 +130,9 @@ jobs:
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE ckan_test OWNER ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='datastore_test'" | grep -q 1 || \
             PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE datastore_test OWNER ckan_default;"
+          # Prefect server backing database (shared Postgres; separate logical DB).
+          PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -Atc "SELECT 1 FROM pg_database WHERE datname='prefect_test'" | grep -q 1 || \
+            PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "CREATE DATABASE prefect_test OWNER postgres;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE ckan_test TO ckan_default;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT ALL PRIVILEGES ON DATABASE datastore_test TO datastore_write;"
           PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U postgres -c "GRANT CONNECT ON DATABASE datastore_test TO datastore_read;"
@@ -169,41 +175,172 @@ jobs:
       - name: Install qsv
         run: |
           set -eu
-          QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-gnu.zip"
-          QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
 
-          echo "Downloading qsv GNU version $QSV_VER"
-          mkdir -p /tmp/qsv-install && cd /tmp/qsv-install
+          QSV_DEB_REPO_URL="https://dathere.github.io/qsv-deb-releases"
+          QSV_BIN_TARGET="/usr/local/bin/qsvdp"
 
-          wget -q "$QSV_URL" -O "$QSV_ZIP" || { echo "Failed to download qsv"; exit 1; }
-          unzip -q "$QSV_ZIP"
-          ls -lh
+          # Try the official Debian package first (qsv-datapusher-plus, which
+          # ships the qsvdp binary). The apt repo at $QSV_DEB_REPO_URL only
+          # carries the latest version per package, so we fall back to the
+          # GitHub release zip when the requested QSV_VER doesn't match the
+          # repo's candidate (or when anything else about the deb path fails).
+          # See https://github.com/dathere/qsv#debian-package
+          # On any failure inside install_via_deb, drop the qsv apt source +
+          # keyring so subsequent apt-get invocations in later steps don't
+          # keep hitting (and possibly erroring on) the qsv repo.
+          _cleanup_qsv_apt_state() {
+            rm -f /etc/apt/sources.list.d/qsv.list /usr/share/keyrings/qsv-deb.gpg
+          }
 
-          # Always install as /usr/local/bin/qsvdp so the CKAN config (qsv_bin)
-          # path is stable regardless of whether the archive ships qsvdp or qsv.
-          if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
-          elif [ -f "qsv" ]; then SRC_BIN="qsv"
-          else echo "ERROR: No qsv binary found"; ls -la; exit 1; fi
+          install_via_deb() {
+            echo "=== Attempting Debian package install (qsv-datapusher-plus) ==="
+            if _install_via_deb_inner; then
+              return 0
+            fi
+            _cleanup_qsv_apt_state
+            return 1
+          }
 
-          chmod +x "$SRC_BIN"
-          mv -f "$SRC_BIN" /usr/local/bin/qsvdp
+          _install_via_deb_inner() {
+            # Refresh the apt cache up front so the gnupg install below
+            # can't 404 on stale package files even if no earlier step has
+            # run apt-get update recently.
+            apt-get update -y \
+              || { echo "apt-get update failed before gnupg install"; return 1; }
 
-          if ! /usr/local/bin/qsvdp --version; then
-            echo "GNU version failed. Falling back to musl..."
-            rm -f /usr/local/bin/qsvdp "$QSV_ZIP"
-            QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
-            wget -q "https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}" -O "$QSV_ZIP" || exit 1
-            unzip -qo "$QSV_ZIP"
+            # gpg isn't in the ckan-dev base image; install it if missing so we
+            # can use the documented signed-by approach.
+            if ! command -v gpg >/dev/null 2>&1; then
+              apt-get install -y --no-install-recommends gnupg \
+                || { echo "Failed to install gnupg"; return 1; }
+            fi
+
+            install -d -m 0755 /usr/share/keyrings
+            # Split the wget|gpg pipeline into two checked steps: this
+            # workflow's "Install qsv" step runs under `sh -e {0}` (dash on
+            # the ckan-dev image), where `set -o pipefail` isn't reliably
+            # available, so a piped wget failure would otherwise be masked
+            # by gpg --dearmor's exit status.
+            wget -qO /tmp/qsv-deb.gpg "${QSV_DEB_REPO_URL}/qsv-deb.gpg" \
+              || { echo "Failed to download qsv repo GPG key"; return 1; }
+            gpg --dearmor -o /usr/share/keyrings/qsv-deb.gpg < /tmp/qsv-deb.gpg \
+              || { echo "Could not dearmor qsv repo GPG key"; return 1; }
+            rm -f /tmp/qsv-deb.gpg
+
+            echo "deb [signed-by=/usr/share/keyrings/qsv-deb.gpg] ${QSV_DEB_REPO_URL} ./" \
+              > /etc/apt/sources.list.d/qsv.list
+
+            apt-get update -y \
+              || { echo "apt-get update failed after adding qsv repo"; return 1; }
+
+            # Only proceed if the repo's candidate version matches QSV_VER —
+            # the apt repo carries one version per package, so older QSV_VER
+            # values must use the zip flow.
+            candidate=$(apt-cache policy qsv-datapusher-plus 2>/dev/null | awk '/Candidate:/ {print $2; exit}')
+            echo "qsv-datapusher-plus repo candidate: ${candidate:-<none>}"
+            echo "Requested QSV_VER:                  ${QSV_VER}"
+            case "$candidate" in
+              "${QSV_VER}"|"${QSV_VER}-"*) ;;
+              *)
+                echo "Repo candidate does not match QSV_VER; skipping deb install"
+                return 1
+                ;;
+            esac
+
+            apt-get install -y qsv-datapusher-plus \
+              || { echo "apt-get install qsv-datapusher-plus failed"; return 1; }
+
+            # qsv-datapusher-plus 20.0.0-1 installs the binary at
+            # /usr/local/bin/qsvdp directly (= ${QSV_BIN_TARGET}). Accept
+            # /usr/bin/qsvdp too in case a future package revision moves to
+            # the more conventional Debian path, and symlink it to the path
+            # the rest of this workflow + the CKAN config (qsv_bin) hard-code.
+            if [ -x "${QSV_BIN_TARGET}" ]; then
+              installed="${QSV_BIN_TARGET}"
+            elif [ -x /usr/bin/qsvdp ]; then
+              installed=/usr/bin/qsvdp
+              ln -sf /usr/bin/qsvdp "${QSV_BIN_TARGET}"
+            else
+              echo "ERROR: qsvdp not found on PATH after deb install. Package contents:"
+              dpkg -L qsv-datapusher-plus || true
+              return 1
+            fi
+            "${QSV_BIN_TARGET}" --version \
+              || { echo "deb-installed qsvdp failed to run (libc/libstdc++ mismatch?)"; return 1; }
+
+            echo "qsv installed via Debian package successfully (qsv-datapusher-plus ${candidate}, binary at ${installed})"
+          }
+
+          install_via_zip() {
+            QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-gnu.zip"
+            QSV_URL="https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}"
+
+            echo "Downloading qsv GNU version $QSV_VER"
+            mkdir -p /tmp/qsv-install && cd /tmp/qsv-install
+
+            wget -q "$QSV_URL" -O "$QSV_ZIP" || { echo "Failed to download qsv"; return 1; }
+            unzip -q "$QSV_ZIP"
+            ls -lh
+
+            # Always install as /usr/local/bin/qsvdp so the CKAN config (qsv_bin)
+            # path is stable regardless of whether the archive ships qsvdp or qsv.
             if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
             elif [ -f "qsv" ]; then SRC_BIN="qsv"
-            else echo "ERROR: No qsv binary found in musl archive"; ls -la; exit 1; fi
+            else echo "ERROR: No qsv binary found"; ls -la; return 1; fi
+
             chmod +x "$SRC_BIN"
-            mv -f "$SRC_BIN" /usr/local/bin/qsvdp
-            /usr/local/bin/qsvdp --version || { echo "ERROR: musl qsv also failed"; exit 1; }
+            mv -f "$SRC_BIN" "${QSV_BIN_TARGET}"
+
+            if ! "${QSV_BIN_TARGET}" --version; then
+              echo "GNU version failed. Falling back to musl..."
+              rm -f "${QSV_BIN_TARGET}" "$QSV_ZIP"
+              QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
+              wget -q "https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}" -O "$QSV_ZIP" || return 1
+              unzip -qo "$QSV_ZIP"
+              if [ -f "qsvdp" ]; then SRC_BIN="qsvdp"
+              elif [ -f "qsv" ]; then SRC_BIN="qsv"
+              else echo "ERROR: No qsv binary found in musl archive"; ls -la; return 1; fi
+              chmod +x "$SRC_BIN"
+              mv -f "$SRC_BIN" "${QSV_BIN_TARGET}"
+              "${QSV_BIN_TARGET}" --version || { echo "ERROR: musl qsv also failed"; return 1; }
+            else
+              echo "qsv GNU version installed successfully!"
+            fi
+            cd / && rm -rf /tmp/qsv-install
+          }
+
+          if install_via_deb; then
+            echo "qsv install method: Debian package"
+          elif install_via_zip; then
+            echo "qsv install method: GitHub release zip"
           else
-            echo "qsv GNU version installed successfully!"
+            echo "ERROR: all qsv install methods failed"
+            exit 1
           fi
-          cd / && rm -rf /tmp/qsv-install
+
+      - name: Run qsv contract regression tests
+        env:
+          QSV_BIN: /usr/local/bin/qsvdp
+          # The ckan-dev container's site-packages registers a pytest plugin
+          # (ckan.tests.pytest_ckan.ckan_setup) that auto-loads on every
+          # pytest invocation and calls make_app(conf) in pytest_sessionstart,
+          # which requires a fully-configured CKAN (SECRET_KEY, etc.). That
+          # config isn't built until the later "Setup CKAN configuration"
+          # step. Disable pytest plugin autoload so the CKAN plugin can't
+          # hijack this standalone regression run — our tests only need core
+          # pytest (subprocess + skipif), not CKAN or any other plugin.
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+        run: |
+          set -eu
+          # Fast pre-flight: assert the installed qsv satisfies the contracts
+          # DP+ relies on (safe_header_names byte-cap, safenames verify-mode
+          # JSON shape, stats percentile-label-prefix format, etc.). If qsv
+          # ever ships a version that breaks these, fail here in <1 minute
+          # rather than after spinning up the full CKAN + datastore + worker.
+          # See tests/test_qsv_v20_regression.py and
+          # docs/qsv-20.0.0-upgrade-test-plan.md.
+          echo "Asserting qsv ${QSV_VER} satisfies DP+'s contract expectations..."
+          python3 -m pytest tests/test_qsv_v20_regression.py -v
 
       - name: Setup CKAN configuration
         run: |
@@ -279,6 +416,12 @@ jobs:
           ckanext.datapusher_plus.longitude_fields = longitude,long,lon
           ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_bytecode_cache
           ckanext.datapusher_plus.auto_unzip_one_file = true
+          # v3.0: ingestion runs on Prefect instead of RQ.
+          ckanext.datapusher_plus.prefect_deployment_name = datapusher-plus/datapusher-plus
+          ckanext.datapusher_plus.prefect_work_pool = datapusher-plus
+          ckanext.datapusher_plus.prefect_ui_base = http://localhost:4200
+          ckanext.datapusher_plus.flow_timeout = 600
+          ckanext.datapusher_plus.max_quarantine_pct = 5.0
           EOF
           if [ -f /srv/app/src/ckan/test-core.ini ]; then
             awk 'BEGIN{in_sect=0}
@@ -453,9 +596,66 @@ jobs:
             echo "Datastore write access failed"; exit 1
           fi
 
+      - name: Start Prefect server
+        env:
+          PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:${{ env.POSTGRES_PASSWORD }}@postgres:5432/prefect_test
+          PREFECT_SERVER_API_HOST: 0.0.0.0
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          echo "PREFECT_API_URL=http://localhost:4200/api" >> $GITHUB_ENV
+          echo "Starting Prefect server (Postgres-backed) on :4200..."
+          nohup prefect server start > /tmp/prefect_server.log 2>&1 &
+          PREFECT_SERVER_PID=$!
+          echo "PREFECT_SERVER_PID=$PREFECT_SERVER_PID" >> $GITHUB_ENV
+          # Server start can take 30-60s on first run while Alembic migrations apply.
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:4200/api/health > /dev/null 2>&1; then
+              echo "Prefect server is healthy after ${i}s"
+              break
+            fi
+            if ! kill -0 "$PREFECT_SERVER_PID" >/dev/null 2>&1; then
+              echo "Prefect server died:"
+              tail -n 80 /tmp/prefect_server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl -fsS http://localhost:4200/api/health || (tail -n 80 /tmp/prefect_server.log; exit 1)
+
+      - name: Register DataPusher+ deployment
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+        run: |
+          set -eu
+          ckan -c /srv/app/src/ckan/test-core.ini datapusher_plus prefect-deploy
+
+      - name: Start Prefect worker
+        env:
+          PREFECT_API_URL: http://localhost:4200/api
+          CKAN_INI: /srv/app/src/ckan/test-core.ini
+        run: |
+          set -eu
+          echo "Starting Prefect worker on the datapusher-plus pool..."
+          nohup prefect worker start --pool datapusher-plus > /tmp/prefect_worker.log 2>&1 &
+          PREFECT_WORKER_PID=$!
+          echo "PREFECT_WORKER_PID=$PREFECT_WORKER_PID" >> $GITHUB_ENV
+          sleep 5
+          if kill -0 "$PREFECT_WORKER_PID" >/dev/null 2>&1; then
+            echo "Prefect worker started"
+            head -n 30 /tmp/prefect_worker.log || true
+          else
+            echo "Prefect worker failed to start"
+            cat /tmp/prefect_worker.log
+            exit 1
+          fi
+
       - name: Start CKAN background job worker
         run: |
           set -eu
+          # As of DP+ v3.0 the ingestion pipeline runs on Prefect, not RQ.
+          # CKAN's RQ worker is still started because other CKAN extensions
+          # (search reindex, mailer, etc.) rely on it.
           nohup ckan -c /srv/app/src/ckan/test-core.ini jobs worker > /tmp/ckan_worker.log 2>&1 &
           WORKER_PID=$!
           echo "CKAN Worker PID=$WORKER_PID"
@@ -690,9 +890,13 @@ jobs:
             fi
             total_files_in_dir=$((total_tests + skipped_count))
             if [ $total_tests -gt 0 ]; then
-              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || echo "0")
+              # `grep -c` always prints the count to stdout, then exits 1 when
+              # there are zero matches. `|| true` swallows that exit status
+              # while keeping grep's "0"; `|| echo "0"` would instead append a
+              # SECOND line, yielding a two-line value that breaks $(( )) below.
+              passed=$(grep -c ",SUCCESS,.*,complete,true," /tmp/test_results.csv 2>/dev/null || true)
               failed=$(tail -n +2 /tmp/test_results.csv | grep -v ",SUCCESS,.*,complete,true," | wc -l)
-              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || echo "0")
+              error_count=$(grep -c ",error," /tmp/test_results.csv 2>/dev/null || true)
               error_count=$(echo "$error_count" | tr -d '\n')
               tested_success_rate=$(( passed * 100 / total_tests ))
               [ $total_files_in_dir -gt 0 ] && overall_success_rate=$(( passed * 100 / total_files_in_dir ))
@@ -773,8 +977,8 @@ jobs:
                 done
                 echo ""
 
-                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || echo "0")
-                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || echo "0")
+                success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv || true)
+                error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv || true)
 
                 echo "## File Analysis"
                 echo ""
@@ -889,6 +1093,8 @@ jobs:
             /tmp/ckan_stdout.log
             /tmp/ckan_worker.log
             /tmp/worker_analysis.csv
+            /tmp/prefect_server.log
+            /tmp/prefect_worker.log
           retention-days: 7
 
       - name: Cleanup
@@ -896,6 +1102,16 @@ jobs:
         run: |
           kill $CKAN_PID 2>/dev/null || true
           kill $CKAN_WORKER_PID 2>/dev/null || true
+          echo "Stopping Prefect server and worker..."
+          # The start steps launch the servers with a plain `nohup ... &`, so the
+          # exported PIDs are ordinary PIDs (not process-group leaders) -- `kill`
+          # signals only the parent. The `pkill -f` lines sweep the
+          # uvicorn/scheduler children.
+          for pid in "${PREFECT_WORKER_PID:-}" "${PREFECT_SERVER_PID:-}"; do
+            [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+          done
+          pkill -f "prefect server start" || true
+          pkill -f "prefect worker start" || true
           echo "Cleanup completed"
 
       - name: Check test results

@@ -183,3 +183,102 @@ groups:
         default: INFO
         description: |
           Upload log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+
+      # ---------------------------------------------------------------
+      # Prefect orchestration (v3.0+)
+      # ---------------------------------------------------------------
+      - key: ckanext.datapusher_plus.prefect_deployment_name
+        editable: true
+        default: datapusher-plus/datapusher-plus
+        description: |
+          Fully-qualified Prefect deployment name in the form
+          ``<flow-name>/<deployment-name>``. Run ``ckan datapusher_plus
+          prefect-deploy`` once after install to register it.
+
+      - key: ckanext.datapusher_plus.prefect_work_pool
+        editable: true
+        default: datapusher-plus
+        description: |
+          Prefect work-pool name. Workers subscribe to this pool with
+          ``prefect worker start -p <name>``.
+
+      - key: ckanext.datapusher_plus.prefect_work_pool_type
+        editable: true
+        default: process
+        description: |
+          Work-pool type ``prefect-deploy`` creates the pool with when
+          it does not already exist. Defaults to ``process`` (a worker
+          on the same host as CKAN). Operators on Kubernetes / Docker /
+          ECS push pools set this to the matching type.
+
+      - key: ckanext.datapusher_plus.prefect_flow
+        editable: true
+        default: ""
+        description: |
+          Optional Python import path to a custom @flow that composes
+          DataPusher+ tasks differently. Format: ``module.path:flow_name``.
+          When empty, the built-in ``datapusher_plus_flow`` is used.
+
+      - key: ckanext.datapusher_plus.prefect_ui_base
+        editable: true
+        default: ""
+        description: |
+          Base URL of the Prefect UI (e.g. ``http://prefect-server:4200``).
+          When set, ``datapusher_status`` returns a ``job_url`` that
+          deep-links into the run page.
+
+      - key: ckanext.datapusher_plus.flow_timeout
+        type: int
+        editable: true
+        default: 7200
+        description: |
+          Outer flow-run timeout in seconds. Replaces v2's
+          ``ckan.datapusher.timeout``. Per-task timeouts and qsv
+          subprocess timeouts still apply inside the envelope.
+
+      - key: ckanext.datapusher_plus.download_retries
+        type: int
+        editable: true
+        default: 3
+        description: |
+          Max retries for the download task (exponential backoff
+          10s/60s/300s). Lower this when working with brittle upstream
+          sources that should fail fast rather than retry.
+
+      - key: ckanext.datapusher_plus.database_retries
+        type: int
+        editable: true
+        default: 2
+        description: |
+          Max retries for the Postgres COPY task (30s delay between
+          attempts). Useful for transient datastore connectivity blips.
+
+      - key: ckanext.datapusher_plus.max_quarantine_pct
+        editable: true
+        default: 5.0
+        description: |
+          Maximum percentage of rows that may be quarantined by the
+          validation task before the flow fails. Quarantined rows are
+          written to a sibling CSV; only rates above this threshold abort
+          the run.
+
+      - key: ckanext.datapusher_plus.pii_review_threshold
+        type: int
+        editable: true
+        default: 0
+        description: |
+          When > 0 and full PII screening finds more than this many PII
+          candidate matches, the flow suspends and waits for human
+          approval via the Prefect UI before continuing. In quick-screen
+          mode (``pii_quick_screen = true``) only PII *presence* is
+          detected, so any value > 0 makes the flow suspend whenever PII
+          is found at all (the threshold acts purely as on/off there).
+
+      - key: ckanext.datapusher_plus.result_storage_block
+        editable: true
+        default: local-file-system/datapusher-plus-results
+        description: |
+          Prefect Block reference for task-result persistence (used by
+          "re-run from failed task"). Format: ``<type-slug>/<name>``.
+          Defaults to a local filesystem block; switch to an S3/GCS
+          block for multi-host worker pools.

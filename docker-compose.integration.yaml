@@ -1,0 +1,139 @@
+# Full end-to-end stack for DataPusher+ integration testing.
+#
+# Brings up Postgres + Solr + Redis + CKAN + Prefect server + Prefect worker
+# (with qsv baked in via Dockerfile.worker). The worker mounts the repo
+# editable so changes to DP+ code are picked up after `docker compose
+# restart prefect-worker`.
+#
+# Usage:
+#   # 1. Bring up the stack
+#   docker compose -f docker-compose.integration.yaml up -d --build
+#
+#   # 2. Wait for health checks
+#   docker compose -f docker-compose.integration.yaml ps
+#
+#   # 3. Register the DP+ deployment inside the CKAN container
+#   docker compose -f docker-compose.integration.yaml exec ckan \
+#       ckan -c /etc/ckan/default/ckan.ini datapusher_plus prefect-deploy
+#
+#   # 4. Run the integration tests
+#   INTEGRATION=1 pytest tests/integration/
+#
+#   # 5. Tear down
+#   docker compose -f docker-compose.integration.yaml down -v
+#
+# Service URLs (defaults — override via env in tests/integration/conftest.py):
+#   CKAN          http://localhost:5000
+#   Prefect UI    http://localhost:4200
+#   Postgres      localhost:5432   (user=postgres pass=postgres)
+#   Solr          http://localhost:8983
+#   Redis         localhost:6379
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - integration-postgres:/var/lib/postgresql/data
+      - ./tests/integration/init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  solr:
+    image: ckan/ckan-solr:2.11-solr9
+    ports:
+      - "8983:8983"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/ckan/admin/ping || exit 1"]
+      interval: 10s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 5s
+      retries: 10
+
+  prefect-server:
+    image: prefecthq/prefect:3-latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/prefect
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_SERVER_UI_API_URL: http://localhost:4200/api
+    command: prefect server start
+    ports:
+      - "4200:4200"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=1)"]
+      interval: 10s
+      retries: 10
+      start_period: 60s
+
+  prefect-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    depends_on:
+      prefect-server:
+        condition: service_healthy
+    environment:
+      PREFECT_API_URL: http://prefect-server:4200/api
+      CKAN_INI: /etc/ckan/default/ckan.ini
+    volumes:
+      - ./:/opt/datapusher-plus
+      - ./tests/integration/ckan.ini:/etc/ckan/default/ckan.ini:ro
+    command: >
+      bash -c "
+        pip install -e /opt/datapusher-plus &&
+        prefect worker start --pool datapusher-plus
+      "
+    restart: on-failure
+
+  ckan:
+    image: ckan/ckan-dev:2.11
+    depends_on:
+      postgres:
+        condition: service_healthy
+      solr:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      prefect-server:
+        condition: service_healthy
+    environment:
+      CKAN_SQLALCHEMY_URL: postgresql://ckan:ckan@postgres/ckan
+      CKAN_DATASTORE_WRITE_URL: postgresql://datastore_write:datastore@postgres/datastore
+      CKAN_DATASTORE_READ_URL: postgresql://datastore_read:datastore@postgres/datastore
+      CKAN_SOLR_URL: http://solr:8983/solr/ckan
+      CKAN_REDIS_URL: redis://redis:6379/1
+      CKAN_SITE_URL: http://localhost:5000
+      PREFECT_API_URL: http://prefect-server:4200/api
+    volumes:
+      - ./:/srv/app/src/datapusher-plus
+      - ./tests/integration/ckan.ini:/etc/ckan/default/ckan.ini:ro
+    ports:
+      - "5000:5000"
+    command: >
+      bash -c "
+        pip install -e /srv/app/src/datapusher-plus &&
+        ckan -c /etc/ckan/default/ckan.ini db init &&
+        ckan -c /etc/ckan/default/ckan.ini datastore set-permissions | psql postgresql://postgres:postgres@postgres/postgres &&
+        ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus &&
+        ckan -c /etc/ckan/default/ckan.ini run --host 0.0.0.0 --port 5000
+      "
+
+volumes:
+  integration-postgres:
