@@ -63,7 +63,6 @@ def pii_screening_subflow(
     csv_path: Union[str, Path],
     resource: Dict[str, Any],
     temp_dir: Union[str, Path],
-    qsv_bin: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Screen a CSV for PII via ``screen_for_pii``, as an independently
     observable Prefect subflow.
@@ -77,9 +76,6 @@ def pii_screening_subflow(
             flow's ``TemporaryDirectory``; passing it through avoids
             the subflow inventing a new one and losing artifacts on
             success.
-        qsv_bin: Optional explicit path to the qsv binary. When ``None``,
-            ``QSVCommand`` resolves it from ``ckanext.datapusher_plus
-            .qsv_bin`` / ``$QSV_BIN``.
 
     Returns:
         Dict with two keys:
@@ -92,6 +88,14 @@ def pii_screening_subflow(
         Dict (rather than a dataclass) for Prefect serialization
         simplicity at the subflow boundary — Prefect's result encoding
         handles built-ins without extra schema work.
+
+    Note:
+        The qsv binary path is always resolved by ``QSVCommand`` from
+        ``ckanext.datapusher_plus.qsv_bin`` (with ``$QSV_BIN`` fallback).
+        A per-call override is not supported because ``QSVCommand``
+        itself doesn't expose one; if the use case arises, add the
+        override to ``QSVCommand.__init__`` first and then thread it
+        through here.
     """
     log = _runtime_logger()
     qsv = QSVCommand(logger=log)
@@ -152,9 +156,18 @@ def spatial_processing_subflow(
         log,
     )
     if success:
+        # When ``output_csv_path`` is ``None``, ``process_spatial_file``
+        # writes alongside ``input_path`` with a ``.csv`` extension —
+        # surface that in the log instead of the misleading ``None``
+        # operators most need to debug ("where did my CSV go?").
+        effective_output = (
+            output_csv_path
+            if output_csv_path is not None
+            else str(Path(input_path).with_suffix(".csv"))
+        )
         log.info(
             f"Spatial conversion complete: bounds={bounds}, "
-            f"output={output_csv_path}"
+            f"output={effective_output}"
         )
     else:
         log.error(f"Spatial conversion failed: {error_message}")

@@ -44,7 +44,11 @@ def subflows():
 def test_pii_subflow_forwards_args_and_shapes_result(subflows, tmp_path):
     """The subflow calls ``screen_for_pii`` with the forwarded args
     and packages the ``(pii_found, count)`` tuple into the documented
-    dict shape."""
+    dict shape. The constructed ``QSVCommand`` instance reaches the
+    helper as the third positional argument — without this assertion,
+    a regression that swapped the call order or dropped the
+    ``QSVCommand`` would slip through.
+    """
     csv = tmp_path / "x.csv"
     csv.write_text("col1,col2\n1,2\n")
 
@@ -59,13 +63,13 @@ def test_pii_subflow_forwards_args_and_shapes_result(subflows, tmp_path):
 
     assert result == {"pii_found": True, "pii_candidate_count": 3}
     screen.assert_called_once()
-    # ``QSVCommand`` is constructed inside the subflow with the run
-    # logger, then forwarded as the third positional arg to
-    # ``screen_for_pii``.
     qsv_class.assert_called_once()
     args, _ = screen.call_args
     assert args[0] == str(csv)
     assert args[1] == {"format": "CSV", "url": "x"}
+    # The QSVCommand instance constructed inside the subflow is
+    # forwarded as the third positional arg.
+    assert args[2] is qsv_class.return_value
     assert args[3] == str(tmp_path)
 
 

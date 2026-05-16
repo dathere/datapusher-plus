@@ -618,7 +618,7 @@ DP+ ships two **subflow primitives** in `ckanext.datapusher_plus.jobs.subflows` 
 
 | Subflow | Wraps | Use when… |
 |---|---|---|
-| `pii_screening_subflow(csv_path, resource, temp_dir, qsv_bin=None)` | `screen_for_pii` | You want PII screening to retry / observe independently of analysis, or you're A/B-testing a custom screening implementation. |
+| `pii_screening_subflow(csv_path, resource, temp_dir)` | `screen_for_pii` | You want PII screening to retry / observe independently of analysis, or you're A/B-testing a custom screening implementation. |
 | `spatial_processing_subflow(input_path, resource_format, output_csv_path=None, tolerance=0.001)` | `process_spatial_file` | You want spatial conversion (Shapefile/GeoJSON → CSV) to retry / observe independently of the broader format-conversion task. |
 
 Both return a JSON-encodable dict (`{"pii_found": …, "pii_candidate_count": …}` and `{"success": …, "error_message": …, "bounds": …}`) so Prefect's result-serialization works without extra schema setup.
