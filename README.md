@@ -631,8 +631,21 @@ Worker-process env-var fallbacks (read when CKAN config isn't loaded in the work
 * `DATAPUSHER_PLUS_DOWNLOAD_RETRIES`
 * `DATAPUSHER_PLUS_DATABASE_RETRIES`
 * `DATAPUSHER_PLUS_CACHE_TTL_HOURS` (default 24)
+* `DATAPUSHER_PLUS_MAX_PERSIST_FILE_MB` (default 512; `0` disables the cap)
 * `DATAPUSHER_PLUS_MAX_QUARANTINE_PCT`
 * `DATAPUSHER_PLUS_RESULT_STORAGE_BLOCK`
+
+**Prefect Variables (optional, highest priority):** the flow looks up these
+Variable names at run start and uses the value when set. Set / change them
+from the Prefect UI (Variables tab) or `prefect variable set NAME VALUE`;
+takes effect on the next flow run without a worker restart.
+
+| Variable | Overrides |
+|---|---|
+| `dpp_flow_timeout` | `ckanext.datapusher_plus.flow_timeout` / `DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS` |
+| `dpp_download_retries` | `ckanext.datapusher_plus.download_retries` / `DATAPUSHER_PLUS_DOWNLOAD_RETRIES` |
+
+Resolution order: Prefect Variable -> env var -> `ckan.ini` -> built-in default. Variable lookup failures (Prefect server unreachable, name absent, value not int-parseable) silently fall through to the next priority — operators with no Prefect Variables set see no behaviour change.
 
 ### Troubleshooting
 
