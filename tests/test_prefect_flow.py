@@ -669,14 +669,22 @@ def test_bootstrap_noops_when_worker_sentinel_unset():
     returns silently without calling ``make_app``. This is the guard
     that lets pytest import ``prefect_flow`` without bringing up a full
     CKAN stack at module import.
+
+    Forces guards #1 (Flask app context) and #2 (``ckan.common.config``
+    populated) to NOT fire so the assertion exercises guard #3 even if
+    an earlier test (or a future conftest) leaves either of the other
+    guards primed.
     """
     import os
+    from ckan.common import config as ckan_config
     from ckanext.datapusher_plus.jobs.prefect_flow import (
         _bootstrap_ckan_app_context,
     )
 
     with mock.patch.dict(
         os.environ, {"DPP_PREFECT_WORKER": "0"}, clear=False
+    ), mock.patch("flask.has_app_context", return_value=False), mock.patch.object(
+        ckan_config, "get", return_value=None
     ), mock.patch("ckan.config.middleware.make_app") as mk_make_app:
         _bootstrap_ckan_app_context()
     mk_make_app.assert_not_called()
