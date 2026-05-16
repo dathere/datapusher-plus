@@ -130,6 +130,17 @@ groups:
         description: |
           Auto index dates
 
+      - key: ckanext.datapusher_plus.auto_csv_spatial_extent
+        type: bool
+        editable: true
+        default: true
+        description: |
+          For CSV resources with detected latitude/longitude columns,
+          persist a ``dpp_spatial_extent`` BoundingBox derived from
+          the qsv stats min/max of those columns. Shapefile / GeoJSON
+          resources already get this from FormatConverterStage; this
+          flag only governs the CSV path.
+
       - key: ckanext.datapusher_plus.sort_and_dupe_check
         type: bool
         editable: true

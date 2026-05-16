@@ -15,6 +15,7 @@ from typing import Optional
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
+import ckanext.datapusher_plus.jinja2_helpers as j2h
 from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
 
@@ -485,4 +486,83 @@ class MetadataStage(BaseStage):
             context.resource["preview_rows"] = None
             context.resource["partial_download"] = False
 
+        self._maybe_write_csv_spatial_extent(context)
+
         dsu.update_resource(context.resource)
+
+    def _maybe_write_csv_spatial_extent(self, context: ProcessingContext) -> None:
+        """Persist a ``dpp_spatial_extent`` BoundingBox for CSV lat/lon.
+
+        FormatConverterStage already writes ``dpp_spatial_extent`` on
+        the SIMPLIFIED resource it uploads for Shapefile / GeoJSON
+        inputs. For plain CSV resources that happen to carry lat/lon
+        columns, the bbox is currently only computed at jinja2
+        render-time (see ``spatial_extent_wkt`` in
+        ``jinja2_helpers.py``). This persists it on the resource dict
+        so downstream consumers (gazetteer widgets, third-party
+        extensions) can read it directly instead of re-deriving from
+        stats.
+
+        Skips when:
+            * ``conf.AUTO_CSV_SPATIAL_EXTENT`` is disabled,
+            * the resource already has ``dpp_spatial_extent`` (a
+              shapefile/GeoJSON-simplified resource will, since
+              FormatConverterStage set it before upload),
+            * stats aren't available, or
+            * the lat/lon detection heuristic doesn't match.
+
+        Output shape mirrors
+        ``FormatConverterStage._upload_simplified_resource``
+        (``format_converter.py:240``): a GeoJSON-ish BoundingBox dict
+        whose ``coordinates`` is ``[[min_lon, min_lat], [max_lon,
+        max_lat]]``. Same shape ``spatial_extent_wkt`` and
+        ``spatial_extent_feature_collection`` consume.
+
+        Args:
+            context: Processing context
+        """
+        if not conf.AUTO_CSV_SPATIAL_EXTENT:
+            return
+
+        if context.resource.get("dpp_spatial_extent"):
+            return
+
+        stats = context.resource_fields_stats
+        if not stats:
+            return
+
+        try:
+            lat_field, lon_field = j2h.detect_lat_lon_fields(stats)
+        except Exception:
+            # Unexpected — the helper is pure data manipulation. Log
+            # with traceback so an operator can see what shape of
+            # stats blew it up, then skip rather than fail the whole
+            # pipeline over an optional metadata field.
+            context.logger.exception(
+                "Skipping CSV dpp_spatial_extent: lat/lon detection raised"
+            )
+            return
+
+        if not lat_field or not lon_field:
+            return
+
+        try:
+            min_lon = float(stats[lon_field]["stats"]["min"])
+            min_lat = float(stats[lat_field]["stats"]["min"])
+            max_lon = float(stats[lon_field]["stats"]["max"])
+            max_lat = float(stats[lat_field]["stats"]["max"])
+        except (KeyError, TypeError, ValueError) as e:
+            context.logger.warning(
+                f"Skipping CSV dpp_spatial_extent: min/max unreadable ({e})"
+            )
+            return
+
+        context.resource["dpp_spatial_extent"] = {
+            "type": "BoundingBox",
+            "coordinates": [[min_lon, min_lat], [max_lon, max_lat]],
+        }
+        context.logger.info(
+            f"Added dpp_spatial_extent from CSV lat/lon "
+            f"(lat={lat_field!r}, lon={lon_field!r}): "
+            f"[[{min_lon}, {min_lat}], [{max_lon}, {max_lat}]]"
+        )

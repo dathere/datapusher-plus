@@ -207,6 +207,15 @@ LONGITUDE_FIELDS = tk.config.get(
     "longitude,lon",
 )
 
+# Auto-persist a ``dpp_spatial_extent`` BoundingBox on the resource when
+# a CSV has lat/lon columns (detected via the same heuristic the
+# formula engine uses, see ``jinja2_helpers.detect_lat_lon_fields``).
+# Shapefile / GeoJSON resources already get this written by
+# ``FormatConverterStage``; this flag controls the CSV path only.
+AUTO_CSV_SPATIAL_EXTENT = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.auto_csv_spatial_extent", True)
+)
+
 # Jinja2 bytecode cache settings
 JINJA2_BYTECODE_CACHE_DIR = tk.config.get(
     "ckanext.datapusher_plus.jinja2_bytecode_cache_dir", "/tmp/jinja2_bytecode_cache"

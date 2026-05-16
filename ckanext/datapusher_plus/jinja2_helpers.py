@@ -62,6 +62,48 @@ def uses_sql(func):
     return func
 
 
+def detect_lat_lon_fields(resource_fields_stats):
+    """Return ``(lat_field, lon_field)`` for a stats dict, or ``(None, None)``.
+
+    A field is treated as a latitude / longitude candidate when its qsv
+    ``stats.type`` is ``Float`` and its ``min``/``max`` fall within the
+    valid WGS84 range ([-90,90] for latitude, [-180,180] for longitude).
+    The candidate set comes from ``conf.LATITUDE_FIELDS`` /
+    ``conf.LONGITUDE_FIELDS`` (comma-separated, case-insensitive); the
+    first matching column wins. Either return value can be ``None`` if
+    no candidate matched.
+
+    Extracted from ``FormulaProcessor.__init__`` so non-formula stages
+    (currently ``MetadataStage``, which persists ``dpp_spatial_extent``
+    for CSVs with lat/lon columns) can run the same detection without
+    constructing a full ``FormulaProcessor``.
+    """
+    latitude_fields = [f.strip() for f in conf.LATITUDE_FIELDS.split(",")]
+    longitude_fields = [f.strip() for f in conf.LONGITUDE_FIELDS.split(",")]
+
+    def _match(candidates, min_bound, max_bound):
+        lowered = {k.lower(): k for k in resource_fields_stats.keys()}
+        for field in candidates:
+            orig = lowered.get(field.lower())
+            if orig is None:
+                continue
+            stats = resource_fields_stats.get(orig, {}).get("stats", {})
+            if stats.get("type") != "Float":
+                continue
+            try:
+                lo = float(stats["min"])
+                hi = float(stats["max"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if lo >= min_bound and hi <= max_bound:
+                return orig
+        return None
+
+    lat_field = _match(latitude_fields, -90.0, 90.0)
+    lon_field = _match(longitude_fields, -180.0, 180.0)
+    return lat_field, lon_field
+
+
 class FormulaProcessor:
     def __init__(
         self,
@@ -75,59 +117,14 @@ class FormulaProcessor:
     ):
 
         # FIRST, INFER LATITUDE AND LONGITUDE COLUMN NAMES
-        # fetch LATITUDE_FIELDS and LONGITUDE_FIELDS from config
-        latitude_fields = [field.strip() for field in conf.LATITUDE_FIELDS.split(",")]
-        longitude_fields = [field.strip() for field in conf.LONGITUDE_FIELDS.split(",")]
-
-        logger.trace(f"Latitude Fields: {latitude_fields}")
-        logger.trace(f"Longitude Fields: {longitude_fields}")
+        logger.trace(f"Latitude Fields: {conf.LATITUDE_FIELDS}")
+        logger.trace(f"Longitude Fields: {conf.LONGITUDE_FIELDS}")
 
         dpp = {}
-        # then, check if any of the fields are present in the resource_fields_stats
-        # case-insensitive and is a float and whose values are between -90.0 and 90.0
-        # if found, set the dpp["LAT_FIELD"] to the field name
-        dpp["LAT_FIELD"] = None
-        for field in latitude_fields:
-            field = field.lower()
-            if field in [k.lower() for k in resource_fields_stats.keys()]:
-                # Get the original case field name by finding the matching key ignoring case
-                orig_field = next(
-                    k for k in resource_fields_stats.keys() if k.lower() == field
-                )
-                if (
-                    resource_fields_stats[orig_field]["stats"]["type"] == "Float"
-                    and float(resource_fields_stats[orig_field]["stats"]["min"])
-                    >= -90.0
-                    and float(resource_fields_stats[orig_field]["stats"]["max"]) <= 90.0
-                ):
-                    dpp["LAT_FIELD"] = orig_field
-                    break
-
-        # if found, set the dpp["LON_FIELD"] to the field name
-        dpp["LON_FIELD"] = None
-        for field in longitude_fields:
-            field = field.lower()
-            if field in [k.lower() for k in resource_fields_stats.keys()]:
-                # Get the original case field name by finding the matching key ignoring case
-                orig_field = next(
-                    k for k in resource_fields_stats.keys() if k.lower() == field
-                )
-                if (
-                    resource_fields_stats[orig_field]["stats"]["type"] == "Float"
-                    and float(resource_fields_stats[orig_field]["stats"]["min"])
-                    >= -180.0
-                    and float(resource_fields_stats[orig_field]["stats"]["max"])
-                    <= 180.0
-                ):
-                    dpp["LON_FIELD"] = orig_field
-                    break
-
-        # if no latitude nor longitude fields are found,
-        # set dpp["NO_LAT_LON_FIELDS"] to True
-        if dpp["LAT_FIELD"] is None or dpp["LON_FIELD"] is None:
-            dpp["NO_LAT_LON_FIELDS"] = True
-        else:
-            dpp["NO_LAT_LON_FIELDS"] = False
+        lat_field, lon_field = detect_lat_lon_fields(resource_fields_stats)
+        dpp["LAT_FIELD"] = lat_field
+        dpp["LON_FIELD"] = lon_field
+        dpp["NO_LAT_LON_FIELDS"] = lat_field is None or lon_field is None
 
         # now, check if any date fields are present in the resource_fields_stats
         # if found, set the dpp["DATE_FIELDS"] to the field name
@@ -553,8 +550,24 @@ def spatial_extent_feature_collection(
         else:
             bbox = [float(coord) for coord in bbox]
     else:
-        if context.get("resource").get("dpp_spatial_extent"):
-            bbox = context.get("resource").get("dpp_spatial_extent").get("coordinates")
+        extent = context.get("resource").get("dpp_spatial_extent")
+        if extent:
+            # ``dpp_spatial_extent`` is persisted as a GeoJSON-ish
+            # BoundingBox: ``{"type": "BoundingBox", "coordinates":
+            # [[min_lon, min_lat], [max_lon, max_lat]]}``. Flatten to
+            # the [min_lon, min_lat, max_lon, max_lat] order this
+            # function's format-string expects. Same shape that
+            # ``spatial_extent_wkt`` consumes.
+            if extent.get("type") == "BoundingBox":
+                coords = extent.get("coordinates")
+                bbox = [
+                    float(coords[0][0]),
+                    float(coords[0][1]),
+                    float(coords[1][0]),
+                    float(coords[1][1]),
+                ]
+            else:
+                raise ValueError("Spatial extent is not a BoundingBox")
         else:
             if context.get("dpp").get("NO_LAT_LON_FIELDS"):
                 raise ValueError("No latitude or longitude fields found")
