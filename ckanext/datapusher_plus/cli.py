@@ -214,8 +214,26 @@ def prefect_deploy(work_pool: str | None):
         # custom flow + their own prefect.yaml.
         image=None,
         push=False,
+        # Sentinel read by ``prefect_flow._bootstrap_ckan_app_context`` so
+        # it can tell a real worker subprocess apart from pytest / ad-hoc
+        # imports / tooling, and only call ``make_app()`` for the former.
+        # Prefect merges these vars into the worker subprocess's env at
+        # flow-run start; ``CKAN_INI`` continues to come from the worker's
+        # own environment (operator-set per deployment).
+        job_variables={"env": {"DPP_PREFECT_WORKER": "1"}},
     )
     click.echo(f"Deployed to work-pool '{pool}': {deployment_id}")
+    # Surface the sentinel-env-var contract for operators. ``prefect-deploy``
+    # injects it for them, but anyone who later moves to a hand-rolled
+    # ``prefect.yaml`` needs to replicate it -- without the sentinel the
+    # worker's import-time bootstrap no-ops and the first ``tk.get_action``
+    # call later crashes with a stale-action-registry error.
+    click.echo(
+        "  Worker subprocess env will receive DPP_PREFECT_WORKER=1 (sentinel "
+        "for _bootstrap_ckan_app_context). If you deploy via your own "
+        "prefect.yaml instead of this command, replicate it under "
+        "job_variables.env -- the bootstrap is a no-op without it."
+    )
 
 
 @datapusher_plus.command(name="migrate-from-rq")

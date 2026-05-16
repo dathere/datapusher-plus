@@ -650,3 +650,80 @@ def test_stage_run_rehydrates_context_from_prev():
 
     assert seen["tmp"] == "/tmp/run/r1.csv"
     assert seen["file_hash"] == "hash-xyz"
+
+
+
+# ---------------------------------------------------------------------------
+# _bootstrap_ckan_app_context — no-op guards
+# ---------------------------------------------------------------------------
+#
+# Covers the roborev follow-up "No dedicated unit test for
+# `_bootstrap_ckan_app_context`'s no-op guards" and the new
+# `DPP_PREFECT_WORKER` sentinel guard — the latter is what lets pytest
+# (and the CKAN web app, ad-hoc tooling, etc.) import `prefect_flow`
+# safely, since the bootstrap no-ops outside a genuine worker subprocess.
+
+
+def test_bootstrap_noops_when_worker_sentinel_unset():
+    """No ``DPP_PREFECT_WORKER=1`` → ``_bootstrap_ckan_app_context``
+    returns silently without calling ``make_app``. This is the guard
+    that lets pytest import ``prefect_flow`` without bringing up a full
+    CKAN stack at module import.
+
+    Forces guards #1 (Flask app context) and #2 (``ckan.common.config``
+    populated) to NOT fire so the assertion exercises guard #3 even if
+    an earlier test (or a future conftest) leaves either of the other
+    guards primed.
+    """
+    import os
+    from ckan.common import config as ckan_config
+    from ckanext.datapusher_plus.jobs.prefect_flow import (
+        _bootstrap_ckan_app_context,
+    )
+
+    with mock.patch.dict(
+        os.environ, {"DPP_PREFECT_WORKER": "0"}, clear=False
+    ), mock.patch("flask.has_app_context", return_value=False), mock.patch.object(
+        ckan_config, "get", return_value=None
+    ), mock.patch("ckan.config.middleware.make_app") as mk_make_app:
+        _bootstrap_ckan_app_context()
+    mk_make_app.assert_not_called()
+
+
+def test_bootstrap_noops_when_app_context_present():
+    """Existing guard #1: a Flask app context is already pushed (the
+    CKAN web process imported the plugin) → bootstrap is a no-op even
+    when the worker sentinel is set.
+    """
+    import os
+    from ckanext.datapusher_plus.jobs.prefect_flow import (
+        _bootstrap_ckan_app_context,
+    )
+
+    with mock.patch.dict(
+        os.environ, {"DPP_PREFECT_WORKER": "1"}, clear=False
+    ), mock.patch("flask.has_app_context", return_value=True), mock.patch(
+        "ckan.config.middleware.make_app"
+    ) as mk_make_app:
+        _bootstrap_ckan_app_context()
+    mk_make_app.assert_not_called()
+
+
+def test_bootstrap_noops_when_ckan_config_populated():
+    """Existing guard #2: ``ckan.common.config`` is already populated
+    (a ``ckan`` CLI command already ran ``make_app``) → bootstrap is a
+    no-op even when the worker sentinel is set.
+    """
+    import os
+    from ckan.common import config as ckan_config
+    from ckanext.datapusher_plus.jobs.prefect_flow import (
+        _bootstrap_ckan_app_context,
+    )
+
+    with mock.patch.dict(
+        os.environ, {"DPP_PREFECT_WORKER": "1"}, clear=False
+    ), mock.patch("flask.has_app_context", return_value=False), mock.patch.object(
+        ckan_config, "get", return_value="http://example.test"
+    ), mock.patch("ckan.config.middleware.make_app") as mk_make_app:
+        _bootstrap_ckan_app_context()
+    mk_make_app.assert_not_called()
