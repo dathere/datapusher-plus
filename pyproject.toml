@@ -55,3 +55,15 @@ packages = { find = { where = ["."], exclude = ["tests*"] } }
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
 optional-dependencies = { dev = { file = ["requirements-dev.txt"] } }
+
+# pytest config lives here (moved from setup.cfg) so build metadata has a
+# single source of truth in pyproject.toml. setup.cfg now only holds babel
+# i18n command config, and setup.py only holds the babel message_extractors
+# block (which has no pyproject-native equivalent).
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::sqlalchemy.exc.SADeprecationWarning",
+    "ignore::sqlalchemy.exc.SAWarning",
+    "ignore::DeprecationWarning",
+]
+addopts = "--pdbcls=IPython.terminal.debugger:TerminalPdb"

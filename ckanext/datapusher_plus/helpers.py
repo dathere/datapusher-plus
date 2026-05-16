@@ -400,6 +400,21 @@ def set_aps_job_id(job_id: str, aps_job_id: str) -> None:
     update_job(job_id, {"aps_job_id": aps_job_id})
 
 
+def _csv_safe_cell(value):
+    """Defang values that spreadsheet apps would interpret as formulas.
+
+    A ZIP entry's filename is attacker-controlled — if it starts with ``=``,
+    ``+``, ``-``, ``@``, ``\\t`` or ``\\r``, Excel/LibreOffice will interpret
+    the cell as a formula on open. Prefixing with a single quote tells the
+    spreadsheet to treat the cell as literal text.
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    if value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def extract_zip_or_metadata(
     zip_path: Union[str, Path],
     output_dir: Optional[Union[str, Path]] = None,
@@ -495,7 +510,10 @@ def extract_zip_or_metadata(
                     )
                     writer.writerow(
                         {
-                            "filename": file_info.filename,
+                            # Defang CSV-formula injection — ZIP entry filenames
+                            # are attacker-controlled and flow into a CSV that
+                            # may be opened in Excel/LibreOffice downstream.
+                            "filename": _csv_safe_cell(file_info.filename),
                             "compressed_size": file_info.compress_size,
                             "file_size": file_info.file_size,
                             "compression_ratio": f"{compression_ratio:.2f}%",

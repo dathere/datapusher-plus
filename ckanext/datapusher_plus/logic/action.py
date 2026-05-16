@@ -113,11 +113,14 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
                 "key": "datapusher_plus",
             },
         )
+        # tk.asint gracefully handles bools/None/whitespace and gives a clean
+        # ValueError on garbage — better than bare int() which crashes the
+        # action on a malformed config string like "3600s".
         assume_task_stale_after = datetime.timedelta(
-            seconds=int(config.get("ckan.datapusher.assume_task_stale_after", 3600))
+            seconds=tk.asint(config.get("ckan.datapusher.assume_task_stale_after", 3600))
         )
         assume_task_stillborn_after = datetime.timedelta(
-            seconds=int(config.get("ckan.datapusher.assume_task_stillborn_after", 5))
+            seconds=tk.asint(config.get("ckan.datapusher.assume_task_stillborn_after", 5))
         )
         if existing_task.get("state") == "pending":
             # Query Prefect for resource_ids currently in non-terminal flow
@@ -246,8 +249,11 @@ def datapusher_hook(context: Context, data_dict: dict[str, Any]):
     res_id = _get_or_bust(metadata, "resource_id")
 
     # Pass metadata, not data_dict, as it contains the resource id needed
-    # on the auth checks
-    p.toolkit.check_access("datapusher_submit", context, metadata)
+    # on the auth checks. Use the dedicated datapusher_hook permission rather
+    # than datapusher_submit so the boundary matches the hook's side effects
+    # (marking complete, creating default views, recursive resubmit) and can
+    # be tightened independently.
+    p.toolkit.check_access("datapusher_hook", context, metadata)
 
     task = p.toolkit.get_action("task_status_show")(
         context,

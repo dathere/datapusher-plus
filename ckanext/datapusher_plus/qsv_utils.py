@@ -55,6 +55,7 @@ class QSVCommand:
         text: bool = True,
         env: Optional[Dict[str, str]] = None,
         uses_stdio: bool = False,
+        timeout: Optional[float] = None,
     ) -> Union[subprocess.CompletedProcess, Dict[str, Any], str]:
         """
         Run a qsv command with the given arguments.
@@ -65,12 +66,16 @@ class QSVCommand:
             capture_output: Whether to capture stdout and stderr
             text: Whether to return output as text
             env: Optional environment variables
+            timeout: Per-call override (seconds). Defaults to
+                ``conf.QSV_COMMAND_TIMEOUT`` so a hung qsv invocation never
+                pins an RQ worker indefinitely.
 
         Returns:
             The result of subprocess.run
 
         Raises:
-            utils.JobError: If the command fails and check is True
+            utils.JobError: If the command fails and check is True, or if the
+                command times out.
         """
 
         args = [self.qsv_bin] + args
@@ -78,24 +83,43 @@ class QSVCommand:
         # Convert all args to str to avoid TypeError with Path objects
         str_args = [str(arg) for arg in args]
 
+        effective_timeout = timeout if timeout is not None else conf.QSV_COMMAND_TIMEOUT
+
         try:
             self.logger.trace(f"Running qsv command: {' '.join(str_args)}")
             result = subprocess.run(
-                str_args, check=check, capture_output=capture_output, text=text, env=env
+                str_args,
+                check=check,
+                capture_output=capture_output,
+                text=text,
+                env=env,
+                timeout=effective_timeout,
             )
             return result
+        except subprocess.TimeoutExpired as e:
+            error_msg = (
+                f"qsv command timed out after {effective_timeout}s: "
+                f"{' '.join(str_args)}"
+            )
+            self.logger.error(error_msg)
+            raise utils.JobError(error_msg) from e
         except subprocess.CalledProcessError as e:
             if uses_stdio:
-                stdio = {}
-                stdio["stdout"] = e.stdout
-                stdio["stderr"] = e.stderr
-                return stdio
+                # Callers that opt into stdio capture handle their own failure
+                # logic and just want the raw stdout/stderr back.
+                return {"stdout": e.stdout, "stderr": e.stderr}
+
+            # Always log AND always raise when check=True — previously the
+            # raise was nested inside `if e.stderr:`, so failures with empty
+            # stderr silently returned None/"" and slipped past callers that
+            # had asked for check=True. Build the message with stderr when we
+            # have it, fall back to the exception's str otherwise.
             error_msg = f"qsv command failed: {e}"
-            if hasattr(e, "stderr") and e.stderr:
+            if getattr(e, "stderr", None):
                 error_msg += f" - {e.stderr}"
-                self.logger.error(error_msg)
-                if check:
-                    raise utils.JobError(error_msg)
+            self.logger.error(error_msg)
+            if check:
+                raise utils.JobError(error_msg) from e
             return e.stderr
 
     def version(self) -> str:

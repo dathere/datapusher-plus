@@ -8,6 +8,8 @@ from ckan.model.domain_object import DomainObject
 from sqlalchemy import types, Column, ForeignKey
 from ckan.plugins.toolkit import BaseModel
 
+from ckanext.datapusher_plus.job_exceptions import JobNotFoundError
+
 
 class Jobs(DomainObject, BaseModel):
     __tablename__ = "jobs"
@@ -98,7 +100,11 @@ class Jobs(DomainObject, BaseModel):
             # Assuming meta.Session has a commit method to save changes to the DB
             meta.Session.commit()
         else:
-            raise Exception("Job not found")
+            # Use a domain-specific exception so callers can distinguish
+            # "not found" from a real runtime error.
+            raise JobNotFoundError(
+                f"Job not found for job_id={job_dict.get('job_id')!r}"
+            )
 
 
 class Metadata(DomainObject, BaseModel):

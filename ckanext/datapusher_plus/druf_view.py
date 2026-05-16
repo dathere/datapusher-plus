@@ -8,7 +8,7 @@ from flask import Blueprint
 from flask.views import MethodView
 
 from ckan import model
-from ckan.plugins.toolkit import NotAuthorized, abort, h, get_action, _, request
+from ckan.plugins.toolkit import NotAuthorized, abort, h, get_action, _, request, g
 
 
 resource_first = Blueprint('resource_first', __name__)
@@ -30,8 +30,16 @@ class _ResourceFirst(MethodView):
         if 'type' in request.form:
             data['type'] = request.form['type']
 
+        # Build a real auth context — empty {} bypasses CKAN's standard idiom
+        # and makes auth fail on missing-user rather than wrong-user.
+        ctx = {
+            'model': model,
+            'session': model.Session,
+            'user': g.user,
+            'auth_user_obj': getattr(g, 'userobj', None),
+        }
         try:
-            pkg = get_action('package_create')({}, data)
+            pkg = get_action('package_create')(ctx, data)
         except NotAuthorized:
             return abort(403, _('Unauthorized to create a package'))
 

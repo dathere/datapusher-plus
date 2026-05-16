@@ -1,4 +1,9 @@
-FROM ubuntu:22.04
+# Pinned to a multi-arch image index digest so rebuilds are reproducible and
+# a compromised tag at the registry cannot silently shift our base image.
+# To refresh: `docker buildx imagetools inspect ubuntu:22.04` and copy the
+# top-level Digest. The human-readable tag is kept after the digest so
+# rendering tools still show what version this points to.
+FROM ubuntu:22.04@sha256:962f6cadeae0ea6284001009daa4cc9a8c37e75d1f5191cf0eb83fe565b63dd7
 
 # Set timezone
 ENV TZ=UTC

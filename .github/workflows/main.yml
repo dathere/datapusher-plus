@@ -1,9 +1,21 @@
 name: Automated DataPusher+ Testing Run
 on:
   workflow_dispatch:
+    inputs:
+      branch:
+        description: "datapusher-plus branch to clone & test (defaults to main)"
+        required: false
+        type: string
+        default: "main"
 env:
   FILES_DIR: "custom"
-  DATAPUSHER_BRANCH: "main"
+  # When dispatched with no input, this still resolves to "main" — preserves
+  # the existing zero-arg behaviour. Pass `branch=<name>` to target another.
+  DATAPUSHER_BRANCH: ${{ inputs.branch || 'main' }}
+  # Opt into Node 24 for JavaScript actions ahead of the 2026-06-02 default
+  # switch. Silences the deprecation annotation on actions/checkout@v4 and
+  # actions/upload-artifact@v4 without needing version bumps.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   CKAN_VERSION: "2.11"
   POSTGRES_PASSWORD: postgres
   CKAN_DB_PASSWORD: pass
@@ -1203,7 +1215,8 @@ jobs:
               # (DP+ submitted a flow that failed), expected or not.
               error_count=$(tail -n +2 /tmp/test_results.csv 2>/dev/null | awk -F',' '$NF=="error"' | wc -l)
               error_count=${error_count:-0}
-              
+
+
               # Calculate success rates
               tested_success_rate=$(( passed * 100 / total_tests ))
               if [ $total_files_in_dir -gt 0 ]; then
@@ -1287,7 +1300,11 @@ jobs:
                 done
                 echo ""
                 
-                # Add worker analysis sections
+                # Add worker analysis sections.
+                # `|| true` (not `|| echo "0"`) — `grep -c` already prints "0"
+                # on no-match and only exits 1; pairing it with `|| echo "0"`
+                # would APPEND a second "0" and break downstream arithmetic.
+                # `${var:-0}` is the final guard for the unset-variable case.
                 success_jobs=$(grep -c ",SUCCESS," /tmp/worker_analysis.csv 2>/dev/null || true)
                 success_jobs=${success_jobs:-0}
                 error_jobs=$(grep -c ",ERROR," /tmp/worker_analysis.csv 2>/dev/null || true)

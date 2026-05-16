@@ -6,8 +6,16 @@ import requests
 from pathlib import Path
 import ckan.plugins.toolkit as tk
 
-# SSL verification settings
-SSL_VERIFY = tk.asbool(tk.config.get("SSL_VERIFY"))
+# SSL verification settings.
+# Default to True (verify TLS) — disabling verification is a MITM footgun on
+# downloads. The old non-namespaced "SSL_VERIFY" key is still honoured for
+# backward compatibility with existing deployments.
+SSL_VERIFY = tk.asbool(
+    tk.config.get(
+        "ckanext.datapusher_plus.ssl_verify",
+        tk.config.get("SSL_VERIFY", True),
+    )
+)
 if not SSL_VERIFY:
     requests.packages.urllib3.disable_warnings()
 
@@ -52,7 +60,13 @@ PII_QUICK_SCREEN = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.pii_quick_screen", False)
 )
 
-# Binary paths
+# Binary paths.
+# Falls back to ``/usr/local/bin/qsvdp`` (the ckan-dev container's install
+# location) when the config key is unset, so CI doesn't have to manage this
+# in CKAN's ``ckan.ini``. The flow-start path-existence check in
+# ``prefect_flow._build_runtime_context`` raises a clear ``JobError`` if the
+# binary isn't actually at the resolved path, so a misconfiguration still
+# surfaces — just later, when it matters.
 QSV_BIN = Path(
     tk.config.get("ckanext.datapusher_plus.qsv_bin") or "/usr/local/bin/qsvdp"
 )
@@ -60,6 +74,9 @@ QSV_BIN = Path(
 # Data processing settings
 PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "1000"))
 TIMEOUT = tk.asint(tk.config.get("ckanext.datapusher_plus.download_timeout", "300"))
+QSV_COMMAND_TIMEOUT = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.qsv_command_timeout", "1800")
+)
 MAX_CONTENT_LENGTH = tk.asint(
     tk.config.get("ckanext.datapusher_plus.max_content_length", "5000000")
 )
@@ -137,7 +154,14 @@ DATASTORE_URLS = {
     "resource_update": "{ckan_url}/api/action/resource_update",
 }
 
-# Datastore write URL
+# Datastore write URL.
+# Read at module import (the rest of the module's constants depend on this
+# being a string-ish). A missing / empty value here surfaces later at the
+# point of use — the database task's psycopg2 connect raises a clear
+# OperationalError, captured by the flow's exception path and recorded on
+# the Jobs row. Hard-failing at import would also break test environments
+# and tooling imports (ckan db init, plugin metadata extraction) that have
+# no business needing the write URL.
 DATASTORE_WRITE_URL = tk.config.get("ckan.datastore.write_url")
 
 # spatial simplification settings
