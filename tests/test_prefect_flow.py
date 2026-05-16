@@ -727,3 +727,70 @@ def test_bootstrap_noops_when_ckan_config_populated():
     ), mock.patch("ckan.config.middleware.make_app") as mk_make_app:
         _bootstrap_ckan_app_context()
     mk_make_app.assert_not_called()
+
+
+
+def test_flow_resolves_retry_counts_per_run(
+    job_input, patched_dependencies, monkeypatch
+):
+    """``download_task``'s retry count is resolved from env at flow
+    start (via ``task.with_options(retries=…)``) so a change picks up
+    immediately on interpreter-reusing work pools. The default
+    ``process`` worker re-imports per run anyway, but this test
+    exercises the resolution path itself.
+
+    ``database_task`` is *not* covered here: ``with_options`` strips
+    its ``on_rollback`` hook in Prefect 3.x, so it stays import-time —
+    see the comment block near the constants definitions in
+    ``prefect_flow.py``.
+    """
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    monkeypatch.setenv("DATAPUSHER_PLUS_DOWNLOAD_RETRIES", "7")
+
+    # Spy on ``with_options``; return the original task so the stage
+    # body still runs (and ``patched_dependencies`` keeps every stage
+    # as a no-op).
+    download_with_options = mock.MagicMock(
+        return_value=prefect_flow.download_task
+    )
+    monkeypatch.setattr(
+        prefect_flow.download_task, "with_options", download_with_options
+    )
+
+    result = prefect_flow.datapusher_plus_flow(job_input)
+
+    assert result is None
+    download_with_options.assert_called_once_with(retries=7)
+
+
+def test_flow_aborts_when_soft_deadline_exceeded(
+    job_input, patched_dependencies, monkeypatch
+):
+    """The runtime-resolved soft deadline raises ``JobError`` (and the
+    flow records ``mark_job_as_errored``) when elapsed time at the
+    first between-stage check exceeds ``flow_timeout_seconds``. The
+    ``@flow`` decorator's hard ceiling is unaffected — this test only
+    exercises the body-level check.
+
+    Uses a deadline of ``0`` rather than patching ``time.monotonic``:
+    the latter is also called by Prefect's flow infrastructure
+    (run-context bookkeeping) and exhausts a small ``iter`` of fake
+    values before the flow body runs. With a 0 deadline, any positive
+    elapsed time at the check triggers, which is what we want.
+    """
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    monkeypatch.setenv("DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS", "0")
+
+    with pytest.raises(Exception):
+        # JobError propagates as a real exception out of the flow when
+        # called in-process (no Prefect server to wrap it into a state).
+        prefect_flow.datapusher_plus_flow(job_input)
+
+    # The flow's except-block marked the job as errored with the
+    # deadline-exceeded message before raising.
+    mark_errored = patched_dependencies["mark_errored"]
+    assert mark_errored.called
+    err_msg = mark_errored.call_args[0][1]
+    assert "Flow exceeded configured timeout of 0s" in err_msg
