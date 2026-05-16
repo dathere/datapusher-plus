@@ -101,6 +101,51 @@ def test_persist_returns_none_when_file_missing(tmp_path):
     assert block.store == {}
 
 
+
+def test_persist_skips_files_above_size_cap(tmp_path, monkeypatch):
+    """Files larger than ``DATAPUSHER_PLUS_MAX_PERSIST_FILE_MB`` skip
+    persistence and return ``None`` so the worker doesn't OOM trying to
+    load a multi-GB CSV into RAM. The bytes never reach the block."""
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus.jobs import file_persistence
+
+    src = tmp_path / "big.csv"
+    src.write_bytes(b"x" * (2 * 1024 * 1024))  # 2 MiB
+
+    monkeypatch.setenv("DATAPUSHER_PLUS_MAX_PERSIST_FILE_MB", "1")  # 1 MiB cap
+
+    block = _FakeBlock()
+    with mock.patch.object(
+        file_persistence, "load_result_storage_block", return_value=block
+    ):
+        result = file_persistence.persist_file(str(src), "k-big")
+
+    assert result is None
+    assert block.store == {}  # nothing was written
+
+
+def test_persist_cap_zero_disables_size_gate(tmp_path, monkeypatch):
+    """Setting the cap env var to ``0`` disables the gate entirely
+    (for operators with RAM to spare who want to persist everything)."""
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus.jobs import file_persistence
+
+    src = tmp_path / "biggish.csv"
+    src.write_bytes(b"y" * (2 * 1024 * 1024))  # 2 MiB
+
+    monkeypatch.setenv("DATAPUSHER_PLUS_MAX_PERSIST_FILE_MB", "0")
+
+    block = _FakeBlock()
+    with mock.patch.object(
+        file_persistence, "load_result_storage_block", return_value=block
+    ):
+        result = file_persistence.persist_file(str(src), "k-uncapped")
+
+    assert result == "k-uncapped"
+    assert "k-uncapped" in block.store
+    assert len(block.store["k-uncapped"]) == 2 * 1024 * 1024
+
+
 def test_restore_returns_false_for_missing_key(tmp_path):
     """A missing storage key is handled gracefully (returns ``False``)
     so the caller can fall back to letting the downstream stage raise

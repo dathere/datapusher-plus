@@ -28,11 +28,38 @@ caching was re-enabled.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from ckanext.datapusher_plus.jobs.blocks import load_result_storage_block
 
 log = logging.getLogger(__name__)
+
+
+# Skip persistence for files larger than this many MiB. ``persist_file``
+# reads the whole file into RAM before handing it to the Prefect block
+# (Prefect 3's ``LocalFileSystem.write_path`` / ``read_path`` are
+# bytes-in / bytes-out — no streaming variant), so on multi-GB CSV
+# ingestions a single task completion could OOM the worker. Skipping
+# above the threshold falls back to the pre-caching behaviour for
+# those files (same-run chains still work; cross-run cache hits don't
+# rehydrate the file and the downstream stage will surface a clear
+# ``FileNotFoundError`` instead of running out of memory).
+#
+# Operators override via ``DATAPUSHER_PLUS_MAX_PERSIST_FILE_MB``; set
+# to ``0`` to disable the cap entirely (only sensible on workers with
+# RAM to spare). The 512 MiB default is chosen so a CSV that fits in
+# Postgres' default ``work_mem`` × a typical worker box also fits in
+# RAM for one round-trip.
+def _max_persist_bytes() -> int:
+    raw = os.environ.get("DATAPUSHER_PLUS_MAX_PERSIST_FILE_MB", "512")
+    try:
+        mb = int(raw)
+    except ValueError:
+        mb = 512
+    if mb <= 0:
+        return 0  # disabled — persist everything
+    return mb * 1024 * 1024
 
 
 def persist_file(local_path: str, key: str) -> Optional[str]:
@@ -44,15 +71,30 @@ def persist_file(local_path: str, key: str) -> Optional[str]:
             from the content hash + stage name).
 
     Returns:
-        ``key`` on success, or ``None`` if the block is unavailable
-        or the write failed. Callers should treat ``None`` as "no
-        persistence recorded" — the result dataclass leaves its
-        ``*_path_key`` field at ``None`` and cross-run rehydration
-        falls back to the in-tempdir copy (which works for same-run
-        chains, just not cache hits).
+        ``key`` on success, or ``None`` if the block is unavailable,
+        the file exceeds the configured size cap, or the write failed.
+        Callers should treat ``None`` as "no persistence recorded" —
+        the result dataclass leaves its ``*_path_key`` field at
+        ``None`` and cross-run rehydration falls back to the in-tempdir
+        copy (which works for same-run chains, just not cache hits).
     """
     block = load_result_storage_block()
     if block is None:
+        return None
+    try:
+        size = os.path.getsize(local_path)
+    except OSError:
+        log.warning("Could not persist file %s: not found", local_path)
+        return None
+    cap = _max_persist_bytes()
+    if cap and size > cap:
+        log.debug(
+            "Skipping persistence of %s (%d bytes > %d-byte cap); set "
+            "DATAPUSHER_PLUS_MAX_PERSIST_FILE_MB=0 to disable the cap.",
+            local_path,
+            size,
+            cap,
+        )
         return None
     try:
         with open(local_path, "rb") as fh:
@@ -61,6 +103,9 @@ def persist_file(local_path: str, key: str) -> Optional[str]:
         log.debug("Persisted file %s to result storage as %s", local_path, key)
         return key
     except FileNotFoundError:
+        # Race: file existed at getsize() but was removed before open().
+        # Rare in practice but possible if a parallel tempdir cleanup
+        # fires; treat as "not persisted" rather than crashing the task.
         log.warning("Could not persist file %s: not found", local_path)
         return None
     except Exception as e:
