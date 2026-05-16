@@ -186,6 +186,7 @@ from ckanext.datapusher_plus.jobs.runtime_context import (
     RuntimeContext,
     ValidateResult,
     get_runtime_context,
+    rehydrate,
     reset_runtime_context,
     set_runtime_context,
 )
@@ -340,14 +341,23 @@ class _StageAbort(Exception):
         )
 
 
-def _stage_run(stage) -> RuntimeContext:
+def _stage_run(stage, prev: Any = None) -> RuntimeContext:
     """Invoke a stage on the bound RuntimeContext.
+
+    ``prev`` is the upstream task's result. When given, the bound
+    ``RuntimeContext`` is rehydrated from it first, so the stage sees
+    correct ``ctx`` state even if the upstream task's body never ran (a
+    Prefect cache hit, or a persisted-result replay on a flow re-run) —
+    that body is what would otherwise have mutated the shared context.
+    The root task (``download_task``) passes no ``prev``.
 
     A stage returning ``None`` is the BaseStage "skip / nothing to do"
     signal (per its docstring) — surfaced here as ``_StageAbort`` so the
     flow can stop cleanly and mark the job *complete*, not errored.
     """
     ctx = get_runtime_context()
+    if prev is not None:
+        rehydrate(ctx, prev)
     result = stage(ctx)
     if result is None:
         raise _StageAbort(stage.name)
@@ -447,11 +457,11 @@ def download_task(job_input: JobInput) -> DownloadResult:
 )
 def format_convert_task(prev: DownloadResult) -> ConvertResult:
     """Excel/ODS/Shapefile/GeoJSON/ZIP → CSV via qsv."""
-    ctx = _stage_run(FormatConverterStage())
+    ctx = _stage_run(FormatConverterStage(), prev)
     return ConvertResult(
+        upstream=prev,
         csv_path=ctx.tmp,
         converted_from=ctx.resource.get("format"),
-        file_hash=prev.file_hash,
     )
 
 
@@ -464,7 +474,7 @@ def format_convert_task(prev: DownloadResult) -> ConvertResult:
 )
 def validate_task(prev: ConvertResult) -> ValidateResult:
     """RFC-4180 validation with quarantine, encoding normalization, dedup."""
-    ctx = _stage_run(ValidationStage())
+    ctx = _stage_run(ValidationStage(), prev)
 
     # Enforce the quarantine threshold (raises if exceeded) and emit the
     # row.quarantined event. ``apply_quarantine`` is a no-op when no rows
@@ -478,11 +488,11 @@ def validate_task(prev: ConvertResult) -> ValidateResult:
     )
 
     return ValidateResult(
+        upstream=prev,
         csv_path=ctx.tmp,
         rows_after_dedup=ctx.rows_to_copy,
         quarantined_rows=ctx.quarantined_rows,
         quarantine_csv_path=ctx.quarantine_csv_path or None,
-        file_hash=prev.file_hash,
     )
 
 
@@ -497,7 +507,7 @@ def validate_task(prev: ConvertResult) -> ValidateResult:
 )
 def analyze_task(prev: ValidateResult) -> AnalyzeResult:
     """qsv stats + frequency + type inference + PII screening."""
-    ctx = _stage_run(AnalysisStage())
+    ctx = _stage_run(AnalysisStage(), prev)
     if ctx.pii_found:
         # Operators wire Prefect Automations to this event for alerting.
         # PII screening reports a candidate-match count, not per-column
@@ -508,6 +518,8 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
             details={"candidate_count": ctx.pii_candidate_count},
         )
     return AnalyzeResult(
+        upstream=prev,
+        csv_path=ctx.tmp,
         headers=list(ctx.headers),
         headers_dicts=list(ctx.headers_dicts),
         original_header_dict=dict(ctx.original_header_dict),
@@ -516,7 +528,6 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
         resource_fields_freqs=dict(ctx.resource_fields_freqs),
         pii_found=ctx.pii_found,
         pii_candidate_count=ctx.pii_candidate_count,
-        file_hash=prev.file_hash,
     )
 
 
@@ -534,8 +545,9 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
 )
 def database_task(prev: AnalyzeResult) -> DatabaseResult:
     """Postgres COPY into the datastore."""
-    ctx = _stage_run(DatabaseStage())
+    ctx = _stage_run(DatabaseStage(), prev)
     return DatabaseResult(
+        upstream=prev,
         rows_to_copy=ctx.rows_to_copy,
         copied_count=ctx.copied_count,
         existing_info=dict(ctx.existing_info) if ctx.existing_info else None,
@@ -554,8 +566,8 @@ def database_task(prev: AnalyzeResult) -> DatabaseResult:
 )
 def indexing_task(prev: DatabaseResult) -> IndexingResult:
     """Create indexes based on cardinality / date columns."""
-    _stage_run(IndexingStage())
-    return IndexingResult()
+    _stage_run(IndexingStage(), prev)
+    return IndexingResult(upstream=prev)
 
 
 @task(
@@ -569,8 +581,8 @@ def indexing_task(prev: DatabaseResult) -> IndexingResult:
 )
 def formula_task(prev: IndexingResult) -> FormulaResult:
     """Jinja2 formula evaluation against dpps/dppf/dpp namespaces."""
-    _stage_run(FormulaStage())
-    return FormulaResult()
+    _stage_run(FormulaStage(), prev)
+    return FormulaResult(upstream=prev)
 
 
 @task(
@@ -586,8 +598,8 @@ def formula_task(prev: IndexingResult) -> FormulaResult:
 )
 def metadata_task(prev: FormulaResult) -> MetadataResult:
     """Final datastore resource_show updates + dpp_suggestions write-back."""
-    _stage_run(MetadataStage())
-    return MetadataResult()
+    _stage_run(MetadataStage(), prev)
+    return MetadataResult(upstream=prev)
 
 
 
@@ -1021,6 +1033,12 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
                 idx = indexing_task(db)
                 fm = formula_task(idx)
                 md = metadata_task(fm)
+
+            # The result chain is the source of truth: derive the flow's
+            # final view of ``runtime`` from the terminal result so the
+            # artifact / event / completion code below is correct even if
+            # a task body was skipped (cache hit / persisted-result replay).
+            rehydrate(runtime, md)
 
             if job_input.dry_run:
                 dph.mark_job_as_completed(

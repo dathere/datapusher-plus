@@ -108,17 +108,21 @@ def reset_runtime_context(token: contextvars.Token) -> None:
 #
 # Each ``@task`` in ``prefect_flow.py`` returns one of these. They are:
 #
-#   * Small — only data downstream tasks actually need.
+#   * Self-contained — every result nests the result of the stage before
+#     it (``upstream``), so the whole chain of cross-task state is reachable
+#     from any single result. This is what lets ``rehydrate`` (below)
+#     reconstitute the ``RuntimeContext`` from a result alone: a cache hit
+#     or a persisted-result replay skips a task body, so the body's
+#     mutations to the shared context are *not* something a downstream
+#     stage can rely on — the result chain is.
 #   * Typed — so the run graph in the UI is meaningful.
 #   * Serializable — primitives, dicts, lists. No file handles, no loggers,
 #     no subprocess wrappers.
-#   * Cache-friendly — result hashes drive Prefect's caching, so equal
-#     inputs across runs produce equal cached outputs.
 
 
 @dataclass(frozen=True)
 class DownloadResult:
-    """Output of the download task."""
+    """Output of the download task. Root of the result chain."""
 
     resource: Dict[str, Any]
     resource_url: str
@@ -131,30 +135,40 @@ class DownloadResult:
 class ConvertResult:
     """Output of the format-converter task (Excel/ODS/Shapefile/GeoJSON → CSV)."""
 
+    upstream: DownloadResult
     csv_path: str
     # e.g. "xlsx", "shp", or None for pass-through.
     converted_from: Optional[str] = None
-    # Content fingerprint propagated from DownloadResult so downstream
-    # tasks can cache by file identity rather than by tempdir path.
-    file_hash: str = ""  # e.g. "xlsx", "shp", or None for pass-through
+
+    @property
+    def file_hash(self) -> str:
+        """Content fingerprint, carried from the root ``DownloadResult``."""
+        return self.upstream.file_hash
 
 
 @dataclass(frozen=True)
 class ValidateResult:
     """Output of the validation task, including quarantine info."""
 
+    upstream: ConvertResult
     csv_path: str
     rows_after_dedup: int
     quarantined_rows: int = 0
     quarantine_csv_path: Optional[str] = None
-    # Propagated content fingerprint for downstream caching.
-    file_hash: str = ""
+
+    @property
+    def file_hash(self) -> str:
+        """Content fingerprint, carried from the root ``DownloadResult``."""
+        return self.upstream.file_hash
 
 
 @dataclass(frozen=True)
 class AnalyzeResult:
     """Output of the qsv-driven analysis task."""
 
+    upstream: ValidateResult
+    # Working CSV path as analysis left it — what the database COPY reads.
+    csv_path: str
     headers: List[str]
     headers_dicts: List[Dict[str, Any]]
     original_header_dict: Dict[int, str]
@@ -165,23 +179,33 @@ class AnalyzeResult:
     # Count of PII candidate matches — what the PII-review suspend gate
     # thresholds on.
     pii_candidate_count: int = 0
-    # Propagated content fingerprint for downstream caching.
-    file_hash: str = ""
+
+    @property
+    def file_hash(self) -> str:
+        """Content fingerprint, carried from the root ``DownloadResult``."""
+        return self.upstream.file_hash
 
 
 @dataclass(frozen=True)
 class DatabaseResult:
     """Output of the database-load (COPY) task."""
 
+    upstream: AnalyzeResult
     rows_to_copy: int
     copied_count: int
     existing_info: Optional[Dict[str, Any]] = None
+
+    @property
+    def file_hash(self) -> str:
+        """Content fingerprint, carried from the root ``DownloadResult``."""
+        return self.upstream.file_hash
 
 
 @dataclass(frozen=True)
 class IndexingResult:
     """Output of the auto-indexing task."""
 
+    upstream: DatabaseResult
     indexes_created: List[str] = field(default_factory=list)
 
 
@@ -189,6 +213,7 @@ class IndexingResult:
 class FormulaResult:
     """Output of the Jinja2 formula-evaluation task."""
 
+    upstream: IndexingResult
     formula_outputs: Dict[str, Any] = field(default_factory=dict)
     suggestions: Dict[str, Any] = field(default_factory=dict)
 
@@ -197,5 +222,84 @@ class FormulaResult:
 class MetadataResult:
     """Output of the final metadata-update task. Terminal."""
 
+    upstream: FormulaResult
     alias_created: Optional[str] = None
     updated_fields: List[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Rehydration: result chain -> RuntimeContext
+# ---------------------------------------------------------------------------
+#
+# The per-stage result dataclasses above are the *source of truth* for
+# state that crosses a task boundary. ``rehydrate`` walks a nested result
+# chain root-first and writes each layer's fields back onto the
+# ContextVar-bound ``RuntimeContext``, so a stage sees correct ``ctx``
+# state even when an upstream task's body never ran (a Prefect cache hit,
+# or a persisted-result replay on a flow re-run). The stage bodies in
+# ``jobs/stages/*.py`` are reused unmodified — they still read and write
+# ``ctx``; they just no longer *depend* on a previous task body having
+# mutated the shared context in this process.
+
+
+def _apply_result(ctx: RuntimeContext, result: Any) -> None:
+    """Apply one result layer's fields onto ``ctx``.
+
+    Linear ``isinstance`` dispatch keeps every result-to-context mapping
+    visible in one place. Only stages whose output a later stage reads
+    back from ``ctx`` need a branch here; ``IndexingResult`` /
+    ``FormulaResult`` / ``MetadataResult`` carry nothing a downstream
+    stage consumes via the context, so they have none.
+    """
+    if isinstance(result, DownloadResult):
+        # Defensive copy: later stages mutate ``ctx.resource`` in place
+        # (e.g. ``FormulaStage`` adds ``dpp_suggestions``), so without a
+        # copy here that mutation would also mutate the ``DownloadResult``
+        # stored in the result chain — making it no longer a true snapshot
+        # of the download stage's output.
+        ctx.resource = dict(result.resource)
+        ctx.resource_url = result.resource_url
+        ctx.file_hash = result.file_hash
+        ctx.content_length = result.content_length
+        ctx.tmp = result.downloaded_path
+    elif isinstance(result, ConvertResult):
+        ctx.tmp = result.csv_path
+    elif isinstance(result, ValidateResult):
+        ctx.tmp = result.csv_path
+        ctx.rows_to_copy = result.rows_after_dedup
+        ctx.quarantined_rows = result.quarantined_rows
+        ctx.quarantine_csv_path = result.quarantine_csv_path or ""
+    elif isinstance(result, AnalyzeResult):
+        ctx.tmp = result.csv_path
+        ctx.headers = list(result.headers)
+        ctx.headers_dicts = list(result.headers_dicts)
+        ctx.original_header_dict = dict(result.original_header_dict)
+        ctx.dataset_stats = dict(result.dataset_stats)
+        ctx.resource_fields_stats = dict(result.resource_fields_stats)
+        ctx.resource_fields_freqs = dict(result.resource_fields_freqs)
+        ctx.pii_found = result.pii_found
+        ctx.pii_candidate_count = result.pii_candidate_count
+    elif isinstance(result, DatabaseResult):
+        ctx.rows_to_copy = result.rows_to_copy
+        ctx.copied_count = result.copied_count
+        # Defensive copy — same rationale as ``DownloadResult.resource``.
+        ctx.existing_info = (
+            dict(result.existing_info) if result.existing_info else None
+        )
+
+
+def rehydrate(ctx: RuntimeContext, result: Any) -> None:
+    """Reconstitute ``ctx`` from a (possibly nested) result chain.
+
+    Walks ``result.upstream`` to the root, then applies each layer
+    root-first so later stages' values win (e.g. each stage's ``csv_path``
+    overwrites the previous ``ctx.tmp``). A task calls this before running
+    its stage; see the module note above.
+    """
+    chain: List[Any] = []
+    node: Any = result
+    while node is not None:
+        chain.append(node)
+        node = getattr(node, "upstream", None)
+    for node in reversed(chain):
+        _apply_result(ctx, node)
