@@ -263,22 +263,32 @@ def _resolve_int(env_name: str, config_key: str, default: int) -> int:
     return default
 
 
-# These are read once at module import and baked into the ``@flow`` /
-# ``@task`` decorators below. The default ``process`` work pool spawns a
-# fresh Python interpreter per flow run, so it re-imports this module —
-# and re-reads these values — every run; env-var / ckan.ini changes take
-# effect immediately there. Operators on a work-pool type that reuses a
-# long-lived interpreter must restart their workers for a change to
-# these three knobs to take effect.
+# Module-import-time constants:
+#
+# ``_FLOW_TIMEOUT_SECONDS`` is read once at module import and baked into
+# the ``@flow`` decorator below as Prefect's hard-stop ceiling. The
+# default ``process`` work pool spawns a fresh Python interpreter per
+# flow run, so it re-imports this module — and re-reads this value —
+# every run; env-var / ckan.ini changes take effect immediately there.
+# On a work-pool type that reuses a long-lived interpreter, operators
+# need a worker restart for the hard ceiling to change, but the
+# *runtime* deadline check inside ``datapusher_plus_flow`` re-resolves
+# the same knob every run — so a shorter runtime value takes effect
+# without a restart even on those pools.
+#
+# ``_TASK_RETRY_DATABASE`` is also import-time. Asymmetric with
+# ``download_task`` (whose retries are resolved per-run inside the flow
+# body via ``with_options``) because the database task carries an
+# ``on_rollback`` hook that drops the partial datastore table on
+# transactional failure, and ``Task.with_options`` in Prefect 3.x does
+# *not* preserve ``on_rollback_hooks`` — it preserves on_completion /
+# on_failure / on_running, but not rollback. Re-deriving the task at
+# runtime would silently break the rollback contract, so we accept the
+# import-time read here and document the limitation.
 _FLOW_TIMEOUT_SECONDS = _resolve_int(
     "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
     "ckanext.datapusher_plus.flow_timeout",
     7200,
-)
-_TASK_RETRY_DOWNLOAD = _resolve_int(
-    "DATAPUSHER_PLUS_DOWNLOAD_RETRIES",
-    "ckanext.datapusher_plus.download_retries",
-    3,
 )
 _TASK_RETRY_DATABASE = _resolve_int(
     "DATAPUSHER_PLUS_DATABASE_RETRIES",
@@ -438,7 +448,13 @@ def _retry_if_transient(task, task_run, state) -> bool:
 
 @task(
     name="download",
-    retries=_TASK_RETRY_DOWNLOAD,
+    # ``retries`` is set per-run via ``task.with_options(retries=…)``
+    # at the call site in ``datapusher_plus_flow`` so the count is
+    # resolved from env / ckan.ini at run time (and so picks up changes
+    # without a worker restart on interpreter-reusing work pools).
+    # Safe to do here (unlike ``database_task``) because download has
+    # no ``on_rollback`` hook — there's nothing for Prefect's
+    # ``with_options`` strip-and-recopy to lose.
     retry_delay_seconds=[10, 60, 300],
     retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "io-bound"],
@@ -546,6 +562,10 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
 
 @task(
     name="database-load",
+    # Import-time read (see the comment block near the constants
+    # definitions): a runtime ``with_options(retries=…)`` would strip
+    # the ``on_rollback`` hook registered below, silently breaking the
+    # datastore-cleanup contract on transactional failure.
     retries=_TASK_RETRY_DATABASE,
     retry_delay_seconds=30,
     retry_condition_fn=_retry_if_transient,
@@ -994,6 +1014,44 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
         dph.mark_job_as_errored(job_id, str(e))
         raise
 
+    # Runtime-resolved tunables. Reading these here (not at module
+    # import) means env / ckan.ini changes take effect on the very next
+    # flow run, even on work-pool types that reuse a long-lived
+    # interpreter. On the default ``process`` work pool the module is
+    # re-imported per run anyway, so this is equivalent to the
+    # import-time read there. ``database_retries`` is *not* runtime-
+    # resolved — see the comment block near the constants definitions
+    # at the top of the module for why.
+    download_retries = _resolve_int(
+        "DATAPUSHER_PLUS_DOWNLOAD_RETRIES",
+        "ckanext.datapusher_plus.download_retries",
+        3,
+    )
+    flow_timeout_seconds = _resolve_int(
+        "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
+        "ckanext.datapusher_plus.flow_timeout",
+        7200,
+    )
+    flow_start = time.monotonic()
+
+    def _check_deadline():
+        """Raise if the runtime-resolved flow deadline has been exceeded.
+
+        Soft enforcement: only checked between stages, so a stage hung
+        mid-execution will not be aborted by this — the ``@flow``
+        decorator's import-time ``timeout_seconds`` ceiling is the hard
+        backstop for that case. The point of this softer check is to
+        honour a *runtime-resolved* deadline so env / ckan.ini changes
+        take effect without a worker restart on interpreter-reusing
+        work pools.
+        """
+        elapsed = time.monotonic() - flow_start
+        if elapsed > flow_timeout_seconds:
+            raise utils.JobError(
+                f"Flow exceeded configured timeout of "
+                f"{flow_timeout_seconds}s (elapsed: {elapsed:.0f}s)"
+            )
+
     # Announce running state to CKAN.
     result_url = job_input.input.get("result_url")
     if result_url:
@@ -1022,11 +1080,17 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
                 dph.mark_job_as_completed(job_id, {"skipped": "datastore-managed"})
                 return None
 
-            # Read-only / non-destructive stages.
-            dl = download_task(job_input)
+            # Read-only / non-destructive stages. ``download_task`` gets
+            # its retry count resolved per-run (see the comment block
+            # above the constants near the top of the module).
+            dl = download_task.with_options(retries=download_retries)(
+                job_input
+            )
+            _check_deadline()
             cv = format_convert_task(dl)
             vl = validate_task(cv)
             an = analyze_task(vl)
+            _check_deadline()
 
             # Human-in-the-loop gate. When PII screening flags more
             # fields than ``pii_review_threshold``, the flow suspends
@@ -1043,6 +1107,7 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
             # drop or flagged for review when the table pre-existed).
             with transaction():
                 db = database_task(an)
+                _check_deadline()
                 idx = indexing_task(db)
                 fm = formula_task(idx)
                 md = metadata_task(fm)
