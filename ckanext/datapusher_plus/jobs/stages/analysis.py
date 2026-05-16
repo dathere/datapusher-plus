@@ -174,8 +174,17 @@ class AnalysisStage(BaseStage):
                 f"({unsafe_headers}). Sanitizing...\""
             )
             qsv_safenames_csv = os.path.join(context.temp_dir, "qsv_safenames.csv")
+            # Mirror the ``reserved`` / ``prefix`` args from the detect call
+            # above so the sanitize step uses the same rules. Without them
+            # qsv falls back to its built-in defaults, which can disagree
+            # with what was reported as unsafe — yielding renamed columns
+            # that don't match the detection output.
             context.qsv.safenames(
-                context.tmp, mode="conditional", output_file=qsv_safenames_csv
+                context.tmp,
+                mode="conditional",
+                reserved=conf.RESERVED_COLNAMES,
+                prefix=conf.UNSAFE_PREFIX,
+                output_file=qsv_safenames_csv,
             )
             context.update_tmp(qsv_safenames_csv)
         else:
