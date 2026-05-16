@@ -242,14 +242,45 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _resolve_int(env_name: str, config_key: str, default: int) -> int:
-    """Resolve an int tunable from env var → CKAN config → default.
+def _resolve_int(
+    env_name: str,
+    config_key: str,
+    default: int,
+    *,
+    prefect_var_name: Optional[str] = None,
+) -> int:
+    """Resolve an int tunable from Prefect Variable → env → ckan config → default.
 
-    Env var wins so operators and CI can override per-process without
+    When ``prefect_var_name`` is given and the Prefect API is reachable,
+    that Variable wins if set — operators can tune the value from the
+    Prefect UI without shell access to the worker. Lookup failures
+    (server unreachable, name absent, value not int-parseable) silently
+    fall through to the env / ckan.ini path.
+
+    Env wins next so operators and CI can override per-process without
     touching ``ckan.ini``. When the env var is unset, fall back to the
-    CKAN config key — useful for operators who manage all settings via
-    ``ckan.ini``. When neither is set, return ``default``.
+    CKAN config key (useful for operators who manage all settings via
+    ``ckan.ini``). When nothing is set, return ``default``.
+
+    Intentionally NOT a module-import-time call: ``Variable.get()``
+    triggers a Prefect API call (and an ephemeral server bootstrap when
+    ``PREFECT_API_URL`` is unset), which would pollute stdout during
+    ``ckan db init`` or other tooling that imports the DP+ plugin.
+    Call this from inside a running flow / task body where a Prefect
+    runtime context already exists.
     """
+    if prefect_var_name:
+        try:
+            from prefect.variables import Variable
+
+            v = Variable.get(prefect_var_name, default=None)
+            if v is not None and v != "":
+                return int(v)
+        except Exception:
+            # Prefect server unreachable, variables API unavailable on
+            # older Prefect 3.x, Variable name has unexpected type, or
+            # value isn't int-parseable — fall through to env / config.
+            pass
     env_value = os.environ.get(env_name)
     if env_value is not None and env_value != "":
         try:
@@ -1086,15 +1117,22 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
     # import-time read there. ``database_retries`` is *not* runtime-
     # resolved — see the comment block near the constants definitions
     # at the top of the module for why.
+    #
+    # ``prefect_var_name`` adds a Prefect Variable as the highest-
+    # priority source: operators can tune these values from the Prefect
+    # UI without shell access to the worker. Variable absent / Prefect
+    # unreachable → falls through to env / ckan.ini / default.
     download_retries = _resolve_int(
         "DATAPUSHER_PLUS_DOWNLOAD_RETRIES",
         "ckanext.datapusher_plus.download_retries",
         3,
+        prefect_var_name="dpp_download_retries",
     )
     flow_timeout_seconds = _resolve_int(
         "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
         "ckanext.datapusher_plus.flow_timeout",
         7200,
+        prefect_var_name="dpp_flow_timeout",
     )
     flow_start = time.monotonic()
 

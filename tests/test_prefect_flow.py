@@ -794,3 +794,88 @@ def test_flow_aborts_when_soft_deadline_exceeded(
     assert mark_errored.called
     err_msg = mark_errored.call_args[0][1]
     assert "Flow exceeded configured timeout of 0s" in err_msg
+
+
+
+def test_resolve_int_prefect_variable_wins_when_set(monkeypatch):
+    """When a Prefect Variable is set, it overrides env and ckan.config.
+
+    Operators can tune these knobs from the Prefect UI without shell
+    access to the worker; the Variable wins over the lower-priority
+    sources documented in README.md.
+    """
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    # Set env to a known value so we can prove the Variable wins over
+    # both (env > ckan.config, so env is the strongest competing source
+    # in this test).
+    monkeypatch.setenv("DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS", "111")
+
+    fake_variable = mock.MagicMock()
+    fake_variable.get = mock.MagicMock(return_value="999")
+    with mock.patch.dict(
+        "sys.modules", {"prefect.variables": mock.MagicMock(Variable=fake_variable)}
+    ):
+        result = prefect_flow._resolve_int(
+            "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
+            "ckanext.datapusher_plus.flow_timeout",
+            7200,
+            prefect_var_name="dpp_flow_timeout",
+        )
+
+    assert result == 999
+    fake_variable.get.assert_called_once_with("dpp_flow_timeout", default=None)
+
+
+def test_resolve_int_falls_through_when_variable_absent(monkeypatch):
+    """An unset Prefect Variable (``Variable.get`` returns ``None``)
+    falls through to the env-var path with no error — operators who
+    don't use Prefect Variables see no behaviour change.
+    """
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    monkeypatch.setenv("DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS", "222")
+
+    fake_variable = mock.MagicMock()
+    fake_variable.get = mock.MagicMock(return_value=None)  # Variable absent
+    with mock.patch.dict(
+        "sys.modules", {"prefect.variables": mock.MagicMock(Variable=fake_variable)}
+    ):
+        result = prefect_flow._resolve_int(
+            "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
+            "ckanext.datapusher_plus.flow_timeout",
+            7200,
+            prefect_var_name="dpp_flow_timeout",
+        )
+
+    assert result == 222  # env-var value wins
+
+
+def test_resolve_int_falls_through_when_prefect_unreachable(monkeypatch):
+    """A Prefect server connection failure (``Variable.get`` raises)
+    falls through silently to env / config — the Variable lookup must
+    never break a flow that worked before Variables were configured.
+    """
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    monkeypatch.setenv("DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS", "333")
+
+    fake_variable = mock.MagicMock()
+    fake_variable.get = mock.MagicMock(side_effect=RuntimeError("connection refused"))
+    with mock.patch.dict(
+        "sys.modules", {"prefect.variables": mock.MagicMock(Variable=fake_variable)}
+    ):
+        result = prefect_flow._resolve_int(
+            "DATAPUSHER_PLUS_FLOW_TIMEOUT_SECONDS",
+            "ckanext.datapusher_plus.flow_timeout",
+            7200,
+            prefect_var_name="dpp_flow_timeout",
+        )
+
+    assert result == 333  # Variable raised → fall through to env
