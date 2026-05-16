@@ -51,6 +51,12 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = { find = { where = ["."], exclude = ["tests*"] } }
+# Tell setuptools to include MANIFEST.in-listed data files (yaml, json, html,
+# js, mo, etc.) inside the *wheel* as well, not just the sdist. Without this,
+# `pip install datapusher-plus` from PyPI builds a wheel that omits
+# `config_declaration.yaml` and the bundled templates/JS — surfaces as
+# "config_declaration.yaml file is missing" at plugin load time (see #251).
+include-package-data = true
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements.txt"] }
