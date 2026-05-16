@@ -96,8 +96,26 @@ class DatabaseStage(BaseStage):
         )
 
     def _copy_data(self, context: ProcessingContext) -> int:
-        """
-        Copy data to datastore using PostgreSQL COPY.
+        """Copy data to datastore using PostgreSQL COPY.
+
+        Two strategies, controlled by
+        ``ckanext.datapusher_plus.use_truncate_freeze`` (default
+        ``True``):
+
+        * **TRUNCATE + COPY ... WITH FREEZE in one transaction.** The
+          FREEZE flag tells PostgreSQL the new rows are already
+          vacuum-clean, so subsequent VACUUMs can skip them — a real
+          speedup on multi-million-row loads. The catch is that
+          TRUNCATE's ``AccessExclusive`` lock is held for the duration
+          of the COPY, blocking any concurrent ``SELECT`` on the table
+          (see #258).
+        * **TRUNCATE + commit, then COPY (without FREEZE) in a fresh
+          transaction.** TRUNCATE's AccessExclusive lock is released
+          after a millisecond-scale commit; the COPY only acquires
+          ``RowExclusive``, so concurrent reads keep working. FREEZE
+          speedup is lost (the closing VACUUM ANALYZE picks up the
+          slack), but ingestions on a read-heavy datastore no longer
+          block dashboard queries.
 
         Args:
             context: Processing context
@@ -108,6 +126,12 @@ class DatabaseStage(BaseStage):
         Raises:
             utils.JobError: If COPY operation fails
         """
+        # Cache the config flag once: we read it three times below
+        # (commit-or-not gate, COPY-options builder, SQL formatter), and
+        # a mid-method config change shouldn't cause the COPY to disagree
+        # with what we planned for the TRUNCATE.
+        use_freeze = conf.USE_TRUNCATE_FREEZE
+
         try:
             raw_connection = psycopg2.connect(conf.DATASTORE_WRITE_URL)
         except psycopg2.Error as e:
@@ -116,20 +140,35 @@ class DatabaseStage(BaseStage):
         try:
             cur = raw_connection.cursor()
 
-            # Truncate table for COPY FREEZE optimization
-            self._truncate_table(cur, context.resource_id)
+            # Truncate the table. Required for FREEZE; useful even
+            # without it (gives a clean slate matching the new schema).
+            # ``_truncate_table`` rolls back on failure, so the
+            # transaction state is clean regardless of which branch
+            # ran (see the method docstring for the rationale).
+            self._truncate_table(cur, raw_connection, context.resource_id)
 
-            # Prepare COPY SQL
+            if not use_freeze:
+                # Release the AccessExclusive lock from TRUNCATE before
+                # the long COPY. Subsequent COPY runs in a new
+                # transaction and only grabs RowExclusive — concurrent
+                # SELECTs on the table proceed normally.
+                raw_connection.commit()
+
+            # Prepare COPY SQL. ``FREEZE 1`` only valid in the same
+            # transaction as the TRUNCATE/CREATE that emptied the table,
+            # so the option is dropped when we just committed.
             col_names_list = [h["id"] for h in context.headers_dicts]
-            column_names = sql.SQL(",").join(sql.Identifier(c) for c in col_names_list)
-            copy_sql = sql.SQL(
-                "COPY {} ({}) FROM STDIN "
-                "WITH (FORMAT CSV, FREEZE 1, "
-                "HEADER 1, ENCODING 'UTF8');"
-            ).format(
-                sql.Identifier(context.resource_id),
-                column_names,
+            column_names = sql.SQL(",").join(
+                sql.Identifier(c) for c in col_names_list
             )
+            copy_options = (
+                "FORMAT CSV, FREEZE 1, HEADER 1, ENCODING 'UTF8'"
+                if use_freeze
+                else "FORMAT CSV, HEADER 1, ENCODING 'UTF8'"
+            )
+            copy_sql = sql.SQL(
+                "COPY {} ({}) FROM STDIN WITH (" + copy_options + ");"
+            ).format(sql.Identifier(context.resource_id), column_names)
 
             # Execute COPY
             with open(context.tmp, "rb", conf.COPY_READBUFFER_SIZE) as f:
@@ -141,7 +180,10 @@ class DatabaseStage(BaseStage):
 
             raw_connection.commit()
 
-            # VACUUM ANALYZE for performance
+            # VACUUM ANALYZE for performance. Cheap when FREEZE was used
+            # (most pages already marked clean), more substantial work
+            # when it wasn't — but the ingestion has already returned
+            # from the operator's point of view.
             self._vacuum_analyze(raw_connection, context.resource_id)
 
             return copied_count
@@ -150,22 +192,38 @@ class DatabaseStage(BaseStage):
             if raw_connection:
                 raw_connection.close()
 
-    def _truncate_table(self, cursor: psycopg2.extensions.cursor, resource_id: str) -> None:
-        """
-        Truncate table to enable COPY FREEZE optimization.
+    def _truncate_table(
+        self,
+        cursor: psycopg2.extensions.cursor,
+        connection: psycopg2.extensions.connection,
+        resource_id: str,
+    ) -> None:
+        """Truncate table to enable COPY FREEZE optimization.
+
+        Intentionally non-fatal: if the table doesn't exist yet (a brand
+        new resource), TRUNCATE raises and we want the subsequent
+        ``_create_datastore_table`` / COPY path to proceed anyway. But
+        a failed TRUNCATE leaves the transaction in the
+        ``InFailedSqlTransaction`` state — every subsequent statement
+        on the same connection (including the explicit ``commit()`` in
+        the opt-out branch of ``_copy_data``) raises until a
+        ``rollback()``. Roll back here so callers always observe a
+        clean transaction state on return, regardless of which branch
+        of ``_copy_data`` invoked us.
 
         Args:
             cursor: Database cursor
+            connection: Owning connection (for the rollback on failure)
             resource_id: Resource ID (table name)
         """
         try:
             cursor.execute(
                 sql.SQL("TRUNCATE TABLE {}").format(sql.Identifier(resource_id))
             )
-        except psycopg2.Error as e:
-            # Non-fatal, log warning but continue
-            # (table might not exist yet)
-            pass
+        except psycopg2.Error:
+            # Non-fatal: clear the aborted-transaction state so the
+            # caller's subsequent commit / COPY doesn't trip over it.
+            connection.rollback()
 
     def _vacuum_analyze(
         self, connection: psycopg2.extensions.connection, resource_id: str
