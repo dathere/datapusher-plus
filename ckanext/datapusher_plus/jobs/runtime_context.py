@@ -31,9 +31,11 @@ from __future__ import annotations
 
 import contextvars
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
+from ckanext.datapusher_plus.jobs.file_persistence import restore_file
 
 # ``RuntimeContext`` is the role-name for the mutable per-run state. We
 # alias it to ``ProcessingContext`` so stage signatures (``process(ctx:
@@ -129,6 +131,14 @@ class DownloadResult:
     file_hash: str
     content_length: int
     downloaded_path: str
+    # Result-storage key under which ``downloaded_path``'s contents were
+    # persisted at task completion. ``None`` when persistence skipped
+    # (no storage block, or write failed). On a cross-run cache hit,
+    # ``_apply_result`` uses this key to restore the file into the
+    # current run's tempdir. Optional + defaulting to ``None`` is
+    # back-compat: cached results from older runs predating this field
+    # deserialize cleanly and just behave as "no cross-run rehydration".
+    downloaded_path_key: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -139,6 +149,9 @@ class ConvertResult:
     csv_path: str
     # e.g. "xlsx", "shp", or None for pass-through.
     converted_from: Optional[str] = None
+    # See ``DownloadResult.downloaded_path_key`` for the rationale on
+    # this field. Set at task completion if persistence succeeded.
+    csv_path_key: Optional[str] = None
 
     @property
     def file_hash(self) -> str:
@@ -155,6 +168,9 @@ class ValidateResult:
     rows_after_dedup: int
     quarantined_rows: int = 0
     quarantine_csv_path: Optional[str] = None
+    # See ``DownloadResult.downloaded_path_key``; one key per file path.
+    csv_path_key: Optional[str] = None
+    quarantine_csv_path_key: Optional[str] = None
 
     @property
     def file_hash(self) -> str:
@@ -179,6 +195,8 @@ class AnalyzeResult:
     # Count of PII candidate matches — what the PII-review suspend gate
     # thresholds on.
     pii_candidate_count: int = 0
+    # See ``DownloadResult.downloaded_path_key``.
+    csv_path_key: Optional[str] = None
 
     @property
     def file_hash(self) -> str:
@@ -242,6 +260,36 @@ class MetadataResult:
 # mutated the shared context in this process.
 
 
+def _resolve_or_restore(
+    local_path: Optional[str], storage_key: Optional[str], dest_dir: str
+) -> Optional[str]:
+    """Return a usable local path for a file referenced by a result.
+
+    Three cases:
+
+    1. ``local_path`` exists on disk -> use it as-is (same-run case;
+       the file is still in the current tempdir).
+    2. ``local_path`` does not exist but ``storage_key`` is set ->
+       restore the persisted contents into ``dest_dir`` (the current
+       run's tempdir) under the same basename and return the new path
+       (cross-run cache-hit case).
+    3. Otherwise -> return ``local_path`` unchanged so the downstream
+       stage fails with a clear ``FileNotFoundError`` rather than
+       silently appearing to succeed on stale data.
+
+    ``None`` / empty inputs pass through unchanged.
+    """
+    if not local_path:
+        return local_path
+    if Path(local_path).is_file():
+        return local_path
+    if storage_key:
+        dest = Path(dest_dir) / Path(local_path).name
+        if restore_file(storage_key, str(dest)):
+            return str(dest)
+    return local_path
+
+
 def _apply_result(ctx: RuntimeContext, result: Any) -> None:
     """Apply one result layer's fields onto ``ctx``.
 
@@ -250,6 +298,11 @@ def _apply_result(ctx: RuntimeContext, result: Any) -> None:
     back from ``ctx`` need a branch here; ``IndexingResult`` /
     ``FormulaResult`` / ``MetadataResult`` carry nothing a downstream
     stage consumes via the context, so they have none.
+
+    Every file-path field is routed through ``_resolve_or_restore`` so
+    a cross-run cache hit (whose recorded tempdir path no longer exists)
+    transparently fetches the persisted file from result storage into
+    the current run's tempdir.
     """
     if isinstance(result, DownloadResult):
         # Defensive copy: later stages mutate ``ctx.resource`` in place
@@ -261,16 +314,31 @@ def _apply_result(ctx: RuntimeContext, result: Any) -> None:
         ctx.resource_url = result.resource_url
         ctx.file_hash = result.file_hash
         ctx.content_length = result.content_length
-        ctx.tmp = result.downloaded_path
+        ctx.tmp = _resolve_or_restore(
+            result.downloaded_path, result.downloaded_path_key, ctx.temp_dir
+        )
     elif isinstance(result, ConvertResult):
-        ctx.tmp = result.csv_path
+        ctx.tmp = _resolve_or_restore(
+            result.csv_path, result.csv_path_key, ctx.temp_dir
+        )
     elif isinstance(result, ValidateResult):
-        ctx.tmp = result.csv_path
+        ctx.tmp = _resolve_or_restore(
+            result.csv_path, result.csv_path_key, ctx.temp_dir
+        )
         ctx.rows_to_copy = result.rows_after_dedup
         ctx.quarantined_rows = result.quarantined_rows
-        ctx.quarantine_csv_path = result.quarantine_csv_path or ""
+        ctx.quarantine_csv_path = (
+            _resolve_or_restore(
+                result.quarantine_csv_path,
+                result.quarantine_csv_path_key,
+                ctx.temp_dir,
+            )
+            or ""
+        )
     elif isinstance(result, AnalyzeResult):
-        ctx.tmp = result.csv_path
+        ctx.tmp = _resolve_or_restore(
+            result.csv_path, result.csv_path_key, ctx.temp_dir
+        )
         ctx.headers = list(result.headers)
         ctx.headers_dicts = list(result.headers_dicts)
         ctx.original_header_dict = dict(result.original_header_dict)

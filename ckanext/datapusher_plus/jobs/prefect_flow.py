@@ -185,7 +185,13 @@ import ckanext.datapusher_plus.job_exceptions as job_exceptions
 import ckanext.datapusher_plus.prefect_client as prefect_client
 import ckanext.datapusher_plus.utils as utils
 from ckanext.datapusher_plus.jobs import artifacts, events, quarantine
-from ckanext.datapusher_plus.jobs.caching import DEFAULT_RESULT_STORAGE
+from ckanext.datapusher_plus.jobs.caching import (
+    CONTENT_CACHE_POLICY,
+    DEFAULT_CACHE_EXPIRATION,
+    DEFAULT_RESULT_STORAGE,
+    DOWNLOAD_CACHE_POLICY,
+)
+from ckanext.datapusher_plus.jobs.file_persistence import persist_file
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
 from ckanext.datapusher_plus.jobs.runtime_context import (
     AnalyzeResult,
@@ -261,6 +267,33 @@ def _resolve_int(env_name: str, config_key: str, default: int) -> int:
         # ``prefect worker`` process) — fall through to the default.
         pass
     return default
+
+
+
+def _persist_stage_file(
+    local_path: Optional[str], file_hash: Optional[str], stage: str, slot: str
+) -> Optional[str]:
+    """Persist a stage's working file to result storage, return the key.
+
+    Returns ``None`` (and records nothing on the result dataclass) when:
+
+    * ``local_path`` is empty / falsy — nothing to persist;
+    * ``file_hash`` is empty — without a content hash we cannot build a
+      stable cross-run key;
+    * the result-storage block is unavailable or the write failed —
+      ``persist_file`` already logs the reason.
+
+    The key layout — ``dpp:files:{file_hash}:{stage}:{slot}`` — namespaces
+    by content fingerprint, then stage, then slot (a stage with multiple
+    file outputs uses different slots, e.g. ``ValidateResult``'s
+    ``csv`` / ``quarantine``). Same hash + stage + slot across runs ->
+    same key -> a cache hit on the result lands on a persisted file we
+    can restore.
+    """
+    if not local_path or not file_hash:
+        return None
+    key = f"dpp:files:{file_hash}:{stage}:{slot}"
+    return persist_file(local_path, key)
 
 
 # Module-import-time constants:
@@ -458,6 +491,13 @@ def _retry_if_transient(task, task_run, state) -> bool:
     retry_delay_seconds=[10, 60, 300],
     retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "io-bound"],
+    # Content-caching: skip re-downloading the same URL within the
+    # cache window. The downloaded file is persisted alongside the
+    # result so a cache hit on a later run can restore it into the
+    # current tempdir (see ``_persist_stage_file`` /
+    # ``runtime_context._resolve_or_restore``).
+    cache_policy=DOWNLOAD_CACHE_POLICY,
+    cache_expiration=DEFAULT_CACHE_EXPIRATION,
     # Persistence: every output is checkpointed so operators can inspect
     # a task's output from the Prefect UI.
     persist_result=True,
@@ -472,6 +512,9 @@ def download_task(job_input: JobInput) -> DownloadResult:
         file_hash=ctx.file_hash,
         content_length=ctx.content_length,
         downloaded_path=ctx.tmp,
+        downloaded_path_key=_persist_stage_file(
+            ctx.tmp, ctx.file_hash, "download", "downloaded"
+        ),
     )
 
 
@@ -481,6 +524,8 @@ def download_task(job_input: JobInput) -> DownloadResult:
     retry_delay_seconds=30,
     retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "qsv-subprocess"],
+    cache_policy=CONTENT_CACHE_POLICY,
+    cache_expiration=DEFAULT_CACHE_EXPIRATION,
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
 )
@@ -491,6 +536,9 @@ def format_convert_task(prev: DownloadResult) -> ConvertResult:
         upstream=prev,
         csv_path=ctx.tmp,
         converted_from=ctx.resource.get("format"),
+        csv_path_key=_persist_stage_file(
+            ctx.tmp, ctx.file_hash, "convert", "csv"
+        ),
     )
 
 
@@ -498,6 +546,8 @@ def format_convert_task(prev: DownloadResult) -> ConvertResult:
     name="validate",
     retries=0,
     tags=["datapusher-plus", "qsv-subprocess"],
+    cache_policy=CONTENT_CACHE_POLICY,
+    cache_expiration=DEFAULT_CACHE_EXPIRATION,
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
 )
@@ -522,6 +572,15 @@ def validate_task(prev: ConvertResult) -> ValidateResult:
         rows_after_dedup=ctx.rows_to_copy,
         quarantined_rows=ctx.quarantined_rows,
         quarantine_csv_path=ctx.quarantine_csv_path or None,
+        csv_path_key=_persist_stage_file(
+            ctx.tmp, ctx.file_hash, "validate", "csv"
+        ),
+        quarantine_csv_path_key=_persist_stage_file(
+            ctx.quarantine_csv_path or None,
+            ctx.file_hash,
+            "validate",
+            "quarantine",
+        ),
     )
 
 
@@ -531,6 +590,8 @@ def validate_task(prev: ConvertResult) -> ValidateResult:
     retry_delay_seconds=60,
     retry_condition_fn=_retry_if_transient,
     tags=["datapusher-plus", "qsv-subprocess", "cpu-bound"],
+    cache_policy=CONTENT_CACHE_POLICY,
+    cache_expiration=DEFAULT_CACHE_EXPIRATION,
     persist_result=True,
     result_storage=DEFAULT_RESULT_STORAGE,
 )
@@ -557,6 +618,9 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
         resource_fields_freqs=dict(ctx.resource_fields_freqs),
         pii_found=ctx.pii_found,
         pii_candidate_count=ctx.pii_candidate_count,
+        csv_path_key=_persist_stage_file(
+            ctx.tmp, ctx.file_hash, "analyze", "csv"
+        ),
     )
 
 

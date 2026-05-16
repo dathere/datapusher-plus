@@ -3,28 +3,31 @@
 Result-persistence and cache-key configuration for the Prefect flow.
 
 **Result persistence** (``persist_result=True`` + ``result_storage=...``)
-is active: every task output is checkpointed so operators can open a
-task's output from the Prefect UI to debug bad data.
+is active on every task: outputs are checkpointed so operators can
+open a task's output from the Prefect UI to debug bad data.
 
-**Content-based caching is currently DISABLED** — ``prefect_flow.py``
-does not pass ``cache_policy=`` to any task. The cache-key functions
-and policies below are kept for when it can be safely re-enabled.
+**Content-based caching is enabled** on the read-only stages
+(``download_task``, ``format_convert_task``, ``validate_task``,
+``analyze_task``); the cache-key functions below build keys from the
+content fingerprint propagated through the result chain, so identical
+content across runs hits the cache and skips the qsv subprocess. The
+mutating stages (``database_task``, ``indexing_task``,
+``formula_task``, ``metadata_task``) intentionally do NOT cache —
+caching the result would skip the side effect.
 
-The original blocker is now cleared: each per-stage result dataclass is
-self-contained (it nests its ``upstream`` result), and every task
-``rehydrate``-s the ``RuntimeContext`` from its input result before
-running its stage. So a cache *hit* — which skips the task body — no
-longer leaves a downstream stage reading empty state (the
-``COPY "<table>" () FROM STDIN`` failure that first forced caching off).
+The original blocker (each per-stage result dataclass needs to be
+self-contained so a cache *hit* — which skips the task body —
+doesn't leave a downstream stage reading empty state) was cleared in
+PR #280: every task ``rehydrate``-s the ``RuntimeContext`` from its
+input result before running its stage.
 
-What still blocks re-enabling it: the result dataclasses carry working
-*file paths* (``downloaded_path``, ``csv_path``) that point into a
-per-flow-run ``TemporaryDirectory``. A cached result from an earlier
-run references a tempdir that no longer exists, so the consuming stage
-would fail on a missing file. Safely re-enabling content caching needs
-the working files persisted to stable ``result_storage`` (and rehydra-
-tion to stage them back into the current tempdir) — the next step of
-the ProcessingContext-retirement work.
+The second blocker (cached results carried tempdir paths that didn't
+survive to the next run) was cleared in PR #286: each file-carrying
+result dataclass now stores a stable ``*_path_key`` alongside its
+local path; ``file_persistence.persist_file`` writes the working file
+to the result-storage block at task completion, and the rehydration
+path (``runtime_context._resolve_or_restore``) fetches it back into
+the current run's tempdir on a cross-run cache hit.
 """
 
 from __future__ import annotations
@@ -167,15 +170,27 @@ def content_cache_key(context, parameters) -> Optional[str]:
 # ``cache_policies`` module isn't available (older Prefect 3.x or
 # tooling contexts).
 
+# We deliberately do NOT compose with ``TASK_SOURCE`` here. A naive
+# ``CacheKeyFnPolicy(cache_key_fn=key_fn) + TASK_SOURCE`` has a
+# correctness hazard: Prefect 3's ``CompoundCachePolicy.compute_key``
+# drops ``None`` contributions and hashes the rest, so when ``key_fn``
+# returns ``None`` (no file_hash propagated yet, or operator passed
+# ``ignore_hash=True``) the compound key collapses to just the
+# TASK_SOURCE hash — identical for every invocation of that task with
+# the same task source, regardless of parameters. Two unrelated runs
+# with no content key would hit each other's cache. Verified
+# empirically against Prefect 3.7.
+#
+# Without TASK_SOURCE, a DP+ upgrade that changes a task body does NOT
+# automatically invalidate older cached output. Operators relying on
+# fresh output after an upgrade should either delete the result-storage
+# Block contents or shorten ``DATAPUSHER_PLUS_CACHE_TTL_HOURS``. The
+# default 24h expiration bounds the staleness window.
 try:
-    from prefect.cache_policies import CacheKeyFnPolicy, TASK_SOURCE
+    from prefect.cache_policies import CacheKeyFnPolicy
 
-    DOWNLOAD_CACHE_POLICY = (
-        CacheKeyFnPolicy(cache_key_fn=download_cache_key) + TASK_SOURCE
-    )
-    CONTENT_CACHE_POLICY = (
-        CacheKeyFnPolicy(cache_key_fn=content_cache_key) + TASK_SOURCE
-    )
+    DOWNLOAD_CACHE_POLICY = CacheKeyFnPolicy(cache_key_fn=download_cache_key)
+    CONTENT_CACHE_POLICY = CacheKeyFnPolicy(cache_key_fn=content_cache_key)
 except ImportError as e:  # pragma: no cover - older Prefect 3.x
     # Only a missing module is an expected fallback. A narrower catch
     # than bare ``Exception`` so a real bug (e.g. a bad CacheKeyFnPolicy
