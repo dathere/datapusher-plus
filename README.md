@@ -380,11 +380,17 @@ sudo chown rzmk /var/lib/ckan/default
 sudo chmod -R u+rwx /var/lib/ckan/default
 ```
 
-10. Make sure you enable the [Datastore](https://docs.ckan.org/en/2.11/maintaining/datastore.html) plugin.
-11. In a separate terminal start the job queue:
+12. Make sure you enable the [Datastore](https://docs.ckan.org/en/2.11/maintaining/datastore.html) plugin.
+13. In a separate terminal, start a Prefect worker subscribed to the
+    DP+ work pool. v3.0 replaced the RQ `ckan jobs worker` with a
+    Prefect worker; see the [Worker lifecycle](#worker-lifecycle)
+    section below for the full command and lifecycle details. Quick
+    reference:
 
 ```bash
-ckan -c /etc/ckan/default/ckan.ini jobs worker
+PREFECT_API_URL=http://prefect-server:4200/api \
+CKAN_INI=/etc/ckan/default/ckan.ini \
+prefect worker start --pool datapusher-plus
 ```
 
 ## Configuring
