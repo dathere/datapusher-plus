@@ -155,37 +155,31 @@ def content_cache_key(context, parameters) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# Composed cache policies
+# Cache policies
 # ---------------------------------------------------------------------------
 #
 # Prefect 3.4+ recommends ``cache_policy=...`` over the legacy
-# ``cache_key_fn=`` shorthand. Wrapping our custom keys in
-# ``CacheKeyFnPolicy`` lets us compose them with ``TASK_SOURCE`` — when
-# operators upgrade DP+ and a task body changes, the source-hash
-# component invalidates stale caches automatically. Without this, a
-# resubmit after upgrading would happily reuse output produced by the
-# old code.
+# ``cache_key_fn=`` shorthand. We deliberately do NOT compose our
+# ``CacheKeyFnPolicy`` with ``TASK_SOURCE`` — though it would be the
+# textbook "invalidate on task body change" approach, it has a
+# correctness hazard verified empirically against Prefect 3.7:
+# ``CompoundCachePolicy.compute_key`` drops ``None`` contributions and
+# hashes the rest, so when ``cache_key_fn`` returns ``None`` (no
+# ``file_hash`` propagated yet, or operator passed ``ignore_hash=True``)
+# the compound key collapses to just the TASK_SOURCE hash — identical
+# for every invocation of that task with the same task source,
+# regardless of parameters. Two unrelated runs with no content key
+# would hit each other's cache.
 #
-# Loaded lazily so the module still imports when Prefect 3.4's
-# ``cache_policies`` module isn't available (older Prefect 3.x or
-# tooling contexts).
-
-# We deliberately do NOT compose with ``TASK_SOURCE`` here. A naive
-# ``CacheKeyFnPolicy(cache_key_fn=key_fn) + TASK_SOURCE`` has a
-# correctness hazard: Prefect 3's ``CompoundCachePolicy.compute_key``
-# drops ``None`` contributions and hashes the rest, so when ``key_fn``
-# returns ``None`` (no file_hash propagated yet, or operator passed
-# ``ignore_hash=True``) the compound key collapses to just the
-# TASK_SOURCE hash — identical for every invocation of that task with
-# the same task source, regardless of parameters. Two unrelated runs
-# with no content key would hit each other's cache. Verified
-# empirically against Prefect 3.7.
-#
-# Without TASK_SOURCE, a DP+ upgrade that changes a task body does NOT
+# Trade-off: a DP+ upgrade that changes a task body does NOT
 # automatically invalidate older cached output. Operators relying on
-# fresh output after an upgrade should either delete the result-storage
+# fresh output after an upgrade should either clear the result-storage
 # Block contents or shorten ``DATAPUSHER_PLUS_CACHE_TTL_HOURS``. The
 # default 24h expiration bounds the staleness window.
+#
+# Loaded lazily inside the try-block below so the module still imports
+# when Prefect 3.4's ``cache_policies`` module isn't available (older
+# Prefect 3.x, tooling contexts).
 try:
     from prefect.cache_policies import CacheKeyFnPolicy
 
