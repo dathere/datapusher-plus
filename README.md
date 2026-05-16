@@ -612,6 +612,36 @@ ckanext.datapusher_plus.prefect_flow = my_plugin.flows:my_custom_flow
 
 …and re-run `ckan datapusher_plus prefect-deploy`. Submissions via the CKAN UI now invoke your flow. The existing `IDataPusher.can_upload` / `after_upload` plugin hooks continue to fire — custom flows are additive, not exclusive.
 
+#### Per-domain subflows
+
+DP+ ships two **subflow primitives** in `ckanext.datapusher_plus.jobs.subflows` for custom flow authors who want per-domain work to appear as its own Prefect-UI run row (with its own retries, concurrency limits, and logs):
+
+| Subflow | Wraps | Use when… |
+|---|---|---|
+| `pii_screening_subflow(csv_path, resource, temp_dir, qsv_bin=None)` | `screen_for_pii` | You want PII screening to retry / observe independently of analysis, or you're A/B-testing a custom screening implementation. |
+| `spatial_processing_subflow(input_path, resource_format, output_csv_path=None, tolerance=0.001)` | `process_spatial_file` | You want spatial conversion (Shapefile/GeoJSON → CSV) to retry / observe independently of the broader format-conversion task. |
+
+Both return a JSON-encodable dict (`{"pii_found": …, "pii_candidate_count": …}` and `{"success": …, "error_message": …, "bounds": …}`) so Prefect's result-serialization works without extra schema setup.
+
+Example — replacing the inline PII call inside a custom analyze task:
+
+```python
+from prefect import task
+from ckanext.datapusher_plus.jobs.subflows import pii_screening_subflow
+
+@task
+def my_analyze_task(prev):
+    ctx = ...  # build / rehydrate the runtime context
+    # ... your stats / type-inference work ...
+    pii = pii_screening_subflow(
+        csv_path=ctx.tmp, resource=ctx.resource, temp_dir=ctx.temp_dir,
+    )
+    if pii["pii_found"]:
+        ...  # gate / suspend / route as you like
+```
+
+The **default** DP+ flow does NOT call these subflows — it inlines the underlying helpers inside its existing task bodies to avoid restructuring the working pipeline. The subflows are entry points for custom-flow authors who want the independent-observability win.
+
 ### Configuration reference (new in v3.0)
 
 | Key | Default | Purpose |
