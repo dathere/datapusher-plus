@@ -5,6 +5,7 @@ Metadata stage for the DataPusher Plus pipeline.
 Handles resource metadata updates, auto-aliasing, and summary statistics.
 """
 
+import csv
 import os
 import time
 import psycopg2
@@ -274,6 +275,16 @@ class MetadataStage(BaseStage):
 
         new_stats_resource_id = stats_response["result"]["resource_id"]
 
+        # qsv's stats CSV reports ``mean`` as an ISO date string for Date /
+        # DateTime fields (e.g. "2025-03-01" for the average day in a
+        # date column), but the summary-stats table declares ``mean
+        # FLOAT`` — so a direct COPY raises
+        # ``invalid input syntax for type double precision: "2025-03-01"``
+        # and the whole stats load aborts. Rewrite the stats CSV with
+        # ``mean`` blanked out on Date/DateTime rows before the COPY.
+        # The numeric mean for actual numeric fields is preserved.
+        qsv_stats_csv = self._blank_date_means(context, qsv_stats_csv)
+
         # Copy stats data to datastore
         self._copy_stats_to_datastore(
             context, cursor, qsv_stats_csv, new_stats_resource_id, stats_stats_dict
@@ -318,6 +329,52 @@ class MetadataStage(BaseStage):
                 existing_stats_alias_of = stats_alias_result[0]
                 dsu.delete_datastore_resource(existing_stats_alias_of)
                 dsu.delete_resource(existing_stats_alias_of)
+
+    def _blank_date_means(
+        self, context: ProcessingContext, qsv_stats_csv: str
+    ) -> str:
+        """Rewrite the qsv stats CSV with ``mean`` blanked on Date/DateTime rows.
+
+        qsv reports a Date column's ``mean`` as an ISO-formatted date
+        string (e.g. ``"2025-03-01"`` for the average day across the
+        column). The summary-statistics table declares ``mean FLOAT``,
+        so a direct ``COPY`` raises ``invalid input syntax for type
+        double precision``. Blanking the cell lets Postgres land NULL
+        in the FLOAT column instead. Numeric-field means are
+        untouched.
+
+        Args:
+            context: Processing context (used for ``temp_dir`` only).
+            qsv_stats_csv: Path to the raw qsv stats CSV.
+
+        Returns:
+            Path to the cleaned stats CSV. When no Date/DateTime rows
+            are present, returns ``qsv_stats_csv`` unchanged so we
+            don't rewrite the file for nothing.
+        """
+        cleaned_path = os.path.join(context.temp_dir, "qsv_stats_cleaned.csv")
+        rewrote = False
+        with open(qsv_stats_csv, "r", newline="") as src, open(
+            cleaned_path, "w", newline=""
+        ) as dst:
+            reader = csv.DictReader(src)
+            writer = csv.DictWriter(dst, fieldnames=reader.fieldnames)
+            writer.writeheader()
+            for row in reader:
+                if row.get("type") in ("Date", "DateTime") and row.get("mean"):
+                    row["mean"] = ""
+                    rewrote = True
+                writer.writerow(row)
+        if not rewrote:
+            # Avoid handing downstream a different path when nothing
+            # changed — keeps the file-handling path identical for the
+            # common all-numeric case.
+            os.remove(cleaned_path)
+            return qsv_stats_csv
+        context.logger.info(
+            f"Blanked Date/DateTime mean values in stats CSV → {cleaned_path}"
+        )
+        return cleaned_path
 
     def _infer_stats_schema(
         self, context: ProcessingContext, qsv_stats_csv: str
