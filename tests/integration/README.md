@@ -101,10 +101,17 @@ until curl -fsS http://localhost:5050/api/3/action/status_show >/dev/null 2>&1; 
 done
 
 # 3. Grab the admin token (auto-minted by the bootstrap)
-TOKEN=$(docker exec datapusher-plus-ckan-1 cat /tmp/integration_admin_token)
+#    ``docker compose ... exec`` instead of ``docker exec <name>``: the
+#    container name is project-prefixed (``<project>-ckan-1``) and the
+#    project name varies with the clone directory and
+#    ``COMPOSE_PROJECT_NAME``, so a hard-coded ``datapusher-plus-ckan-1``
+#    only works for one clone layout. ``-T`` disables the pseudo-tty
+#    that ``exec`` would otherwise allocate for non-interactive use.
+TOKEN=$(docker compose -f docker-compose.integration.yaml exec -T ckan \
+    cat /tmp/integration_admin_token)
 
 # 4. Register the DP+ deployment with the Prefect server
-docker exec datapusher-plus-ckan-1 \
+docker compose -f docker-compose.integration.yaml exec -T ckan \
     ckan -c /etc/ckan/default/ckan.ini datapusher_plus prefect-deploy
 
 # 5. Run the integration tests (CKAN_API_KEY env var keeps the JWT

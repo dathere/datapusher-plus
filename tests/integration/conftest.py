@@ -66,9 +66,16 @@ def ckan_api_key() -> str:
     token_path = pathlib.Path(__file__).resolve().parents[2] / ".integration-token"
     if token_path.is_file():
         try:
-            return token_path.read_text().strip()
+            token = token_path.read_text().strip()
         except OSError:
-            pass
+            token = ""
+        if token:
+            return token
+        # An empty / whitespace-only token file means ``integration-up``
+        # didn't finish or got truncated. Fall through to the skip
+        # below rather than silently returning "" — tests run with a
+        # blank Authorization header are much harder to diagnose than
+        # a clean "fixture skipped: no token" line.
 
     pytest.skip(
         "CKAN_API_KEY env var (or ./.integration-token written by "

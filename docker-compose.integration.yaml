@@ -72,7 +72,12 @@ services:
     environment:
       PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/prefect
       PREFECT_SERVER_API_HOST: 0.0.0.0
-      PREFECT_SERVER_UI_API_URL: http://localhost:4200/api
+      # Tracks ${PREFECT_HOST_PORT} below — the UI is served from the
+      # browser's perspective, so the API URL it calls must match
+      # whatever host port the API is published on. Hard-coding :4200
+      # would break the UI as soon as a user remaps PREFECT_HOST_PORT
+      # to avoid a conflict.
+      PREFECT_SERVER_UI_API_URL: http://localhost:${PREFECT_HOST_PORT:-4200}/api
     command: prefect server start
     ports:
       - "${PREFECT_HOST_PORT:-4200}:4200"
@@ -187,7 +192,10 @@ services:
     # multi-line shell still parses as one command.
     command: >
       bash -c '
-        set -e
+        # ``-o pipefail`` so a failure in ``ckan datastore set-permissions``
+        # (left of the psql pipe below) surfaces — without it psql''s exit
+        # status would mask it and the stack would come up half-bootstrapped.
+        set -euo pipefail
         apt-get update -qq && apt-get install -y --no-install-recommends postgresql-client >/dev/null
         pip install -e /srv/app/src/datapusher-plus
         ckan -c /etc/ckan/default/ckan.ini db init
