@@ -627,6 +627,84 @@ class QSVCommand:
 
         return self._run_command(args)
 
+    def describegpt(
+        self,
+        input_file: str,
+        prompt_file: Optional[str] = None,
+        description: bool = True,
+        dictionary: bool = True,
+        tags: bool = True,
+        json_output: bool = True,
+        output_file: Optional[str] = None,
+        timeout: Optional[float] = None,
+        env: Optional[Dict[str, str]] = None,
+    ) -> subprocess.CompletedProcess:
+        """
+        Run ``qsv describegpt`` against a CSV to get LLM-generated
+        description / per-field dictionary / tags.
+
+        Thin wrapper — qsv owns the actual LLM round-trip (endpoint,
+        model, prompt template, API key all live in ``prompt_file`` or
+        qsv's environment, NOT in DP+ config). The wrapper just stitches
+        the flags together and invokes the subprocess.
+
+        Args:
+            input_file: Path to the CSV (the file qsv describes).
+            prompt_file: Optional path to qsv's describegpt prompt /
+                config file (TOML). When omitted, qsv falls back to its
+                own discovery (``~/.qsv/describegpt.toml`` etc.) and
+                ``OPENAI_API_KEY`` from the environment. Maps to
+                ``--prompt-file``.
+            description: Include the overall dataset description.
+                Maps to ``--description``. Default True.
+            dictionary: Include the per-field dictionary.
+                Maps to ``--dictionary``. Default True.
+            tags: Include the tag list. Maps to ``--tags``. Default True.
+            json_output: Format output as JSON (vs. plain text).
+                Maps to ``--json``. Default True — the AISuggestionsStage
+                consumes the JSON.
+            output_file: Optional path to write the result to. When
+                omitted, the result lands in ``CompletedProcess.stdout``.
+            timeout: Per-call subprocess timeout, in seconds. Defaults
+                to ``conf.DESCRIBEGPT_TIMEOUT_SECONDS`` (120s) so a hung
+                LLM endpoint doesn't pin a worker for the full
+                ``QSV_COMMAND_TIMEOUT`` (1800s default).
+            env: Optional environment overrides for the subprocess
+                (e.g. ``{"OPENAI_API_KEY": "..."}`` if the caller has a
+                key it wants to inject out-of-band).
+
+        Returns:
+            The result of ``subprocess.run``. ``stdout`` is the
+            (JSON-formatted, by default) describegpt output.
+
+        Raises:
+            utils.JobError: If the subprocess fails (non-zero exit or
+                timeout). Callers in the AISuggestionsStage catch
+                ``JobError`` so describegpt failures don't bring down
+                the pipeline.
+        """
+        args: List[Union[str, Path]] = ["describegpt"]
+
+        if description:
+            args.append("--description")
+        if dictionary:
+            args.append("--dictionary")
+        if tags:
+            args.append("--tags")
+        if json_output:
+            args.append("--json")
+        if prompt_file:
+            args.extend(["--prompt-file", prompt_file])
+        if output_file:
+            args.extend(["--output", output_file])
+
+        args.append(input_file)
+
+        effective_timeout = (
+            timeout if timeout is not None else conf.DESCRIBEGPT_TIMEOUT_SECONDS
+        )
+        return self._run_command(args, timeout=effective_timeout, env=env)
+
     def slice(
         self,
         input_file: str,

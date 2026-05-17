@@ -220,6 +220,7 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
             "datapusher_plus_status_description": dph.datapusher_status_description,
             "scheming_field_suggestion": dph.scheming_field_suggestion,
             "scheming_get_suggestion_value": dph.scheming_get_suggestion_value,
+            "scheming_get_ai_suggestion": dph.scheming_get_ai_suggestion,
             "scheming_is_valid_suggestion": dph.scheming_is_valid_suggestion,
             "is_preformulated_field": dph.is_preformulated_field,
         }
