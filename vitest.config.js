@@ -6,8 +6,9 @@ import { defineConfig } from 'vitest/config';
 // registers a CKAN module via `ckan.module('scheming-ai-suggestions', cb)`
 // and binds document-ready click handlers. The test setup file installs
 // the `ckan` / `$` / `window` globals jsdom doesn't supply on its own,
-// then loads the script via raw fs read + `eval` inside the jsdom realm
-// so the registration is captured before the tests run.
+// then loads the script via raw fs read + `new Function(...)` (with
+// `$`/`ckan`/`window`/`document` passed as named params) so the
+// registration is captured before the tests run.
 //
 // Scope is intentionally narrow: this config covers ONLY the JS tests
 // under `tests/js/`. The 171-test Python unit suite continues to run

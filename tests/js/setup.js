@@ -13,6 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, vi } from 'vitest';
 // jquery's ESM default-export shape varies under different bundlers
 // (sometimes the factory function, sometimes a wrapper). Use
@@ -21,6 +22,12 @@ import { beforeEach, vi } from 'vitest';
 // real jQuery instance.
 import { createRequire } from 'node:module';
 const requireCjs = createRequire(import.meta.url);
+
+// ESM: ``__dirname`` is undefined here. Vitest happens to inject a
+// CommonJS shim that makes it work, but ``import.meta.url`` →
+// ``fileURLToPath`` is the portable idiom and doesn't depend on
+// runner-specific compatibility behavior.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Path to the JS file under test. Kept as a constant so the test
 // file can reference it without re-deriving.
@@ -145,7 +152,7 @@ export function buildInstance(elOrHtml, optionsOverride = {}) {
  *
  *   const ajax = stubAjax([
  *     { success: { result: { dpp_suggestions: { ai_suggestions: {...} } } } },
- *     { success: { result: { dpp_suggestions: { ai_suggestions: {...}, STATUS: 'DONE' } } } },
+ *     { success: { result: { dpp_suggestions: { ai_suggestions: {..., STATUS: 'DONE'} } } } },
  *   ]);
  *   // ... trigger polling ...
  *   expect(ajax.calls.length).toBe(2);

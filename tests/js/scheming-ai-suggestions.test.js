@@ -51,19 +51,23 @@ describe('initialize() — early-return guard', () => {
   it('returns early for elements without data-field-name (the guard added on PR #302 / Copilot review)', () => {
     // A CTA button without data-field-name: pre-guard, initialize
     // would hide() it AND register polling. With the guard it just
-    // returns — element stays visible, no global state touched.
+    // returns — element stays visible, no further global-state
+    // mutation. (The global state DOES get initialized when the
+    // script loads at top level; what the guard prevents is
+    // ``initialize`` going on to populate ``datasetId`` and flip
+    // ``globalInitDone`` for an element that has no business
+    // driving the polling loop.)
     const cta = buildInstance(
       '<button class="ai-suggestions-button" data-module="scheming-ai-suggestions">Get AI Suggestions</button>',
     );
 
-    // jsdom + the JS we just loaded. The script's document-ready
-    // handler already fired during loadSchemingAiSuggestions, but
-    // it doesn't touch globalState — only ``initialize`` does.
     cta.initialize();
 
     // Element still visible.
     expect(cta.el.style.display).not.toBe('none');
-    // No global state mutation triggered.
+    // initialize() did not mutate the (script-load-initialized)
+    // global state — datasetId stayed null, globalInitDone stayed
+    // false.
     expect(window._schemingAiSuggestionsGlobalState).toBeDefined();
     expect(window._schemingAiSuggestionsGlobalState.globalInitDone).toBe(false);
     expect(window._schemingAiSuggestionsGlobalState.datasetId).toBeNull();
@@ -71,11 +75,13 @@ describe('initialize() — early-return guard', () => {
 
   it('hides element AND starts polling when data-field-name is present', () => {
     // Use a path that contains the dataset segment so initialize
-    // can extract datasetId via the URL fallback.
-    Object.defineProperty(window, 'location', {
-      value: new URL('http://localhost/dataset/edit/widgets-dataset-id-1234'),
-      writable: true,
-    });
+    // can extract datasetId via the URL fallback. ``pushState``
+    // mutates ``window.location.pathname`` in-place; redefining
+    // ``window.location`` via ``Object.defineProperty`` works in
+    // most jsdom versions but is fragile (some configs mark it
+    // non-configurable / unforgeable) and pushState is the proper
+    // browser-equivalent idiom.
+    window.history.pushState({}, '', '/dataset/edit/widgets-dataset-id-1234');
 
     const btn = buildInstance(
       '<button class="ai-suggestion-btn" data-field-name="description">AI</button>',
