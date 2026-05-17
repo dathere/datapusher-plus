@@ -18,6 +18,7 @@ context unchanged.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from typing import Any, Dict, Optional
 
@@ -26,6 +27,9 @@ import ckanext.datapusher_plus.datastore_utils as dsu
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
 from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.qsv_utils import QSVCommand
+
+
+_LOG = logging.getLogger(__name__)
 
 
 # Keys that the dataset-level / bookkeeping entries occupy in the
@@ -38,6 +42,20 @@ from ckanext.datapusher_plus.qsv_utils import QSVCommand
 # Skipping (rather than nesting per-column entries under a sub-key)
 # preserves the flat-map contract the polling JS depends on
 # (``Object.keys(aiSuggestions).forEach`` → ``[data-field-name=X]``).
+#
+# NOTE: This set is intentionally case-sensitive. The polling JS uses
+# case-sensitive attribute selectors (``[data-field-name="X"]``) and
+# qsv preserves CSV header casing verbatim in
+# ``Dictionary.response.fields[i].name``. So a CSV with header
+# ``Description`` produces a dictionary entry ``{"name": "Description",
+# ...}`` that creates ``ai_suggestions["Description"]`` — which the
+# dataset description field (whose ``data-field-name`` is the
+# lowercase ``description``) would NOT pick up. The case-sensitive
+# guard is therefore exactly the right granularity: it blocks the
+# real collision class (exact-name match), and case-mismatched names
+# are already isolated from each other by the JS's selector. Do NOT
+# lowercase both sides "for safety" — that would re-introduce the
+# very collision this guard prevents.
 _RESERVED_AI_KEYS = frozenset({"description", "tags", "STATUS", "generated_at"})
 
 
@@ -369,8 +387,7 @@ class AISuggestionsStage(BaseStage):
                         # Best-effort: warn via the module logger so
                         # operators can find it in worker logs without
                         # us needing a context handle here.
-                        import logging
-                        logging.getLogger(__name__).warning(
+                        _LOG.warning(
                             "Skipping qsv describegpt tag %r — contains a comma "
                             "which scheming's tag field would split into multiple tags",
                             s,
@@ -400,8 +417,7 @@ class AISuggestionsStage(BaseStage):
                             # Don't overwrite dataset-level / bookkeeping
                             # entries with a per-column entry sharing
                             # the same name.
-                            import logging
-                            logging.getLogger(__name__).warning(
+                            _LOG.warning(
                                 "Skipping per-column AI suggestion for %r — "
                                 "name collides with reserved dataset-level / "
                                 "bookkeeping key",
