@@ -167,14 +167,16 @@ groups:
         editable: true
         default: ""
         description: |
-          Path to qsv's ``describegpt`` config file (the same one the
-          ``qsv describegpt`` CLI looks for). Defines the LLM endpoint,
-          model, prompt template, and (if set there) the API key.
+          Path to qsv's ``describegpt`` prompt-file (the same one the
+          ``qsv describegpt`` CLI loads via its ``--prompt-file`` flag).
+          Defines the LLM endpoint, model, prompt template, and (if set
+          there) the API key. qsv expects this to be TOML.
 
-          Empty (the default) lets qsv use its own discovery — typically
-          ``~/.qsv/describegpt.json`` plus the ``OPENAI_API_KEY``
-          environment variable. We deliberately do NOT proxy the API
-          key through ckan.ini so it stays out of CKAN's config dump.
+          Empty (the default) lets qsv use its own discovery — qsv
+          looks for ``dp.prompt`` / ``dp_prompt.toml`` next to its
+          binary, then falls back to the ``OPENAI_API_KEY`` env var.
+          We deliberately do NOT proxy the API key through ckan.ini
+          so it stays out of CKAN's config dump.
 
           Only consulted when
           ``ckanext.datapusher_plus.enable_ai_suggestions`` is True.

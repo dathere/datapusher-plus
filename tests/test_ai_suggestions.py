@@ -311,14 +311,40 @@ def test_process_swallows_patch_package_error(stage_cls, context_factory):
     ctx.logger.warning.assert_called()
 
 
-def test_process_resets_corrupted_dpp_suggestions(stage_cls, context_factory):
-    """If ``package['dpp_suggestions']`` is not a dict, it's reset before write."""
+def test_process_skips_when_dpp_suggestions_is_non_dict(stage_cls, context_factory):
+    """If ``package['dpp_suggestions']`` is not a dict, we skip the write
+    rather than overwriting — preserving whatever the operator put there
+    (legacy JSON string, custom plugin's scalar, …)."""
     from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
 
     fake_qsv = mock.Mock()
     fake_qsv.describegpt.return_value = _completed('{"description": "x"}')
 
     package = {"id": "pkg-1", "dpp_suggestions": "this should be a dict"}
+
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml", return_value=({}, package)
+         ), \
+         mock.patch.object(ai_mod.dsu, "patch_package") as patch_pkg:
+        ctx = context_factory()
+        stage_cls().process(ctx)
+
+    # Non-destructive: original value preserved, no patch_package call.
+    assert package["dpp_suggestions"] == "this should be a dict"
+    patch_pkg.assert_not_called()
+    ctx.logger.warning.assert_called()
+
+
+def test_process_initializes_missing_dpp_suggestions(stage_cls, context_factory):
+    """Happy path when dpp_suggestions is absent: dict is initialized
+    and the AI sub-key gets written."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed('{"description": "x"}')
+
+    package = {"id": "pkg-1"}  # no dpp_suggestions at all
 
     captured = {}
 
@@ -332,7 +358,6 @@ def test_process_resets_corrupted_dpp_suggestions(stage_cls, context_factory):
          mock.patch.object(ai_mod.dsu, "patch_package", side_effect=fake_patch):
         stage_cls().process(context_factory())
 
-    # Reset to a fresh dict, with our ai_suggestions present.
     assert isinstance(captured["package"]["dpp_suggestions"], dict)
     assert "ai_suggestions" in captured["package"]["dpp_suggestions"]
 

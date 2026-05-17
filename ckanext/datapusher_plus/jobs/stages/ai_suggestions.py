@@ -130,7 +130,12 @@ class AISuggestionsStage(BaseStage):
         timeout) so the caller's outer try/except can log + skip.
         """
         prompt_file = conf.DESCRIBEGPT_CONFIG_PATH or None
-        qsv = QSVCommand(logger=context.logger)
+        # ``_build_runtime_context`` constructs a ``QSVCommand`` once per
+        # flow run and stashes it on the context — reuse that so we
+        # don't pay the binary-existence + ``check_version`` cost twice.
+        # Fall back to a fresh instance if the context doesn't have one
+        # (e.g. unit tests that hand-build a context stand-in).
+        qsv = getattr(context, "qsv", None) or QSVCommand(logger=context.logger)
         context.logger.info(
             f"Running qsv describegpt against {context.tmp} "
             f"(prompt_file={prompt_file or '<qsv default>'}, "
@@ -201,19 +206,26 @@ class AISuggestionsStage(BaseStage):
             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         )
 
-        dpp = package.setdefault("dpp_suggestions", {})
-        if not isinstance(dpp, dict):
-            # Legacy / corrupted package — patch_package would barf
-            # on a non-dict either way. Reset to a fresh dict so the
-            # AI write succeeds; the formula-derived ``["package"]``
-            # sub-key (if any) is gone, but FormulaStage will re-emit
-            # it on the same flow run a few stages later.
+        dpp = package.get("dpp_suggestions")
+        if dpp is None:
+            package["dpp_suggestions"] = dpp = {}
+        elif not isinstance(dpp, dict):
+            # Bail rather than overwrite. The stage is non-blocking by
+            # contract, so a corrupted ``dpp_suggestions`` (legacy JSON
+            # string, accidental scalar from a custom plugin, …) gets
+            # skipped here rather than destroyed — preserving whatever
+            # the operator put there. FormulaStage's
+            # ``_setup_dpp_suggestions`` has the inverse policy
+            # (errors out and aborts the flow) because formula
+            # processing is the package's primary purpose; AI
+            # suggestions are bonus content and not worth losing data
+            # over.
             context.logger.warning(
-                "package['dpp_suggestions'] was not a dict "
-                f"(got {type(dpp).__name__}); resetting before write"
+                f"package['dpp_suggestions'] is {type(dpp).__name__}, "
+                "not a dict; skipping AI suggestions write to avoid "
+                "overwriting existing data"
             )
-            dpp = {}
-            package["dpp_suggestions"] = dpp
+            return
         dpp["ai_suggestions"] = payload
 
         dsu.patch_package(package)
