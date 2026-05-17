@@ -181,13 +181,19 @@ def test_should_not_skip_when_flag_on(stage_cls, context_factory):
 
 def test_process_happy_path_persists_suggestions(stage_cls, context_factory):
     """Successful qsv call + valid JSON → patch_package fires with the
-    suggestions stored under ``dpp_suggestions.ai_suggestions``."""
+    reshaped per-field ``{value, source}`` suggestions, plus STATUS=DONE
+    and generated_at bookkeeping. The reshape is the contract with the
+    polling JS in ``scheming-ai-suggestions.js`` — it reads
+    ``ai_suggestions[fieldName].value`` directly via ``package_show``."""
     from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
 
     qsv_payload = {
         "description": "A dataset of widgets.",
         "tags": ["widgets", "production"],
-        "dictionary": [{"field": "sku", "summary": "Stock keeping unit"}],
+        "dictionary": [
+            {"field": "sku", "summary": "Stock keeping unit"},
+            {"field": "price", "summary": "Unit price (USD)"},
+        ],
     }
 
     fake_qsv = mock.Mock()
@@ -209,12 +215,27 @@ def test_process_happy_path_persists_suggestions(stage_cls, context_factory):
         result = stage_cls().process(ctx)
 
     assert result is ctx, "stage must always return the same context object"
-    assert "dpp_suggestions" in captured["package"]
     ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
-    assert ai["description"] == "A dataset of widgets."
-    assert ai["tags"] == ["widgets", "production"]
-    assert ai["dictionary"][0]["field"] == "sku"
-    # Generation timestamp is auto-stamped.
+
+    # Top-level dataset fields land as {value, source} entries.
+    assert ai["description"] == {
+        "value": "A dataset of widgets.",
+        "source": "qsv describegpt",
+    }
+    # Tags are comma-joined (scheming's tag field accepts that natively).
+    assert ai["tags"] == {
+        "value": "widgets, production",
+        "source": "qsv describegpt",
+    }
+    # Per-column entries flattened from qsv's ``dictionary`` list.
+    assert ai["sku"] == {
+        "value": "Stock keeping unit",
+        "source": "qsv describegpt",
+    }
+    assert ai["price"]["value"] == "Unit price (USD)"
+
+    # Bookkeeping for the polling JS + audit log.
+    assert ai["STATUS"] == "DONE"
     assert "generated_at" in ai
 
 
@@ -363,78 +384,168 @@ def test_process_initializes_missing_dpp_suggestions(stage_cls, context_factory)
 
 
 # ---------------------------------------------------------------------------
-# helpers.scheming_get_ai_suggestion
+# helpers.scheming_get_ai_suggestion_value /
+# helpers.scheming_get_ai_suggestion_source /
+# helpers.scheming_field_supports_ai_suggestion /
+# helpers.scheming_has_ai_suggestion_fields
 # ---------------------------------------------------------------------------
 
 
 @pytest.fixture
-def helper():
+def get_value():
     pytest.importorskip("ckan")
     from ckanext.datapusher_plus import helpers as dph
 
-    return dph.scheming_get_ai_suggestion
+    return dph.scheming_get_ai_suggestion_value
 
 
-def test_helper_returns_empty_when_data_missing(helper):
-    assert helper("description", data=None) == ''
-    assert helper("description", data={}) == ''
+@pytest.fixture
+def get_source():
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus import helpers as dph
+
+    return dph.scheming_get_ai_suggestion_source
 
 
-def test_helper_returns_empty_when_no_ai_suggestions(helper):
+@pytest.fixture
+def supports_ai():
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus import helpers as dph
+
+    return dph.scheming_field_supports_ai_suggestion
+
+
+@pytest.fixture
+def has_ai_fields():
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus import helpers as dph
+
+    return dph.scheming_has_ai_suggestion_fields
+
+
+def _ai_data(entries):
+    """Build a package-data dict with the given per-field ai_suggestions."""
+    return {"dpp_suggestions": {"ai_suggestions": entries}}
+
+
+# --- scheming_get_ai_suggestion_value ---
+
+
+def test_value_returns_empty_when_data_missing(get_value):
+    assert get_value("description", data=None) == ''
+    assert get_value("description", data={}) == ''
+
+
+def test_value_returns_empty_when_no_ai_suggestions(get_value):
     data = {"dpp_suggestions": {"package": {"foo": "bar"}}}
-    assert helper("description", data=data) == ''
+    assert get_value("description", data=data) == ''
 
 
-def test_helper_returns_empty_when_ai_suggestions_not_a_dict(helper):
-    data = {"dpp_suggestions": {"ai_suggestions": ["wat"]}}
-    assert helper("description", data=data) == ''
+def test_value_returns_empty_when_ai_suggestions_not_a_dict(get_value):
+    assert get_value("description", data=_ai_data(["wat"])) == ''
 
 
-def test_helper_direct_top_level_lookup(helper):
-    data = {
-        "dpp_suggestions": {
-            "ai_suggestions": {
-                "description": "Widgets dataset",
-                "tags": ["widgets"],
-            }
-        }
-    }
-    assert helper("description", data=data) == "Widgets dataset"
-    assert helper("tags", data=data) == ["widgets"]
+def test_value_per_field_dict_entry(get_value):
+    """The post-reshape on-disk shape: ai_suggestions[field] = {value, source}."""
+    data = _ai_data({
+        "description": {"value": "Widgets dataset", "source": "qsv describegpt"},
+        "sku": {"value": "Stock keeping unit", "source": "qsv describegpt"},
+    })
+    assert get_value("description", data=data) == "Widgets dataset"
+    assert get_value("sku", data=data) == "Stock keeping unit"
+    # Unmatched field → empty.
+    assert get_value("nonexistent", data=data) == ''
 
 
-def test_helper_dictionary_field_match(helper):
-    data = {
-        "dpp_suggestions": {
-            "ai_suggestions": {
-                "dictionary": [
-                    {"field": "sku", "summary": "Stock keeping unit"},
-                    {"field": "price", "summary": "Unit price in USD"},
-                ]
-            }
-        }
-    }
-    assert helper("sku", data=data) == "Stock keeping unit"
-    assert helper("price", data=data) == "Unit price in USD"
-    # Unmatched field → empty string.
-    assert helper("nonexistent", data=data) == ''
+def test_value_returns_empty_when_entry_has_no_value(get_value):
+    """Legacy / partial entries without a 'value' key surface as empty."""
+    data = _ai_data({"description": {"source": "qsv describegpt"}})
+    assert get_value("description", data=data) == ''
 
 
-def test_helper_dictionary_falls_back_to_description_key(helper):
-    """Custom prompts sometimes emit 'description' instead of 'summary'."""
-    data = {
-        "dpp_suggestions": {
-            "ai_suggestions": {
-                "dictionary": [
-                    {"field": "sku", "description": "Stock keeping unit"},
-                ]
-            }
-        }
-    }
-    assert helper("sku", data=data) == "Stock keeping unit"
+def test_value_decodes_dpp_suggestions_json_string(get_value):
+    """CKAN sometimes re-serializes extras; the helper accepts a JSON string."""
+    payload = '{"ai_suggestions": {"description": {"value": "x", "source": "qsv"}}}'
+    assert get_value("description", data={"dpp_suggestions": payload}) == "x"
 
 
-def test_helper_returns_empty_on_malformed_data(helper):
+def test_value_scalar_entry_stringified(get_value):
+    """A non-dict entry (legacy verbatim shape) falls back to str()."""
+    assert get_value("description", data=_ai_data({"description": 42})) == "42"
+
+
+def test_value_returns_empty_on_malformed_data(get_value):
     """Random garbage in the suggestion namespace must not raise."""
-    data = {"dpp_suggestions": "not-a-dict"}
-    assert helper("description", data=data) == ''
+    assert get_value("description", data={"dpp_suggestions": "not-a-dict"}) == ''
+    assert get_value("description", data={"dpp_suggestions": "{bad json"}) == ''
+
+
+# --- scheming_get_ai_suggestion_source ---
+
+
+def test_source_returns_label_when_present(get_source):
+    data = _ai_data({"description": {"value": "x", "source": "qsv describegpt"}})
+    assert get_source("description", data=data) == "qsv describegpt"
+
+
+def test_source_returns_empty_when_data_missing(get_source):
+    assert get_source("description", data=None) == ''
+    assert get_source("description", data={}) == ''
+
+
+def test_source_returns_empty_for_legacy_scalar_entry(get_source):
+    """Scalar entries don't carry a source — return empty, don't raise."""
+    assert get_source("description", data=_ai_data({"description": "x"})) == ''
+
+
+# --- scheming_field_supports_ai_suggestion ---
+
+
+def test_supports_ai_true_when_field_opts_in(supports_ai):
+    assert supports_ai({"field_name": "description", "ai_suggestion": True}) is True
+
+
+def test_supports_ai_false_by_default(supports_ai):
+    assert supports_ai({"field_name": "description"}) is False
+    assert supports_ai({"field_name": "description", "ai_suggestion": False}) is False
+
+
+def test_supports_ai_handles_bad_input(supports_ai):
+    """Non-dict input must not raise — opt-in convention only."""
+    assert supports_ai(None) is False
+    assert supports_ai("not a field") is False
+
+
+# --- scheming_has_ai_suggestion_fields ---
+
+
+def test_has_ai_fields_true_when_dataset_field_opts_in(has_ai_fields):
+    schema = {
+        "dataset_fields": [
+            {"field_name": "title"},
+            {"field_name": "description", "ai_suggestion": True},
+        ]
+    }
+    assert has_ai_fields(schema) is True
+
+
+def test_has_ai_fields_true_when_resource_field_opts_in(has_ai_fields):
+    schema = {
+        "dataset_fields": [{"field_name": "title"}],
+        "resource_fields": [{"field_name": "name", "ai_suggestion": True}],
+    }
+    assert has_ai_fields(schema) is True
+
+
+def test_has_ai_fields_false_when_no_field_opts_in(has_ai_fields):
+    schema = {
+        "dataset_fields": [{"field_name": "title"}],
+        "resource_fields": [{"field_name": "name"}],
+    }
+    assert has_ai_fields(schema) is False
+
+
+def test_has_ai_fields_handles_bad_input(has_ai_fields):
+    assert has_ai_fields(None) is False
+    assert has_ai_fields("not a schema") is False
+    assert has_ai_fields({}) is False

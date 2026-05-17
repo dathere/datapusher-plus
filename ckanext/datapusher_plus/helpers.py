@@ -585,77 +585,138 @@ def scheming_get_suggestion_value(field_name, data=None, errors=None, lang=None)
 
 
 
-def scheming_get_ai_suggestion(field_name, data=None, errors=None, lang=None):
+def scheming_get_ai_suggestion_value(field_name, data=None, errors=None, lang=None):
     """
-    Return an AI-derived suggestion for ``field_name`` from
-    ``package["dpp_suggestions"]["ai_suggestions"]``, or ``""`` when
-    none is available.
+    Return the AI-derived suggestion value for ``field_name``, or ``""``.
+
+    Output shape on a populated package::
+
+        package["dpp_suggestions"]["ai_suggestions"] = {
+            "description": {"value": "...", "source": "qsv describegpt"},
+            "tags":        {"value": "...", "source": "qsv describegpt"},
+            "<field>":     {"value": "...", "source": "qsv describegpt"},
+            "STATUS":      "DONE",
+            "generated_at": "<ISO 8601>",
+        }
+
+    Per-field schema is uniform — top-level dataset metadata
+    (``description`` / ``tags``) and per-column metadata
+    (extracted from qsv describegpt's ``dictionary`` output) all live
+    under their own ``{value, source}`` entry. ``AISuggestionsStage``
+    reshapes qsv's verbatim output into this shape on the way in.
 
     Parallel to ``scheming_get_suggestion_value`` (which reads from the
     formula-derived ``dpp_suggestions["package"]`` sub-key). The two
     namespaces co-exist on purpose: a formula-driven suggestion is
     typically deterministic per-resource (and may be the operator's
     "authoritative" suggestion), while an AI-derived one is
-    probabilistic and operator-reviewed. Keeping them in separate keys
-    lets a single field surface either or both without collision.
+    probabilistic and operator-reviewed. Keeping them in separate
+    sub-keys lets a single field surface either or both without
+    collision.
 
-    Output shape on a populated package::
-
-        package["dpp_suggestions"]["ai_suggestions"] = {
-            "description": "...",
-            "tags": [...],
-            "dictionary": [ {"field": "...", "summary": "..."}, ... ],
-            "generated_at": "<ISO 8601>",
-        }
-
-    The ``dictionary`` entries are scanned for a ``field`` matching
-    ``field_name`` and the matching ``summary`` (or ``description``)
-    is returned. ``description`` / ``tags`` are returned as-is when
-    ``field_name`` matches them literally — that lets a scheming form
-    bind the dataset-level description field to
-    ``scheming_get_ai_suggestion('description')``.
-
-    Defensive in the same way ``scheming_get_suggestion_value`` is:
-    any exception is logged and ``""`` is returned so a malformed
-    suggestion never breaks form rendering.
+    Defensive: any exception is logged and ``""`` is returned so a
+    malformed suggestion never breaks form rendering.
     """
     if not data:
         return ''
 
     try:
-        package_data = data
-        if not (package_data
-                and 'dpp_suggestions' in package_data
-                and isinstance(package_data['dpp_suggestions'], dict)
-                and 'ai_suggestions' in package_data['dpp_suggestions']):
+        entry = _ai_suggestion_entry(data, field_name)
+        if entry is None:
             return ''
-
-        ai = package_data['dpp_suggestions']['ai_suggestions']
-        if not isinstance(ai, dict):
-            return ''
-
-        # Direct lookup first — handles top-level keys like
-        # ``description`` and ``tags`` plus any future qsv describegpt
-        # output shapes that flatten field metadata to the top level.
-        if field_name in ai:
-            return ai[field_name]
-
-        # Per-field dictionary lookup — qsv describegpt's ``dictionary``
-        # output is a list of ``{"field": "...", "summary": "..."}``
-        # objects. Walk it for a match.
-        dictionary = ai.get('dictionary')
-        if isinstance(dictionary, list):
-            for entry in dictionary:
-                if isinstance(entry, dict) and entry.get('field') == field_name:
-                    # ``summary`` is qsv's canonical key, ``description``
-                    # is a common alternate from custom prompts —
-                    # accept either.
-                    return entry.get('summary') or entry.get('description') or ''
-
-        return ''
+        if isinstance(entry, dict):
+            return entry.get('value', '') or ''
+        # Legacy / scalar entries (string) fall through as-is.
+        return str(entry)
     except Exception as e:
         logger.warning(f"Error getting AI suggestion value: {e}")
         return ''
+
+
+
+def _ai_suggestion_entry(data, field_name):
+    """Internal — pull a per-field entry out of dpp_suggestions.ai_suggestions.
+
+    Returns the entry (typically a dict ``{value, source}``) or
+    ``None`` when ai_suggestions isn't populated / the field has no
+    matching entry. Shared by ``scheming_get_ai_suggestion_value`` and
+    ``scheming_get_ai_suggestion_source`` so both helpers see the same
+    extraction rules.
+
+    ``dpp_suggestions`` may arrive as a JSON string (CKAN re-serializes
+    extras on some round-trips); decode if so.
+    """
+    if not data:
+        return None
+    dpp = data.get('dpp_suggestions')
+    if isinstance(dpp, str):
+        try:
+            dpp = json.loads(dpp)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if not isinstance(dpp, dict):
+        return None
+    ai = dpp.get('ai_suggestions')
+    if not isinstance(ai, dict):
+        return None
+    return ai.get(field_name)
+
+
+def scheming_get_ai_suggestion_source(field_name, data=None):
+    """
+    Return the source label for an AI suggestion (e.g. ``"qsv describegpt"``),
+    or ``""`` when none is available.
+
+    The JS surfaces the source under the popover so reviewers know
+    where the suggested value came from. Defensive — never raises,
+    returns ``""`` on any error.
+    """
+    if not data:
+        return ''
+    try:
+        entry = _ai_suggestion_entry(data, field_name)
+        if isinstance(entry, dict):
+            return entry.get('source', '') or ''
+        return ''
+    except Exception as e:
+        logger.warning(f"Error getting AI suggestion source: {e}")
+        return ''
+
+
+def scheming_field_supports_ai_suggestion(field):
+    """
+    Check whether a scheming field config has opted into AI suggestions.
+
+    Opt-in convention: the field's scheming YAML carries
+    ``ai_suggestion: true``. Mirrors PR #253's helper of the same
+    name — the templates gate the per-field "AI Suggestion" button on
+    this.
+    """
+    if not isinstance(field, dict):
+        return False
+    return bool(field.get('ai_suggestion', False))
+
+
+def scheming_has_ai_suggestion_fields(schema):
+    """
+    Schema-level "does any field opt into AI suggestions?" check.
+
+    Used by ``ai_suggestions_button.html`` to decide whether to render
+    the dataset-level "Get AI Suggestions" button at all — when no
+    field opts in, the button is hidden entirely. Walks both
+    ``dataset_fields`` and ``resource_fields`` (qsv describegpt can
+    produce per-resource as well as per-dataset metadata).
+    """
+    if not isinstance(schema, dict):
+        return False
+    for key in ('dataset_fields', 'resource_fields'):
+        fields = schema.get(key)
+        if not isinstance(fields, list):
+            continue
+        for field in fields:
+            if isinstance(field, dict) and field.get('ai_suggestion', False):
+                return True
+    return False
 
 def scheming_is_valid_suggestion(field, value):
     """

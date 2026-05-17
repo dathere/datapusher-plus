@@ -177,9 +177,27 @@ class AISuggestionsStage(BaseStage):
         suggestions: Dict[str, Any],
     ) -> None:
         """
-        Merge ``suggestions`` into
+        Reshape qsv's verbatim output into the per-field
+        ``{value, source}`` schema the UI expects, then merge into
         ``package["dpp_suggestions"]["ai_suggestions"]`` and call
         ``dsu.patch_package`` to save.
+
+        Output shape on the package (UI contract — the JS in
+        ``assets/js/scheming-ai-suggestions.js`` reads this directly
+        via ``package_show``)::
+
+            package["dpp_suggestions"]["ai_suggestions"] = {
+                "description": {"value": "...", "source": "..."},
+                "tags":        {"value": "...", "source": "..."},
+                "<col>":       {"value": "...", "source": "..."},  # per-column
+                "STATUS":      "DONE",
+                "generated_at": "<ISO 8601 UTC>",
+            }
+
+        ``STATUS=DONE`` is the polling-termination signal — the JS
+        loops every 2.5s on ``package_show`` until it sees a STATUS in
+        ``[DONE, ERROR, FAILED]``. Without it the loop runs out the
+        clock at ``maxPollAttempts``, which works but burns API calls.
 
         Raises on package-fetch / patch failure — caller logs and
         continues.
@@ -198,13 +216,14 @@ class AISuggestionsStage(BaseStage):
                 f"package {package_id} not returned by get_scheming_yaml"
             )
 
+        payload = self._reshape_for_ui(suggestions)
         # Stamp the generation time so consumers (and audit logs) can
         # tell stale suggestions from fresh ones. UTC, ISO-8601, no
         # microseconds — readable in log scans.
-        payload = dict(suggestions)
         payload["generated_at"] = (
             time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         )
+        payload["STATUS"] = "DONE"
 
         dpp = package.get("dpp_suggestions")
         if dpp is None:
@@ -229,6 +248,67 @@ class AISuggestionsStage(BaseStage):
         dpp["ai_suggestions"] = payload
 
         dsu.patch_package(package)
+        # ``- 2`` excludes the bookkeeping keys (STATUS / generated_at)
+        # so the log reflects the count of actual per-field suggestions.
+        suggestion_count = max(0, len(payload) - 2)
         context.logger.info(
-            f"Wrote {len(payload)} ai_suggestions keys to package {package_id}"
+            f"Wrote {suggestion_count} ai_suggestions to package {package_id} "
+            f"(STATUS=DONE)"
         )
+
+    def _reshape_for_ui(self, suggestions: Dict[str, Any]) -> Dict[str, Any]:
+        """Transform qsv describegpt's verbatim output into the per-field
+        ``{value, source}`` schema the UI reads.
+
+        qsv emits a flat shape::
+
+            {"description": "...", "tags": [...],
+             "dictionary": [{"field": "...", "summary": "..."}, ...]}
+
+        The UI expects a per-field map::
+
+            {"description": {"value": "...", "source": "qsv describegpt"},
+             "tags":        {"value": "...", "source": "qsv describegpt"},
+             "<col>":       {"value": "<summary>", "source": "qsv describegpt"}}
+
+        Done here (rather than letting the helpers cope with both
+        shapes) so the on-disk schema is uniform — the existing
+        ``scheming_get_ai_suggestion_value`` helper just reaches into
+        ``ai_suggestions[field_name]["value"]`` and the JS polls for
+        ``ai_suggestions[field_name].value`` directly.
+        """
+        source = "qsv describegpt"
+        out: Dict[str, Any] = {}
+
+        description = suggestions.get("description")
+        if isinstance(description, str) and description.strip():
+            out["description"] = {"value": description, "source": source}
+
+        tags = suggestions.get("tags")
+        if isinstance(tags, list) and tags:
+            # ``tags`` is rendered into a single comma-separated string
+            # so the same ``{value: string}`` shape works for it as for
+            # ``description`` — scheming's tag field accepts the
+            # comma-joined form natively. Custom prompts that already
+            # emit a string flow through as-is.
+            out["tags"] = {"value": ", ".join(str(t) for t in tags), "source": source}
+        elif isinstance(tags, str) and tags.strip():
+            out["tags"] = {"value": tags, "source": source}
+
+        dictionary = suggestions.get("dictionary")
+        if isinstance(dictionary, list):
+            for entry in dictionary:
+                if not isinstance(entry, dict):
+                    continue
+                field = entry.get("field")
+                if not field:
+                    continue
+                # ``summary`` is qsv's canonical per-field value; ``description``
+                # is a common alternate when a custom prompt overrides the
+                # template. Accept either; skip the entry if neither is set.
+                value = entry.get("summary") or entry.get("description")
+                if not value:
+                    continue
+                out[field] = {"value": value, "source": source}
+
+        return out
