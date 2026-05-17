@@ -1,35 +1,82 @@
 # DataPusher+ Prefect worker image.
 #
-# Extends the base Prefect 3 image with qsv (the data-wrangling toolkit
-# DP+ stages call as a subprocess) and the datapusher-plus Python
-# package itself. Used by both the dev compose stack and integration
-# tests.
+# Base: ``ckan/ckan-dev:2.11`` (the same image the CKAN container uses
+# in this stack) because DP+'s flow code does an import-time
+# ``_bootstrap_ckan_app_context`` that calls ``ckan.make_app()`` — so the
+# worker's Python env needs to have CKAN installed alongside Prefect.
+# The earlier ``prefecthq/prefect:3-latest`` base shaved a couple
+# hundred MB off the image but left flow runs crashing with
+# ``ModuleNotFoundError: No module named 'ckan'`` the moment the worker
+# subprocess tried to import the flow.
 #
 # Build from the repo root:
 #   docker build -f Dockerfile.worker -t datapusher-plus-worker:dev .
 
-FROM prefecthq/prefect:3-latest
+# ckan/ckan-dev:2.11 doesn't ship an arm64 manifest; pin to linux/amd64
+# so Docker on Apple Silicon builds via emulation instead of failing
+# with ``no match for platform in manifest``.
+FROM --platform=linux/amd64 ckan/ckan-dev:2.11
 
 ARG QSV_VERSION=20.0.0
 ARG QSV_RELEASE=https://github.com/dathere/qsv/releases/download
 
-# qsvdp is the datapusher-tuned qsv build that DP+ expects at the path
-# configured by ckanext.datapusher_plus.qsv_bin.
+# Root for the apt installs and pip writes. ckan-dev's default user is
+# ``ckan``; compose flips it back via the ``user: root`` override on the
+# worker service for the same reason (the bash command needs apt-get).
+USER root
+
+# System dependencies:
+#   * ca-certificates / curl / unzip — for the qsv download below.
+#   * gdal-bin / libgdal-dev — fiona builds from sdist and needs
+#     ``gdal-config`` + GDAL headers. Same package set CI installs
+#     (.github/workflows/main.yml).
+#   * libspatialindex-dev / libgeos-dev / libproj-dev — shapely /
+#     pyproj / rtree expect them when building from source.
+#   * build-essential — gcc/make for those builds.
+#
+# ckan-dev already ships gcc + libpq etc., but the geo libs aren't on
+# the base image and we don't want to silently rely on what is.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates curl unzip \
+        build-essential \
+        gdal-bin libgdal-dev \
+        libspatialindex-dev libgeos-dev libproj-dev \
+        # DP+ ValidationStage shells out to ``uchardet`` for charset
+        # detection and ``file`` for MIME-type sniffing — both are
+        # plain CLI tools, not Python packages. Without them the flow
+        # crashes at the FormatConverter stage with ``FileNotFoundError:
+        # [Errno 2] No such file or directory: 'uchardet'``.
+        uchardet file \
     && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL "${QSV_RELEASE}/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-gnu.zip" -o /tmp/qsv.zip \
+    # MUSL build, not GNU — ckan/ckan-dev:2.11 (Debian bookworm)
+    # ships GLIBC 2.36, and qsv's GNU build requires GLIBC 2.38+.
+    # The MUSL build is statically linked and works on any Linux ABI.
+    && curl -fsSL "${QSV_RELEASE}/${QSV_VERSION}/qsv-${QSV_VERSION}-x86_64-unknown-linux-musl.zip" -o /tmp/qsv.zip \
     && unzip -j /tmp/qsv.zip 'qsvdp' -d /usr/local/bin/ \
     && chmod +x /usr/local/bin/qsvdp \
     && rm /tmp/qsv.zip
 
-# Install DP+ from the bind-mounted source tree. The compose file mounts
-# the repo at /opt/datapusher-plus so editable installs pick up local
-# changes on worker restart.
-WORKDIR /opt/datapusher-plus
-COPY requirements.txt /opt/datapusher-plus/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+# GDAL Python binding must match the installed system library version
+# so fiona / pyproj find a working ABI. Mirrors the CI step:
+#   pip install "GDAL==$(gdal-config --version)"
+ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
+ENV C_INCLUDE_PATH=/usr/include/gdal
 
-# The worker's actual command is provided by docker-compose; this is the
-# default fallback.
+# Install DP+ from the bind-mounted source tree.
+#
+# Path note: the worker MUST mount the repo at the SAME absolute path
+# the CKAN container uses (``/srv/app/src/datapusher-plus``). The
+# ``datapusher_plus prefect-deploy`` command runs inside the CKAN
+# container and bakes ``Path(dp_pkg.__file__).resolve().parent`` into
+# the deployment as the source-pull location. If the worker mounts
+# under a different path, ``set_working_directory`` step crashes with
+# ``FileNotFoundError: '/srv/app/src/datapusher-plus/ckanext/...'`` and
+# every flow run hangs in ``Pending`` indefinitely.
+WORKDIR /srv/app/src/datapusher-plus
+COPY requirements.txt /srv/app/src/datapusher-plus/requirements.txt
+RUN pip install --no-cache-dir "GDAL==$(gdal-config --version)" \
+    && pip install --no-cache-dir -r requirements.txt
+
+# The worker's actual command is provided by docker-compose; this is
+# the default fallback.
 CMD ["prefect", "worker", "start", "--pool", "datapusher-plus"]

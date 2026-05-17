@@ -37,7 +37,7 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - integration-postgres:/var/lib/postgresql/data
       - ./tests/integration/init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh:ro
@@ -49,7 +49,7 @@ services:
   solr:
     image: ckan/ckan-solr:2.11-solr9
     ports:
-      - "8983:8983"
+      - "${SOLR_HOST_PORT:-8983}:8983"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://localhost:8983/solr/ckan/admin/ping || exit 1"]
       interval: 10s
@@ -58,7 +58,7 @@ services:
   redis:
     image: redis:7
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD-SHELL", "redis-cli ping"]
       interval: 5s
@@ -75,7 +75,7 @@ services:
       PREFECT_SERVER_UI_API_URL: http://localhost:4200/api
     command: prefect server start
     ports:
-      - "4200:4200"
+      - "${PREFECT_HOST_PORT:-4200}:4200"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:4200/api/health', timeout=1)"]
       interval: 10s
@@ -86,6 +86,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    # Override ckan-dev's default user (``ckan``) → root so the on-start
+    # bash command can ``pip install -e`` and write to the editable
+    # install. Same reason the ``ckan`` service has ``user: root``.
+    user: root
     depends_on:
       prefect-server:
         condition: service_healthy
@@ -93,17 +97,28 @@ services:
       PREFECT_API_URL: http://prefect-server:4200/api
       CKAN_INI: /etc/ckan/default/ckan.ini
     volumes:
-      - ./:/opt/datapusher-plus
+      # Match the CKAN container's bind path (``/srv/app/src/datapusher-plus``).
+      # ``ckan datapusher_plus prefect-deploy`` resolves the flow source
+      # via ``dp_pkg.__file__`` inside CKAN and bakes that absolute path
+      # into the Prefect deployment, so the worker has to be able to
+      # ``chdir`` to the same path or the ``set_working_directory`` step
+      # crashes and flow runs stay ``Pending`` forever.
+      - ./:/srv/app/src/datapusher-plus
       - ./tests/integration/ckan.ini:/etc/ckan/default/ckan.ini:ro
     command: >
       bash -c "
-        pip install -e /opt/datapusher-plus &&
+        pip install -e /srv/app/src/datapusher-plus &&
         prefect worker start --pool datapusher-plus
       "
     restart: on-failure
 
   ckan:
     image: ckan/ckan-dev:2.11
+    # Override default user (``ckan``) → root so the on-start command
+    # can ``apt-get install postgresql-client`` (needed for piping
+    # ``datastore set-permissions`` into psql). The CI workflow does
+    # the equivalent via ``options: --user root``.
+    user: root
     depends_on:
       postgres:
         condition: service_healthy
@@ -119,20 +134,61 @@ services:
       CKAN_DATASTORE_READ_URL: postgresql://datastore_read:datastore@postgres/datastore
       CKAN_SOLR_URL: http://solr:8983/solr/ckan
       CKAN_REDIS_URL: redis://redis:6379/1
-      CKAN_SITE_URL: http://localhost:5000
+      # Docker-network hostname (not ``localhost``): the prefect-worker
+      # downloads resources by fetching this URL from its OWN network
+      # context, where ``localhost`` would resolve to the worker
+      # container itself. ``ckan`` is reachable from any service in
+      # this compose stack. Host-side tests reach CKAN via the
+      # separate ``CKAN_URL=http://localhost:5050`` env var.
+      CKAN_SITE_URL: http://ckan:5000
       PREFECT_API_URL: http://prefect-server:4200/api
     volumes:
       - ./:/srv/app/src/datapusher-plus
-      - ./tests/integration/ckan.ini:/etc/ckan/default/ckan.ini:ro
+      # Bind-mount the ini RW (not RO) so the start command can inject
+      # the freshly-minted DP+ service-account token via ``ckan
+      # config-tool`` before starting the server. Same pattern as the
+      # CI workflow (main.yml:524). Drop back to ``:ro`` if you bake
+      # the token into the ini ahead of time.
+      - ./tests/integration/ckan.ini:/etc/ckan/default/ckan.ini
     ports:
-      - "5000:5000"
+      - "${CKAN_HOST_PORT:-5000}:5000"
+    # psql is piped from ``datastore set-permissions`` to grant the
+    # datastore_read role its SELECT privileges; the base
+    # ``ckan/ckan-dev:2.11`` image doesn't carry the postgresql-client
+    # binaries, so install them on first start. Cheap (~1s) on
+    # subsequent restarts because the apt cache layer is already
+    # populated.
+    # End-to-end first-start dance:
+    # 1. apt-install psql so the set-permissions pipe works.
+    # 2. pip-install DP+ in editable mode (pulls in fiona / shapely /
+    #    prefect via the dynamic-dependencies block in pyproject.toml).
+    # 3. db init / datastore set-permissions / db upgrade.
+    # 4. Mint the integration sysadmin + an API token, then inject
+    #    that token as the DP+ service-account token in the ini via
+    #    ``ckan config-tool`` — without this the resource_create /
+    #    auto-submit path 500s with "No API token found. API token
+    #    required for DP+ service account." (see utils.py:89). Mirrors
+    #    main.yml:516-528.
+    # 5. Stash the same token to ``/tmp/integration_admin_token`` so
+    #    the integration tests on the host can grab it via
+    #    ``docker exec ... cat``.
+    # 6. ``ckan run`` foreground (this stays alive).
     command: >
       bash -c "
-        pip install -e /srv/app/src/datapusher-plus &&
-        ckan -c /etc/ckan/default/ckan.ini db init &&
-        ckan -c /etc/ckan/default/ckan.ini datastore set-permissions | psql postgresql://postgres:postgres@postgres/postgres &&
-        ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus &&
-        ckan -c /etc/ckan/default/ckan.ini run --host 0.0.0.0 --port 5000
+        set -e
+        apt-get update -qq && apt-get install -y --no-install-recommends postgresql-client >/dev/null
+        pip install -e /srv/app/src/datapusher-plus
+        ckan -c /etc/ckan/default/ckan.ini db init
+        ckan -c /etc/ckan/default/ckan.ini datastore set-permissions | psql postgresql://postgres:postgres@postgres/postgres
+        ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
+        ckan -c /etc/ckan/default/ckan.ini user show admin 2>/dev/null | grep -q 'name=admin' || (
+          echo y | ckan -c /etc/ckan/default/ckan.ini sysadmin add admin password=adminadmin email=admin@test.local
+        )
+        TOKEN=$$(ckan -c /etc/ckan/default/ckan.ini user token add admin integration 2>/dev/null | grep -A 1 'API Token created' | tail -1 | tr -d '[:space:]')
+        ckan -c /etc/ckan/default/ckan.ini config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$$TOKEN"
+        echo -n "$$TOKEN" > /tmp/integration_admin_token
+        echo '--- Integration admin token written to /tmp/integration_admin_token (grab via docker exec) ---'
+        exec ckan -c /etc/ckan/default/ckan.ini run --host 0.0.0.0 --port 5000
       "
 
 volumes:
