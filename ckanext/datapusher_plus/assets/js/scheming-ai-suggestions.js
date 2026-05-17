@@ -147,7 +147,14 @@ ckan.module('scheming-ai-suggestions', function($) {
               // burning ~100s of redundant package_show calls. Falls
               // back to the top-level value too, for forward-compat
               // with custom plugins that mirror the legacy convention.
-              var currentStatus = (dppSuggestionsData.ai_suggestions && dppSuggestionsData.ai_suggestions.STATUS) || dppSuggestionsData.STATUS;
+              //
+              // Uses `?? ` (nullish-coalesce) rather than `||` so an
+              // empty-string `ai_suggestions.STATUS` is treated as
+              // "intentionally empty — keep polling" rather than
+              // silently falling through to the legacy top-level
+              // STATUS.
+              var aiStatus = dppSuggestionsData.ai_suggestions && dppSuggestionsData.ai_suggestions.STATUS;
+              var currentStatus = (aiStatus !== undefined && aiStatus !== null) ? aiStatus : dppSuggestionsData.STATUS;
               currentStatus = currentStatus ? currentStatus.toUpperCase() : null;
               
               if (currentStatus && self.options.terminalStatuses.includes(currentStatus)) {

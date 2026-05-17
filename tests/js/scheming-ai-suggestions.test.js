@@ -87,8 +87,12 @@ describe('initialize() — early-return guard', () => {
       '<button class="ai-suggestion-btn" data-field-name="description">AI</button>',
     );
 
-    // ajax stub for the polling call initialize will trigger.
-    const { calls } = stubAjax([]);
+    // initialize() kicks off polling, so queue ONE sentinel response
+    // (`{}` — no success/error callback triggered, but the call is
+    // still counted) to satisfy strict stubAjax. The test only cares
+    // that the first call fires; the polling behavior itself is
+    // covered by the _pollForAiSuggestions describe block below.
+    const { calls } = stubAjax([{}]);
     btn.initialize();
 
     // The opted-in button is hidden until suggestions arrive.
@@ -195,6 +199,13 @@ describe('_pollForAiSuggestions() — state machine', () => {
     // Tick through the polling interval (default 2500ms).
     vi.advanceTimersByTime(2500);
     expect(calls.length).toBe(2);
+
+    // The second response carried STATUS=DONE — polling must stop.
+    // Without this assertion a regression that ignored terminal
+    // status would still pass the test (the first response would
+    // re-trigger polling and the count would just hit 2 anyway).
+    vi.advanceTimersByTime(2500);
+    expect(calls.length).toBe(2);
   });
 
   it('stops polling after maxPollAttempts', () => {
@@ -294,7 +305,10 @@ describe('_showAiSuggestionButtons() — DOM updates', () => {
   });
 
   it('leaves unrelated buttons hidden', () => {
-    buildInstance(
+    // Two buttons in the DOM — one we drive (description), one
+    // unrelated (tags). The reveal call only carries a description
+    // suggestion, so the tags button stays hidden.
+    const desc = buildInstance(
       '<button class="ai-suggestion-btn" data-field-name="description" style="display:none">AI</button>',
     );
     const otherBtn = document.createElement('button');
@@ -303,13 +317,7 @@ describe('_showAiSuggestionButtons() — DOM updates', () => {
     otherBtn.style.display = 'none';
     document.body.appendChild(otherBtn);
 
-    const { factory } = loadSchemingAiSuggestions();
-    const inst = {
-      el: document.querySelector('[data-field-name="description"]'),
-      options: factory(window.$).options,
-      ...factory(window.$),
-    };
-    inst._showAiSuggestionButtons({
+    desc._showAiSuggestionButtons({
       description: { value: 'A widget dataset.', source: 'qsv' },
     });
 

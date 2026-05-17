@@ -168,10 +168,17 @@ export function stubAjax(responses) {
     calls.push(opts);
     const next = queue.shift();
     if (next === undefined) {
-      // Quiet pass-through for any unexpected extra calls — the
-      // assertion is "we called ajax N times", which calls.length
-      // tells you, rather than "the (N+1)th call exploded".
-      return;
+      // Strict mode: throw on unexpected extra calls so a regression
+      // (polling continued past where the test expected it to stop)
+      // surfaces immediately as a failure, instead of relying on
+      // every test to use exact-equality assertions on calls.length.
+      // Tests that legitimately want more calls than they queue
+      // responses for should queue a sentinel `{}` (no success/error
+      // → caller gets nothing back, but the call is counted).
+      throw new Error(
+        `stubAjax: unexpected ajax call #${calls.length} ` +
+        `(queue exhausted). url=${opts && opts.url}`,
+      );
     }
     if (next.success !== undefined && typeof opts.success === 'function') {
       opts.success(next.success);
