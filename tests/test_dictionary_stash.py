@@ -256,3 +256,164 @@ def test_load_does_not_create_stash_dir(tmp_path, monkeypatch):
     # Only save bootstraps the directory.
     dictionary_stash.save("res-mkdir", {"k": {"label": "v"}})
     assert target.exists()
+
+
+# ---------------------------------------------------------------------------
+# Retry-after-failure: AnalysisStage._parse_stats picks up the stash
+# when no live datastore resource exists.
+#
+# This is the substantive fix from roborev #2222 MEDIUM. Without these
+# tests, a silent regression that drops the stash-load branch would
+# go unnoticed by the rest of the suite (the analysis stage's stash
+# wiring is otherwise only exercised by the integration suite).
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def minimal_stats_csv(tmp_path):
+    """A 2-column stats CSV that ``_parse_stats`` can parse end-to-end.
+
+    Only the columns the method actually reads are populated: ``field``,
+    ``type``, ``min``, ``max``, ``cardinality``. ``qsv_*`` rows are
+    sentinel trailers in qsv stats output — including one ensures the
+    parser's break condition is exercised.
+    """
+    csv_path = tmp_path / "stats.csv"
+    csv_path.write_text(
+        "field,type,min,max,cardinality\n"
+        "name,String,Alice,Zach,42\n"
+        "qty,Integer,1,1000,500\n"
+        "qsv__rowcount,Integer,0,0,0\n",
+        encoding="utf-8",
+    )
+    return str(csv_path)
+
+
+@pytest.fixture
+def analysis_stage_context(stash_module, tmp_path):
+    """A minimal-but-real wiring of ``AnalysisStage._parse_stats``.
+
+    Why the heavy fixture rather than a SimpleNamespace stand-in:
+    ``_parse_stats`` itself is the seam where the retry-restore lives,
+    so the test has to exercise that real method. Everything around
+    it that *isn't* the focus (qsv, frequency tables, type inference)
+    is upstream of this call and doesn't run here.
+    """
+    pytest.importorskip("ckan")
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs.stages.analysis import AnalysisStage
+
+    stage = AnalysisStage()
+    context = SimpleNamespace(
+        resource_id="res-retry-restore",
+        logger=mock.Mock(),
+        existing_info=None,
+        add_stat=mock.Mock(),
+    )
+    return stage, context
+
+
+def test_retry_restore_loads_stash_when_no_live_datastore(
+    analysis_stage_context, minimal_stats_csv, monkeypatch
+):
+    # The failure-then-retry scenario from roborev #2222 MEDIUM:
+    # a previous attempt deleted the datastore resource and stashed
+    # the dictionary before crashing. On retry, no live datastore is
+    # found, but the stash IS — and ``_parse_stats`` must load it
+    # into ``existing_info`` so the merge logic propagates it onto
+    # the rebuilt datastore.
+    from ckanext.datapusher_plus.jobs.stages import analysis as analysis_mod
+
+    stage, context = analysis_stage_context
+    stashed = {
+        "name": {"label": "Customer name", "type_override": "text"},
+        "qty": {"label": "Quantity ordered", "type_override": "numeric"},
+    }
+    analysis_mod.dict_stash.save(context.resource_id, stashed)
+
+    # No live datastore for this resource_id.
+    monkeypatch.setattr(
+        analysis_mod.dsu, "datastore_resource_exists", lambda rid: None
+    )
+
+    headers_dicts, _datetimecols, _stats = stage._parse_stats(
+        context, minimal_stats_csv, {0: "name", 1: "qty"}
+    )
+
+    # The stash was loaded as existing_info.
+    assert context.existing_info == stashed
+    # The downstream merge applied it onto the rebuilt headers — both
+    # fields carry the original info dicts on the rebuilt datastore.
+    by_id = {h["id"]: h for h in headers_dicts}
+    assert by_id["name"]["info"] == stashed["name"]
+    assert by_id["qty"]["info"] == stashed["qty"]
+    # Restoration was logged at info level with a "retry-after-failure"
+    # tell, so operators can spot it.
+    info_log_messages = [
+        call.args[0] for call in context.logger.info.call_args_list
+    ]
+    assert any(
+        "retry-after-failure" in msg.lower() for msg in info_log_messages
+    ), info_log_messages
+
+
+def test_retry_restore_is_noop_when_no_stash(
+    analysis_stage_context, minimal_stats_csv, monkeypatch
+):
+    # First-run-with-no-prior-dictionary case. No live datastore, no
+    # stash — ``existing_info`` must stay ``None`` and no info-level
+    # "restoring" log fires. (Catches a regression where the branch
+    # accidentally synthesizes a non-None empty dict.)
+    from ckanext.datapusher_plus.jobs.stages import analysis as analysis_mod
+
+    stage, context = analysis_stage_context
+    monkeypatch.setattr(
+        analysis_mod.dsu, "datastore_resource_exists", lambda rid: None
+    )
+
+    stage._parse_stats(context, minimal_stats_csv, {0: "name", 1: "qty"})
+
+    assert context.existing_info is None
+    info_log_messages = [
+        call.args[0] for call in context.logger.info.call_args_list
+    ]
+    assert not any(
+        "retry-after-failure" in msg.lower() for msg in info_log_messages
+    ), info_log_messages
+
+
+def test_retry_restore_does_not_fire_when_live_datastore_exists(
+    analysis_stage_context, minimal_stats_csv, monkeypatch
+):
+    # When the datastore DOES exist, the existing-resource branch wins
+    # and the stash is ignored on this path (the stash will be re-saved
+    # before the delete on the same run). Belt-and-braces: a stash
+    # left over from an unrelated prior run must not silently override
+    # what's currently in the datastore.
+    from ckanext.datapusher_plus.jobs.stages import analysis as analysis_mod
+
+    stage, context = analysis_stage_context
+    # A stale stash from a long-ago failed run.
+    analysis_mod.dict_stash.save(
+        context.resource_id, {"name": {"label": "ANCIENT"}}
+    )
+    # The live datastore reports DIFFERENT info — this is what wins.
+    live_info = {"label": "FRESH"}
+    monkeypatch.setattr(
+        analysis_mod.dsu,
+        "datastore_resource_exists",
+        lambda rid: {"fields": [{"id": "name", "info": live_info}]},
+    )
+    # The branch that follows (delete + stash-save) is not under test
+    # here — stub the side-effecty calls so we don't reach CKAN action
+    # internals that aren't available in this unit-test scaffold.
+    monkeypatch.setattr(
+        analysis_mod.dsu, "delete_datastore_resource", lambda rid: None
+    )
+
+    stage._parse_stats(context, minimal_stats_csv, {0: "name", 1: "qty"})
+
+    # The live datastore's info won, not the stale stash.
+    assert context.existing_info == {"name": live_info}

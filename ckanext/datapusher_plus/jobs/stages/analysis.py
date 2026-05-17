@@ -360,17 +360,33 @@ class AnalysisStage(BaseStage):
             # If a stash exists for this resource_id with no live
             # datastore resource, treat it as if the dictionary had
             # been freshly captured: load it into ``existing_info`` so
-            # the merge logic below applies it onto the new headers,
-            # and re-save (overwriting itself) so the on-disk copy
-            # stays current for any *further* mid-flow failure on this
-            # retry attempt.
+            # the merge logic below applies it onto the new headers.
+            # The on-disk stash is left as-is — its content is already
+            # the correct snapshot (the original dictionary, captured
+            # before the original delete). If this retry also fails,
+            # the same stash is reused on the next attempt.
             stashed = dict_stash.load(context.resource_id)
             if stashed:
+                # Surface the stash mtime so operators can distinguish a
+                # genuine retry-after-failure (mtime within the last few
+                # minutes / hours) from a stale-restore caused by an
+                # ancient orphaned stash being applied to an unrelated
+                # upload (roborev #2223 LOW finding). A future change
+                # could enforce a TTL; for now, visibility is enough.
+                stash_age_s: float = 0.0
+                try:
+                    stash_age_s = time.time() - os.path.getmtime(
+                        dict_stash.stash_path(context.resource_id)
+                    )
+                except OSError:
+                    pass
                 context.logger.info(
                     f"Found stashed Data Dictionary for "
-                    f"{context.resource_id} ({len(stashed)} field(s)) "
-                    "with no live datastore resource. Treating as "
-                    "retry-after-failure and restoring."
+                    f"{context.resource_id} ({len(stashed)} field(s), "
+                    f"stash age {stash_age_s:.0f}s). No live datastore "
+                    "resource present — treating as retry-after-failure "
+                    "and restoring. (If this age looks stale, the stash "
+                    "may be orphaned from an unrelated prior upload.)"
                 )
                 context.existing_info = stashed
 
