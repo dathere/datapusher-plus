@@ -14,6 +14,7 @@ from typing import List, Dict, Any
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
+import ckanext.datapusher_plus.dictionary_stash as dict_stash
 from ckanext.datapusher_plus.pii_screening import screen_for_pii
 from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
@@ -358,6 +359,21 @@ class AnalysisStage(BaseStage):
 
         # Delete existing datastore resource
         if existing:
+            # Issue #265: stash the data dictionary to disk BEFORE the
+            # delete, so the rollback hook in ``prefect_flow`` can
+            # restore the operator's annotations if a later stage fails.
+            # The existing in-memory ``context.existing_info`` survives
+            # only inside this stage's worker — the on-disk stash
+            # survives across the whole flow.
+            if context.existing_info:
+                try:
+                    dict_stash.save(context.resource_id, context.existing_info)
+                except Exception as e:  # noqa: BLE001 — never block ingestion on stash failure
+                    context.logger.warning(
+                        f"Could not stash data dictionary for "
+                        f"{context.resource_id}: {e}. Proceeding without "
+                        "stash; a mid-flow failure may lose the dictionary."
+                    )
             context.logger.info(
                 f'Deleting existing resource "{context.resource_id}" from datastore.'
             )

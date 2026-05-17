@@ -41,6 +41,19 @@ groups:
         description: |
           Download proxy
 
+      - key: ckanext.datapusher_plus.dictionary_stash_dir
+        editable: true
+        default: ""
+        description: |
+          Directory where the per-resource Data Dictionary stash files
+          live. The analysis stage writes a small JSON snapshot here
+          before deleting the existing datastore resource, and the
+          database rollback hook reads it back to restore the
+          operator's annotations if any later stage fails (issue #265).
+          Empty (default) → ``<tempdir>/dpp_dict_stash``. For deployments
+          where ``/tmp`` is wiped on container restart, set this to a
+          persistent path.
+
       - key: ckanext.datapusher_plus.types
         description: |
           Types of files to be processed

@@ -180,6 +180,7 @@ from prefect.transactions import transaction
 
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
+import ckanext.datapusher_plus.dictionary_stash as dict_stash
 import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.job_exceptions as job_exceptions
 import ckanext.datapusher_plus.prefect_client as prefect_client
@@ -822,6 +823,39 @@ def _rollback_database(txn) -> None:
             f"Rollback: could not drop datastore {resource_id}: {e}"
         )
 
+    # Issue #265: if the analysis stage stashed a Data Dictionary
+    # before the original delete, restore it now by re-creating the
+    # datastore resource with the stashed per-field ``info`` dicts and
+    # zero rows. The *data* is unrecoverable (it never landed), but the
+    # operator's annotations (labels, descriptions, type_overrides)
+    # are preserved across the failed run. The stash file is left in
+    # place for inspection if restore itself fails — a future
+    # successful run will overwrite it.
+    stashed = dict_stash.load(resource_id)
+    if not stashed:
+        return
+    try:
+        fields = [{"id": fid, "info": info} for fid, info in stashed.items()]
+        dsu.send_resource_to_datastore(
+            resource=None,
+            resource_id=resource_id,
+            headers=fields,
+            records=[],
+            aliases=[],
+            calculate_record_count=False,
+        )
+        runtime.logger.info(
+            f"Rollback: restored Data Dictionary for {resource_id} "
+            f"({len(fields)} field(s)) from stash"
+        )
+        dict_stash.clear(resource_id)
+    except Exception as e:
+        runtime.logger.warning(
+            f"Rollback: could not restore Data Dictionary for "
+            f"{resource_id}: {e}. Stash file retained at "
+            f"{dict_stash.stash_path(resource_id)} for inspection."
+        )
+
 
 @indexing_task.on_rollback
 def _rollback_indexing(txn) -> None:
@@ -1343,6 +1377,21 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
         finally:
             if token is not None:
                 reset_runtime_context(token)
+            # Issue #265: on any successful exit (including
+            # ``_StageAbort`` complete-with-skip), drop the Data
+            # Dictionary stash — the run reached its natural end and
+            # the dictionary either rode through to the new datastore
+            # resource (via the analysis stage's existing_info merge)
+            # or was never needed. On failure, leave the stash for the
+            # rollback hook (and a possible subsequent retry).
+            if not errored:
+                try:
+                    dict_stash.clear(job_input.resource_id)
+                except Exception as e:  # noqa: BLE001 — never block teardown on stash cleanup
+                    prefect_logger.warning(
+                        f"Could not clear dictionary stash for "
+                        f"{job_input.resource_id}: {e}"
+                    )
             if result_url:
                 status = "error" if errored else "complete"
                 saved_ok = callback_datapusher_hook(
