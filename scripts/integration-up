@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# --- help-start ---
+#
+# Bring up the DataPusher+ integration stack and report everything
+# needed to run integration tests against it. Handles all three
+# startup states transparently:
+#
+#   * cold start (no containers, no volume)        → full bootstrap (~5–8 min on emulated x86)
+#   * post-restart (containers exist, just stopped) → ~30 s
+#   * post-down (containers gone, volume kept)     → ~3–5 min (token re-minted, prefect deployment intact)
+#
+# Run from the repo root:
+#
+#   scripts/integration-up [--rebuild] [--no-deploy]
+#
+# Options:
+#   --rebuild      Force ``docker compose build --no-cache prefect-worker``
+#                  before starting. Use after Dockerfile.worker changes.
+#   --no-deploy    Skip the ``datapusher_plus prefect-deploy`` step.
+#                  Useful when the deployment is known-current and
+#                  you want to skip the ~10 s overhead.
+#
+# Environment (all optional, defaults shown):
+#   CKAN_HOST_PORT=5050      host port for CKAN (5000 collides with macOS AirPlay)
+#   POSTGRES_HOST_PORT=5433  host port for Postgres (5432 commonly bound)
+#   PREFECT_HOST_PORT=4200   host port for Prefect UI
+#   SOLR_HOST_PORT=8983      host port for Solr
+#   REDIS_HOST_PORT=6379     host port for Redis
+#
+# After the script returns, the admin token is at:
+#   ./.integration-token  (host-side, gitignored)
+#   /tmp/integration_admin_token  (inside the ckan container)
+#
+# Tear down with ``scripts/integration-down`` (or ``--wipe`` to
+# nuke volumes too).
+#
+# --- help-end ---
+
+set -euo pipefail
+
+# Resolve repo root regardless of where the script is invoked from.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+COMPOSE_FILE="docker-compose.integration.yaml"
+CKAN_SERVICE="ckan"
+TOKEN_PATH_HOST="$REPO_ROOT/.integration-token"
+TOKEN_PATH_CONTAINER="/tmp/integration_admin_token"
+
+# Defaults — overridable via env. Match the values BACKLOG-SWEEP.md
+# uses so docs and helpers stay in sync.
+export CKAN_HOST_PORT="${CKAN_HOST_PORT:-5050}"
+export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5433}"
+export PREFECT_HOST_PORT="${PREFECT_HOST_PORT:-4200}"
+export SOLR_HOST_PORT="${SOLR_HOST_PORT:-8983}"
+export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6379}"
+
+# Help is delimited by sentinel comments above so growing the comment
+# block doesn't break ``--help`` output (the prior ``sed -n '3,40p'``
+# fixed-range form silently lost trailing lines or printed into the
+# code below as the header grew). awk (not GNU-extension ``sed``) so
+# the script works on BSD sed too — macOS dev box matters.
+usage() {
+    awk '
+        /^# --- help-start ---/ { in_block = 1; next }
+        /^# --- help-end ---/   { in_block = 0 }
+        in_block { sub(/^# ?/, ""); print }
+    ' "$0"
+}
+
+REBUILD=0
+DEPLOY=1
+for arg in "$@"; do
+    case "$arg" in
+        --rebuild)    REBUILD=1 ;;
+        --no-deploy)  DEPLOY=0 ;;
+        -h|--help)    usage; exit 0 ;;
+        *)
+            echo "unknown option: $arg" >&2
+            echo "run 'scripts/integration-up --help' for usage" >&2
+            exit 2
+            ;;
+    esac
+done
+
+err()  { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
+info() { printf '\033[36m→\033[0m %s\n' "$*"; }
+ok()   { printf '\033[32m✓\033[0m %s\n' "$*"; }
+
+# All ``docker exec`` / ``docker inspect`` calls below resolve the
+# container ID through ``docker compose ps -q`` rather than via a
+# hard-coded ``datapusher-plus-ckan-1`` name. The name is
+# ``<project>-<service>-<index>``, where the project defaults to the
+# basename of the repo dir but is also overridable via
+# ``COMPOSE_PROJECT_NAME`` — hard-coding it broke for any clone path
+# that didn't happen to be ``datapusher-plus`` or for anyone using a
+# multi-checkout setup.
+ckan_cid() {
+    local cid
+    cid="$(docker compose -f "$COMPOSE_FILE" ps -q "$CKAN_SERVICE")"
+    if [ -z "$cid" ]; then
+        err "No running container for service '$CKAN_SERVICE'."
+        err "Did compose-up succeed? Try \`docker compose -f $COMPOSE_FILE ps\`."
+        exit 1
+    fi
+    printf '%s' "$cid"
+}
+
+# --- Preflight ---------------------------------------------------------------
+
+if ! docker info >/dev/null 2>&1; then
+    err "Docker daemon not reachable — start Docker Desktop and retry."
+    exit 1
+fi
+
+if [ ! -f "$COMPOSE_FILE" ]; then
+    err "$COMPOSE_FILE not found — run from repo root, or check out the branch."
+    exit 1
+fi
+
+# --- (Re)build worker image if asked -----------------------------------------
+
+if [ "$REBUILD" = "1" ]; then
+    info "Rebuilding prefect-worker image (--no-cache, takes a while on emulated x86)…"
+    docker compose -f "$COMPOSE_FILE" build --no-cache prefect-worker
+    ok "Worker image rebuilt."
+fi
+
+# --- Bring stack up ----------------------------------------------------------
+
+info "Starting stack (ports: ckan=$CKAN_HOST_PORT postgres=$POSTGRES_HOST_PORT)…"
+docker compose -f "$COMPOSE_FILE" up -d
+
+# --- Wait for CKAN to be ready -----------------------------------------------
+#
+# CKAN's first-start bash dance does pip install + db init + token mint;
+# subsequent starts skip the heavy bits but still need ~30 s. Poll the
+# /api/3/action/status_show endpoint, with a wall-clock cap so a wedged
+# container doesn't hang the script forever.
+
+CKAN_URL_HOST="http://localhost:${CKAN_HOST_PORT}"
+info "Waiting for CKAN at ${CKAN_URL_HOST} (up to 10 min)…"
+deadline=$(( $(date +%s) + 600 ))
+while [ "$(date +%s)" -lt "$deadline" ]; do
+    cid="$(docker compose -f "$COMPOSE_FILE" ps -q "$CKAN_SERVICE" 2>/dev/null || true)"
+    if [ -z "$cid" ] || ! docker inspect "$cid" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then
+        err "CKAN container exited. Last 20 log lines:"
+        docker compose -f "$COMPOSE_FILE" logs --tail=20 "$CKAN_SERVICE"
+        exit 1
+    fi
+    if curl -fsS "${CKAN_URL_HOST}/api/3/action/status_show" >/dev/null 2>&1; then
+        ok "CKAN is responding."
+        break
+    fi
+    sleep 5
+done
+
+if ! curl -fsS "${CKAN_URL_HOST}/api/3/action/status_show" >/dev/null 2>&1; then
+    err "CKAN didn't come up in 10 min. Tail of CKAN log:"
+    docker compose -f "$COMPOSE_FILE" logs --tail=20 "$CKAN_SERVICE"
+    exit 1
+fi
+
+# --- Grab the token ----------------------------------------------------------
+#
+# First-start bootstrap writes /tmp/integration_admin_token inside the
+# container. Cache it host-side at ./.integration-token (gitignored)
+# so subsequent runs (and other tooling) can grep it without an extra
+# ``docker exec``.
+
+CID="$(ckan_cid)"
+if ! docker exec "$CID" test -s "$TOKEN_PATH_CONTAINER" 2>/dev/null; then
+    err "Token file ${TOKEN_PATH_CONTAINER} missing or empty inside CKAN."
+    err "Bootstrap may have failed. Check \`docker compose -f $COMPOSE_FILE logs $CKAN_SERVICE | tail\`."
+    exit 1
+fi
+
+docker exec "$CID" cat "$TOKEN_PATH_CONTAINER" > "$TOKEN_PATH_HOST"
+chmod 600 "$TOKEN_PATH_HOST"
+ok "Admin token cached to $TOKEN_PATH_HOST ($(wc -c < "$TOKEN_PATH_HOST") bytes)."
+
+# --- Register the Prefect deployment -----------------------------------------
+#
+# Idempotent — re-running just updates the in-place deployment. After
+# ``docker compose down -v``, postgres+Prefect state are wiped and
+# this step is REQUIRED before any flow runs.
+
+if [ "$DEPLOY" = "1" ]; then
+    info "Registering Prefect deployment…"
+    # Explicit if/else, not ``cmd && ok || { err; exit 1; }``: the chained
+    # form double-fires ``cmd`` if ``ok``/``printf`` returns non-zero (closed
+    # stdout pipe etc.) AND reports failure on an otherwise-clean run.
+    deploy_log="$(mktemp)"
+    if docker exec "$CID" \
+            ckan -c /etc/ckan/default/ckan.ini datapusher_plus prefect-deploy \
+            > "$deploy_log" 2>&1; then
+        ok "Deployment registered (work-pool: datapusher-plus)."
+        rm -f "$deploy_log"
+    else
+        err "prefect-deploy failed:"
+        cat "$deploy_log" >&2
+        rm -f "$deploy_log"
+        exit 1
+    fi
+fi
+
+# --- Summary -----------------------------------------------------------------
+#
+# Recommended pytest invocation reads the token from disk via env-file
+# semantics — ``CKAN_API_KEY=$(cat ...)`` puts the JWT on the process
+# command line where any user on the box can see it via ``ps -ef``.
+# The conftest.py fixture also auto-reads ``.integration-token`` when
+# ``CKAN_API_KEY`` is unset, so the env var is now optional.
+
+cat <<EOF
+
+──────────────────────────────────────────────────────────────────────
+DataPusher+ integration stack is up.
+
+CKAN:           ${CKAN_URL_HOST}
+  admin / adminadmin (sysadmin)
+Prefect UI:     http://localhost:${PREFECT_HOST_PORT}
+Postgres:       localhost:${POSTGRES_HOST_PORT}  (postgres/postgres)
+Token:          $TOKEN_PATH_HOST  (chmod 600 — conftest reads it automatically)
+
+Run integration tests:
+
+  INTEGRATION=1 CKAN_URL=${CKAN_URL_HOST} \\
+    python3 -m pytest tests/integration/ -v
+
+  # conftest reads .integration-token when CKAN_API_KEY is unset, so
+  # the JWT never lands in the process command line.
+
+Tear down:
+
+  scripts/integration-down          # preserve volumes (fast next start)
+  scripts/integration-down --wipe   # nuke everything
+
+──────────────────────────────────────────────────────────────────────
+EOF

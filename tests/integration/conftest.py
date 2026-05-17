@@ -45,18 +45,35 @@ def prefect_url() -> str:
 def ckan_api_key() -> str:
     """API key for the test sysadmin user.
 
-    Created during stack bring-up via:
-        ckan -c /etc/ckan/default/ckan.ini sysadmin add admin password=admin
-        ckan -c /etc/ckan/default/ckan.ini user token add admin integration
-    Or supplied via the ``CKAN_API_KEY`` env var.
+    Lookup order:
+      1. ``CKAN_API_KEY`` env var (CI / explicit override).
+      2. ``./.integration-token`` (written by ``scripts/integration-up``).
+         Preferred for local dev — the file is chmod 600 and gitignored,
+         so the JWT never lands in the process command line (``ps -ef``)
+         the way ``CKAN_API_KEY=$(cat .integration-token) pytest …``
+         would expose it on a multi-user box.
+
+    Skips the test if neither is available.
     """
     key = os.environ.get("CKAN_API_KEY", "")
-    if not key:
-        pytest.skip(
-            "CKAN_API_KEY env var required for integration tests "
-            "(generate with `ckan user token add admin integration`)"
-        )
-    return key
+    if key:
+        return key
+
+    # Walk up from the conftest dir to find the repo root that holds
+    # ``.integration-token``. ``Path(__file__).resolve()`` is in
+    # ``<repo>/tests/integration/`` so two parents up is the repo root.
+    import pathlib
+    token_path = pathlib.Path(__file__).resolve().parents[2] / ".integration-token"
+    if token_path.is_file():
+        try:
+            return token_path.read_text().strip()
+        except OSError:
+            pass
+
+    pytest.skip(
+        "CKAN_API_KEY env var (or ./.integration-token written by "
+        "`scripts/integration-up`) required for integration tests."
+    )
 
 
 @pytest.fixture

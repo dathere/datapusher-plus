@@ -31,6 +31,13 @@ classifiers = [
 	"Topic :: Software Development :: Libraries :: Application Frameworks",
 	"Topic :: Database",
 ]
+# The actual dependencies live in requirements.txt / requirements-dev.txt;
+# declare them as dynamic so the [tool.setuptools.dynamic] block below
+# actually takes effect. Without this marker, ``pip install -e .``
+# installs the package with no dependencies — fiona, shapely, prefect,
+# etc. all silently absent, which is why the integration stack's CKAN
+# container couldn't import prefect for ``datapusher_plus prefect-deploy``.
+dynamic = ["dependencies", "optional-dependencies"]
 
 [project.urls]
 Homepage = "https://github.com/dathere/datapusher-plus"
