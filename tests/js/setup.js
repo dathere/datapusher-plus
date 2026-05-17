@@ -52,6 +52,12 @@ new Function('window', 'document', jquerySrc)(window, document);
 // After loading the script into the jsdom realm, the callable $
 // is at window.$ / window.jQuery — same as in a real browser.
 const $ = window.$;
+// Capture the original $.ajax so the beforeEach hook can restore
+// it between tests. Without this, ``stubAjax`` permanently
+// overwrites ``$.ajax`` on the shared jQuery instance and the
+// next test (which may not call ``stubAjax`` at all) still sees
+// the previous test's stub — silent cross-test bleed.
+const originalAjax = $.ajax;
 
 beforeEach(() => {
   // Reset DOM + globals between tests so module state doesn't bleed.
@@ -62,6 +68,10 @@ beforeEach(() => {
   window.jQuery = $;
   global.$ = $;
   global.jQuery = $;
+  // Restore the original $.ajax. Tests that want the stub must
+  // explicitly call ``stubAjax``; the default state is the real
+  // jQuery implementation, same as a fresh page load.
+  $.ajax = originalAjax;
 
   // CKAN module registrar stub. The real ckan.module(name, callback)
   // wires the returned object up for DOM auto-discovery via

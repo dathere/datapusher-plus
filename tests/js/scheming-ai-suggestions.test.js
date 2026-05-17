@@ -117,7 +117,7 @@ describe('_pollForAiSuggestions() — state machine', () => {
     vi.useRealTimers();
   });
 
-  it('stops polling when dpp_suggestions.STATUS is in terminalStatuses', () => {
+  it('stops polling when dpp_suggestions.ai_suggestions.STATUS is in terminalStatuses', () => {
     // Seed a button + datasetId; one ajax response with STATUS=DONE.
     const btn = buildInstance(
       '<button class="ai-suggestion-btn" data-field-name="description">AI</button>',
