@@ -14,6 +14,7 @@ from typing import List, Dict, Any
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
+import ckanext.datapusher_plus.dictionary_stash as dict_stash
 from ckanext.datapusher_plus.pii_screening import screen_for_pii
 from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
@@ -344,6 +345,50 @@ class AnalysisStage(BaseStage):
             context.existing_info = dict(
                 (f["id"], f["info"]) for f in existing.get("fields", []) if "info" in f
             )
+        else:
+            # Issue #265 — retry-after-failure path. The previous attempt
+            # may have already deleted the datastore resource and stashed
+            # the dictionary to disk before crashing. In that case the
+            # database transaction's ``_rollback_database`` hook never
+            # got a chance to fire (the delete happens *here*, outside
+            # the transaction block). Without this branch, ``existing``
+            # is falsy → ``existing_info`` stays ``None`` → the new
+            # datastore resource gets built with no dictionary → and
+            # the flow's success ``finally`` clears the orphaned stash,
+            # losing the operator's annotations forever.
+            #
+            # If a stash exists for this resource_id with no live
+            # datastore resource, treat it as if the dictionary had
+            # been freshly captured: load it into ``existing_info`` so
+            # the merge logic below applies it onto the new headers.
+            # The on-disk stash is left as-is — its content is already
+            # the correct snapshot (the original dictionary, captured
+            # before the original delete). If this retry also fails,
+            # the same stash is reused on the next attempt.
+            stashed = dict_stash.load(context.resource_id)
+            if stashed:
+                # Surface the stash mtime so operators can distinguish a
+                # genuine retry-after-failure (mtime within the last few
+                # minutes / hours) from a stale-restore caused by an
+                # ancient orphaned stash being applied to an unrelated
+                # upload (roborev #2223 LOW finding). A future change
+                # could enforce a TTL; for now, visibility is enough.
+                stash_age_s: float = 0.0
+                try:
+                    stash_age_s = time.time() - os.path.getmtime(
+                        dict_stash.stash_path(context.resource_id)
+                    )
+                except OSError:
+                    pass
+                context.logger.info(
+                    f"Found stashed Data Dictionary for "
+                    f"{context.resource_id} ({len(stashed)} field(s), "
+                    f"stash age {stash_age_s:.0f}s). No live datastore "
+                    "resource present — treating as retry-after-failure "
+                    "and restoring. (If this age looks stale, the stash "
+                    "may be orphaned from an unrelated prior upload.)"
+                )
+                context.existing_info = stashed
 
         # Override with types from Data Dictionary
         if context.existing_info:
@@ -358,6 +403,21 @@ class AnalysisStage(BaseStage):
 
         # Delete existing datastore resource
         if existing:
+            # Issue #265: stash the data dictionary to disk BEFORE the
+            # delete, so the rollback hook in ``prefect_flow`` can
+            # restore the operator's annotations if a later stage fails.
+            # The existing in-memory ``context.existing_info`` survives
+            # only inside this stage's worker — the on-disk stash
+            # survives across the whole flow.
+            if context.existing_info:
+                try:
+                    dict_stash.save(context.resource_id, context.existing_info)
+                except Exception as e:  # noqa: BLE001 — never block ingestion on stash failure
+                    context.logger.warning(
+                        f"Could not stash data dictionary for "
+                        f"{context.resource_id}: {e}. Proceeding without "
+                        "stash; a mid-flow failure may lose the dictionary."
+                    )
             context.logger.info(
                 f'Deleting existing resource "{context.resource_id}" from datastore.'
             )
