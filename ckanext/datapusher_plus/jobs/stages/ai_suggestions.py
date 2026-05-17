@@ -257,58 +257,116 @@ class AISuggestionsStage(BaseStage):
         )
 
     def _reshape_for_ui(self, suggestions: Dict[str, Any]) -> Dict[str, Any]:
-        """Transform qsv describegpt's verbatim output into the per-field
-        ``{value, source}`` schema the UI reads.
+        """Transform qsv describegpt's verbatim JSON envelope into the
+        per-field ``{value, source}`` schema the UI reads.
 
-        qsv emits a flat shape::
+        qsv 20.0.0 emits a wrapped envelope (validated against a real
+        LM Studio round-trip; see ``tests/fixtures/qsv_describegpt_sample.json``)::
 
-            {"description": "...", "tags": [...],
-             "dictionary": [{"field": "...", "summary": "..."}, ...]}
+            {
+              "Dictionary": {
+                "response": {
+                  "fields": [
+                    {"name": "...", "type": "...", "label": "...",
+                     "description": "...", "min": "...", "max": "...",
+                     "cardinality": N, ...},
+                    ...
+                  ],
+                  "enum_threshold": N, "num_examples": N,
+                  "truncate_str": N, "attribution": "..."
+                },
+                "reasoning": "...", "token_usage": {...}
+              },
+              "Description": {
+                "response": "<markdown string>",
+                "reasoning": "...", "token_usage": {...}
+              },
+              "Tags": {
+                "response": {"tags": [...], "attribution": "..."},
+                "reasoning": "...", "token_usage": {...},
+                "num_tags": N, "tag_vocab": ...
+              }
+            }
 
         The UI expects a per-field map::
 
-            {"description": {"value": "...", "source": "qsv describegpt"},
-             "tags":        {"value": "...", "source": "qsv describegpt"},
-             "<col>":       {"value": "<summary>", "source": "qsv describegpt"}}
+            {"description": {"value": "<markdown>", "source": "qsv describegpt"},
+             "tags":        {"value": "<comma-joined>", "source": "qsv describegpt"},
+             "<col>":       {"value": "<dict entry description>", "source": "qsv describegpt"}}
 
-        Done here (rather than letting the helpers cope with both
-        shapes) so the on-disk schema is uniform — the existing
+        Reshape rules:
+
+        * ``Description.response`` → top-level ``description`` (string
+          as-is; qsv emits Markdown inside the JSON envelope, which the
+          scheming markdown form snippet handles natively).
+        * ``Tags.response.tags`` → top-level ``tags`` (comma-joined).
+          scheming's tag field accepts a comma-joined string natively.
+        * ``Dictionary.response.fields[i]`` → per-column entry keyed
+          by ``name``. The value is the LLM-generated ``description``;
+          ``label`` is folded into ``source`` so reviewers see both
+          when they hover the popover.
+
+        Done in the stage (rather than letting the helpers cope with
+        both shapes) so the on-disk schema is uniform — the existing
         ``scheming_get_ai_suggestion_value`` helper just reaches into
         ``ai_suggestions[field_name]["value"]`` and the JS polls for
         ``ai_suggestions[field_name].value`` directly.
+
+        Defensive at every level: a malformed / partial envelope
+        produces an empty dict rather than raising, so the caller's
+        try/except is rarely the line of defense.
         """
-        source = "qsv describegpt"
+        base_source = "qsv describegpt"
         out: Dict[str, Any] = {}
 
-        description = suggestions.get("description")
-        if isinstance(description, str) and description.strip():
-            out["description"] = {"value": description, "source": source}
+        # ---- Description ----
+        desc_envelope = suggestions.get("Description")
+        if isinstance(desc_envelope, dict):
+            desc_value = desc_envelope.get("response")
+            if isinstance(desc_value, str) and desc_value.strip():
+                out["description"] = {"value": desc_value, "source": base_source}
 
-        tags = suggestions.get("tags")
-        if isinstance(tags, list) and tags:
-            # ``tags`` is rendered into a single comma-separated string
-            # so the same ``{value: string}`` shape works for it as for
-            # ``description`` — scheming's tag field accepts the
-            # comma-joined form natively. Custom prompts that already
-            # emit a string flow through as-is.
-            out["tags"] = {"value": ", ".join(str(t) for t in tags), "source": source}
-        elif isinstance(tags, str) and tags.strip():
-            out["tags"] = {"value": tags, "source": source}
+        # ---- Tags ----
+        tags_envelope = suggestions.get("Tags")
+        if isinstance(tags_envelope, dict):
+            tags_response = tags_envelope.get("response")
+            tags_list = None
+            if isinstance(tags_response, dict):
+                tags_list = tags_response.get("tags")
+            elif isinstance(tags_response, list):
+                # Some prompt-file variants might emit the list directly.
+                tags_list = tags_response
+            if isinstance(tags_list, list) and tags_list:
+                out["tags"] = {
+                    "value": ", ".join(str(t) for t in tags_list),
+                    "source": base_source,
+                }
 
-        dictionary = suggestions.get("dictionary")
-        if isinstance(dictionary, list):
-            for entry in dictionary:
-                if not isinstance(entry, dict):
-                    continue
-                field = entry.get("field")
-                if not field:
-                    continue
-                # ``summary`` is qsv's canonical per-field value; ``description``
-                # is a common alternate when a custom prompt overrides the
-                # template. Accept either; skip the entry if neither is set.
-                value = entry.get("summary") or entry.get("description")
-                if not value:
-                    continue
-                out[field] = {"value": value, "source": source}
+        # ---- Dictionary (per-column entries) ----
+        dict_envelope = suggestions.get("Dictionary")
+        if isinstance(dict_envelope, dict):
+            dict_response = dict_envelope.get("response")
+            if isinstance(dict_response, dict):
+                fields = dict_response.get("fields")
+                if isinstance(fields, list):
+                    for entry in fields:
+                        if not isinstance(entry, dict):
+                            continue
+                        name = entry.get("name")
+                        if not name:
+                            continue
+                        value = entry.get("description") or entry.get("label")
+                        if not value:
+                            continue
+                        # Fold the LLM-generated label into ``source``
+                        # so the popover surfaces both. When the label
+                        # is missing or identical to the value, just
+                        # use the base source.
+                        label = entry.get("label")
+                        if label and label != value:
+                            source = f"{base_source} · {label}"
+                        else:
+                            source = base_source
+                        out[name] = {"value": value, "source": source}
 
         return out

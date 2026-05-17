@@ -638,6 +638,8 @@ class QSVCommand:
         output_file: Optional[str] = None,
         timeout: Optional[float] = None,
         env: Optional[Dict[str, str]] = None,
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
     ) -> subprocess.CompletedProcess:
         """
         Run ``qsv describegpt`` against a CSV to get LLM-generated
@@ -647,6 +649,37 @@ class QSVCommand:
         model, prompt template, API key all live in ``prompt_file`` or
         qsv's environment, NOT in DP+ config). The wrapper just stitches
         the flags together and invokes the subprocess.
+
+        Output shape (with ``json_output=True``, validated against qsv
+        20.0.0)::
+
+            {
+              "Dictionary": {
+                "response": {
+                  "fields": [
+                    {"name": "...", "type": "...", "label": "...",
+                     "description": "...", "min": "...", "max": "...",
+                     "cardinality": N, "enumeration": ...,
+                     "null_count": N, "examples": "..."}
+                  ],
+                  "enum_threshold": N, "num_examples": N,
+                  "truncate_str": N, "attribution": "..."
+                },
+                "reasoning": "...", "token_usage": {...}
+              },
+              "Description": {
+                "response": "<markdown string>",
+                "reasoning": "...", "token_usage": {...}
+              },
+              "Tags": {
+                "response": {"tags": [...], "attribution": "..."},
+                "reasoning": "...", "token_usage": {...},
+                "num_tags": N, "tag_vocab": ...
+              }
+            }
+
+        ``AISuggestionsStage._reshape_for_ui`` consumes this and emits
+        the per-field ``{value, source}`` map the scheming UI reads.
 
         Args:
             input_file: Path to the CSV (the file qsv describes).
@@ -660,9 +693,16 @@ class QSVCommand:
             dictionary: Include the per-field dictionary.
                 Maps to ``--dictionary``. Default True.
             tags: Include the tag list. Maps to ``--tags``. Default True.
-            json_output: Format output as JSON (vs. plain text).
-                Maps to ``--json``. Default True — the AISuggestionsStage
-                consumes the JSON.
+            json_output: When True, request the structured JSON envelope
+                described above (``--format JSON``). When False, qsv
+                emits the default Markdown report. Default True — the
+                AISuggestionsStage's JSON parse depends on this.
+
+                Note: qsv 20.0.0 controls output format via
+                ``--format <Markdown|TSV|JSON|TOON>``, NOT a ``--json``
+                flag (an earlier draft of this wrapper assumed the
+                latter and produced ``Unknown flag: '--json'`` at
+                runtime).
             output_file: Optional path to write the result to. When
                 omitted, the result lands in ``CompletedProcess.stdout``.
             timeout: Per-call subprocess timeout, in seconds. Defaults
@@ -672,10 +712,25 @@ class QSVCommand:
             env: Optional environment overrides for the subprocess
                 (e.g. ``{"OPENAI_API_KEY": "..."}`` if the caller has a
                 key it wants to inject out-of-band).
+            api_key: Optional value for ``--api-key``. Required when
+                the LLM endpoint isn't on ``localhost`` (qsv treats
+                non-localhost base URLs as "not a local LLM" and
+                refuses to start without an API key). For unauthenticated
+                local LLMs reached via container-host hostnames
+                (``host.docker.internal``, ``host.local``, …) pass the
+                literal string ``"NONE"`` — qsv accepts it as the
+                "I know this is unauthenticated, get on with it" sentinel.
+                When omitted, qsv reads ``QSV_LLM_APIKEY`` from the
+                environment (or the prompt-file).
+            base_url: Optional override for ``--base-url`` — lets
+                callers point at a different LLM endpoint without
+                rewriting the prompt-file. When omitted, qsv reads
+                ``base_url`` from the prompt-file.
 
         Returns:
             The result of ``subprocess.run``. ``stdout`` is the
-            (JSON-formatted, by default) describegpt output.
+            describegpt output (JSON envelope when ``json_output=True``,
+            Markdown otherwise).
 
         Raises:
             utils.JobError: If the subprocess fails (non-zero exit or
@@ -692,11 +747,15 @@ class QSVCommand:
         if tags:
             args.append("--tags")
         if json_output:
-            args.append("--json")
+            args.extend(["--format", "JSON"])
         if prompt_file:
             args.extend(["--prompt-file", prompt_file])
         if output_file:
             args.extend(["--output", output_file])
+        if api_key:
+            args.extend(["--api-key", api_key])
+        if base_url:
+            args.extend(["--base-url", base_url])
 
         args.append(input_file)
 
