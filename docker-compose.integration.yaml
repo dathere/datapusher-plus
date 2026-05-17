@@ -144,11 +144,19 @@ services:
       PREFECT_API_URL: http://prefect-server:4200/api
     volumes:
       - ./:/srv/app/src/datapusher-plus
-      # Bind-mount the ini RW (not RO) so the start command can inject
-      # the freshly-minted DP+ service-account token via ``ckan
-      # config-tool`` before starting the server. Same pattern as the
-      # CI workflow (main.yml:524). Drop back to ``:ro`` if you bake
-      # the token into the ini ahead of time.
+      # Bind-mounted RW because the bootstrap's ``ckan config-tool``
+      # appends the freshly-minted DP+ service-account token to this
+      # file, and the prefect-worker bind-mounts the SAME file (also
+      # at /etc/ckan/default/ckan.ini) — the worker's Download stage
+      # reads ``ckanext.datapusher_plus.api_token`` to authenticate
+      # the resource fetch back to CKAN. A copy-from-source pattern
+      # would isolate writes but desync the two containers.
+      #
+      # Side effect: this file shows as modified after every stack-up
+      # while the stack is running. ``scripts/integration-down``
+      # resets it to its committed state so the JWT never accidentally
+      # gets committed. Don't ``git add`` it manually while the stack
+      # is up.
       - ./tests/integration/ckan.ini:/etc/ckan/default/ckan.ini
     ports:
       - "${CKAN_HOST_PORT:-5000}:5000"

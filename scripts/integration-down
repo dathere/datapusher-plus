@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# Tear down the DataPusher+ integration stack.
+#
+#   scripts/integration-down            # stop + remove containers, keep
+#                                       # the postgres volume so the next
+#                                       # ``integration-up`` starts in ~3 min
+#                                       # with the admin user / datasets
+#                                       # / Prefect deployment intact.
+#
+#   scripts/integration-down --wipe     # also drop named volumes — full
+#                                       # cold-start required next time
+#                                       # (~5–8 min on emulated x86).
+#
+# Run from the repo root.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$REPO_ROOT"
+
+COMPOSE_FILE="docker-compose.integration.yaml"
+TOKEN_PATH_HOST="$REPO_ROOT/.integration-token"
+
+# Same port-default scheme as integration-up — compose substitutes
+# these even on ``down`` so it needs them defined.
+export CKAN_HOST_PORT="${CKAN_HOST_PORT:-5050}"
+export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-5433}"
+export PREFECT_HOST_PORT="${PREFECT_HOST_PORT:-4200}"
+export SOLR_HOST_PORT="${SOLR_HOST_PORT:-8983}"
+export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6379}"
+
+WIPE=0
+for arg in "$@"; do
+    case "$arg" in
+        --wipe) WIPE=1 ;;
+        -h|--help)
+            sed -n '3,18p' "$0"
+            exit 0
+            ;;
+        *)
+            echo "unknown option: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
+info() { printf '\033[36m→\033[0m %s\n' "$*"; }
+ok()   { printf '\033[32m✓\033[0m %s\n' "$*"; }
+
+if [ "$WIPE" = "1" ]; then
+    info "Tearing down stack AND wiping volumes (cold start next time)…"
+    docker compose -f "$COMPOSE_FILE" down -v
+    if [ -f "$TOKEN_PATH_HOST" ]; then
+        rm -f "$TOKEN_PATH_HOST"
+        ok "Removed cached token at $TOKEN_PATH_HOST."
+    fi
+else
+    info "Stopping containers (postgres volume preserved)…"
+    docker compose -f "$COMPOSE_FILE" down
+    info "Token cache kept at $TOKEN_PATH_HOST (will be refreshed by next ``integration-up``)."
+fi
+
+# Strip any runtime-injected ``api_token`` line from the integration
+# ini. The CKAN bootstrap appends one via ``ckan config-tool`` while
+# the stack is running (the worker reads the same file for its
+# Download-stage callback) — without this strip, the JWT would sit
+# there waiting to be accidentally ``git add``-ed.
+#
+# We use sed instead of ``git checkout`` so unrelated edits the
+# developer may have made to the ini (toggling a config option for a
+# repro, etc.) are preserved.
+INI="$REPO_ROOT/tests/integration/ckan.ini"
+if [ -f "$INI" ] && grep -q '^ckanext\.datapusher_plus\.api_token=' "$INI"; then
+    sed -i.bak '/^ckanext\.datapusher_plus\.api_token=/d' "$INI"
+    rm -f "$INI.bak"
+    ok "Stripped runtime-injected api_token from $INI."
+fi
+
+ok "Stack down."
