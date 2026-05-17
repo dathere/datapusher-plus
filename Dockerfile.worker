@@ -56,9 +56,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && chmod +x /usr/local/bin/qsvdp \
     && rm /tmp/qsv.zip
 
-# GDAL Python binding must match the installed system library version
-# so fiona / pyproj find a working ABI. Mirrors the CI step:
-#   pip install "GDAL==$(gdal-config --version)"
+# ``gdal-config`` lookup + headers for any subprocess pip install that
+# rebuilds fiona / shapely / pyproj from sdist. We DON'T pip-install
+# the GDAL Python binding here — nothing in this codebase imports
+# ``osgeo`` (verified with grep), fiona / shapely / pyproj link the
+# GDAL C library directly via ``gdal-config``, and pinning GDAL at
+# image-build time would get silently re-resolved by the runtime
+# ``pip install -e .`` the compose worker command does next.
 ENV CPLUS_INCLUDE_PATH=/usr/include/gdal
 ENV C_INCLUDE_PATH=/usr/include/gdal
 
@@ -74,8 +78,7 @@ ENV C_INCLUDE_PATH=/usr/include/gdal
 # every flow run hangs in ``Pending`` indefinitely.
 WORKDIR /srv/app/src/datapusher-plus
 COPY requirements.txt /srv/app/src/datapusher-plus/requirements.txt
-RUN pip install --no-cache-dir "GDAL==$(gdal-config --version)" \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # The worker's actual command is provided by docker-compose; this is
 # the default fallback.

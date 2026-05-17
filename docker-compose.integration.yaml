@@ -173,23 +173,50 @@ services:
     #    the integration tests on the host can grab it via
     #    ``docker exec ... cat``.
     # 6. ``ckan run`` foreground (this stays alive).
+    # Outer ``bash -c`` uses SINGLE quotes so the inner script can use
+    # double quotes freely. YAML folded scalar (``>``) collapses newlines
+    # to spaces, which bash treats as statement separators, so the
+    # multi-line shell still parses as one command.
     command: >
-      bash -c "
+      bash -c '
         set -e
         apt-get update -qq && apt-get install -y --no-install-recommends postgresql-client >/dev/null
         pip install -e /srv/app/src/datapusher-plus
         ckan -c /etc/ckan/default/ckan.ini db init
         ckan -c /etc/ckan/default/ckan.ini datastore set-permissions | psql postgresql://postgres:postgres@postgres/postgres
         ckan -c /etc/ckan/default/ckan.ini db upgrade -p datapusher_plus
-        ckan -c /etc/ckan/default/ckan.ini user show admin 2>/dev/null | grep -q 'name=admin' || (
+        if ! ckan -c /etc/ckan/default/ckan.ini user show admin 2>/dev/null | grep -q "name=admin"; then
           echo y | ckan -c /etc/ckan/default/ckan.ini sysadmin add admin password=adminadmin email=admin@test.local
-        )
-        TOKEN=$$(ckan -c /etc/ckan/default/ckan.ini user token add admin integration 2>/dev/null | grep -A 1 'API Token created' | tail -1 | tr -d '[:space:]')
-        ckan -c /etc/ckan/default/ckan.ini config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$$TOKEN"
-        echo -n "$$TOKEN" > /tmp/integration_admin_token
-        echo '--- Integration admin token written to /tmp/integration_admin_token (grab via docker exec) ---'
+        fi
+        # Mint the API token only on first start. Re-running on every
+        # container restart was creating duplicate token rows AND
+        # silently rotating ``api_token`` in the ini under any test
+        # process still holding the previous value (review on PR #300).
+        # ``/tmp/integration_admin_token`` is on the container writable
+        # layer: persists across ``docker compose restart`` but wiped on
+        # ``rm``/``up -d`` after ``down -v``, which is exactly the
+        # behaviour we want.
+        if [ ! -s /tmp/integration_admin_token ]; then
+          # Parse the JWT directly by regex rather than positional grep
+          # so a wording change in ``user token add`` does not silently
+          # leave $$TOKEN empty. Do NOT swallow stderr — a real
+          # failure should surface. ($$ escapes compose env-var
+          # substitution so the literal $ reaches bash.)
+          TOKEN=$$(ckan -c /etc/ckan/default/ckan.ini user token add admin integration \
+                   | grep -Eo "[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+" \
+                   | head -1)
+          if [ -z "$$TOKEN" ]; then
+            echo "FATAL: could not extract API token from ckan user token add output" >&2
+            exit 1
+          fi
+          ckan -c /etc/ckan/default/ckan.ini config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$$TOKEN"
+          printf "%s" "$$TOKEN" > /tmp/integration_admin_token
+          echo "--- Integration admin token written to /tmp/integration_admin_token (grab via docker exec) ---"
+        else
+          echo "--- Reusing existing token from /tmp/integration_admin_token ---"
+        fi
         exec ckan -c /etc/ckan/default/ckan.ini run --host 0.0.0.0 --port 5000
-      "
+      '
 
 volumes:
   integration-postgres:
