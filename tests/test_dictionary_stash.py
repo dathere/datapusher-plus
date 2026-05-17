@@ -136,8 +136,9 @@ def test_save_with_failed_atomic_replace_does_not_leave_corruption(
     stash_module, stash_dir, monkeypatch
 ):
     # If os.replace fails (rare — disk full, permissions), the existing
-    # stash (if any) must remain intact. The new partial file in .tmp
-    # is acceptable collateral; the *real* path must not be touched.
+    # stash (if any) must remain intact AND the .tmp file is cleaned
+    # up so the directory doesn't accumulate leaks across repeated
+    # failed writes (roborev #2222 LOW finding).
     stash_module.save("res-ggg", {"existing": {"label": "keep me"}})
     original_path = stash_dir / "res-ggg.json"
     original_content = original_path.read_text()
@@ -151,6 +152,9 @@ def test_save_with_failed_atomic_replace_does_not_leave_corruption(
 
     # Original stash is intact — the failed write did NOT clobber it.
     assert original_path.read_text() == original_content
+    # And the tempfile was cleaned up, not leaked.
+    leftover_tmps = list(stash_dir.glob("*.tmp"))
+    assert leftover_tmps == [], f"unexpected tempfile leftover: {leftover_tmps}"
 
 
 # ---------------------------------------------------------------------------
@@ -213,8 +217,42 @@ def test_default_stash_dir_falls_back_to_tempfile(monkeypatch):
     import ckan.plugins.toolkit as tk
     from ckanext.datapusher_plus import dictionary_stash
 
-    # Unset the knob if a prior test left one in place.
-    tk.config.pop("ckanext.datapusher_plus.dictionary_stash_dir", None)
+    # Use monkeypatch.delitem (not tk.config.pop) so any prior value
+    # is restored at teardown — pop() would silently swallow it and
+    # create a hidden ordering dependency for subsequent tests
+    # (roborev #2222 LOW finding).
+    monkeypatch.delitem(
+        tk.config,
+        "ckanext.datapusher_plus.dictionary_stash_dir",
+        raising=False,
+    )
 
     path = dictionary_stash.stash_path("res-iii")
     assert path.startswith(os.path.join(tempfile.gettempdir(), "dpp_dict_stash"))
+
+
+def test_load_does_not_create_stash_dir(tmp_path, monkeypatch):
+    # ``load`` and ``clear`` must NOT bootstrap the stash directory —
+    # the flow's success ``finally`` calls ``clear`` unconditionally
+    # and we don't want it to create an empty directory for jobs that
+    # never stashed anything (roborev #2222 LOW finding).
+    pytest.importorskip("ckan")
+    import ckan.plugins.toolkit as tk
+    from ckanext.datapusher_plus import dictionary_stash
+
+    target = tmp_path / "not-yet-created"
+    monkeypatch.setitem(
+        tk.config, "ckanext.datapusher_plus.dictionary_stash_dir", str(target)
+    )
+
+    # load on a missing-stash path → no side effects.
+    assert dictionary_stash.load("res-no-mkdir") is None
+    assert not target.exists()
+
+    # clear on a missing-stash path → no side effects.
+    dictionary_stash.clear("res-no-mkdir")
+    assert not target.exists()
+
+    # Only save bootstraps the directory.
+    dictionary_stash.save("res-mkdir", {"k": {"label": "v"}})
+    assert target.exists()

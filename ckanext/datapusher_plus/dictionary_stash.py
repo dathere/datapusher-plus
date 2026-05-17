@@ -50,22 +50,30 @@ import ckan.plugins.toolkit as tk
 _LOG = logging.getLogger(__name__)
 
 
-def _stash_dir() -> str:
-    """Resolve the stash directory, creating it if missing.
+def _stash_dir(create: bool = False) -> str:
+    """Resolve the stash directory.
 
     Lazy (per-call) rather than module-level so tests can set the config
     via ``ckan.plugins.toolkit.config`` without re-importing the module.
+
+    ``create=True`` is for ``save()`` — the only call site that needs
+    the directory to exist. ``load()`` and ``clear()`` deliberately
+    pass ``create=False`` so they remain side-effect free and so a
+    misconfigured (e.g. unwritable) stash dir cannot crash the flow's
+    ``finally`` cleanup path on a job that never stashed anything.
     """
     configured = tk.config.get("ckanext.datapusher_plus.dictionary_stash_dir")
     base = configured or os.path.join(tempfile.gettempdir(), "dpp_dict_stash")
-    os.makedirs(base, exist_ok=True)
+    if create:
+        os.makedirs(base, exist_ok=True)
     return base
 
 
 def stash_path(resource_id: str) -> str:
     """Return the absolute path to the stash file for ``resource_id``.
 
-    Does not check existence — callers use ``load`` for that.
+    Does not check existence and does not create the stash directory —
+    callers use ``load`` / ``save`` / ``clear`` for I/O.
     """
     if not resource_id:
         raise ValueError("resource_id is required")
@@ -75,7 +83,7 @@ def stash_path(resource_id: str) -> str:
     # an unexpected location.
     if os.sep in resource_id or (os.altsep and os.altsep in resource_id):
         raise ValueError(f"resource_id contains a path separator: {resource_id!r}")
-    return os.path.join(_stash_dir(), f"{resource_id}.json")
+    return os.path.join(_stash_dir(create=False), f"{resource_id}.json")
 
 
 def save(resource_id: str, info_by_field: Dict[str, Dict[str, Any]]) -> None:
@@ -90,15 +98,29 @@ def save(resource_id: str, info_by_field: Dict[str, Dict[str, Any]]) -> None:
     a previous failed run's stash is superseded by the latest attempt's
     snapshot.
     """
+    # ``save`` is the only operation that needs the directory to exist;
+    # ``stash_path`` deliberately does not bootstrap it.
+    _stash_dir(create=True)
     path = stash_path(resource_id)
     # Write to a temp file in the same directory, then rename. atomic on
     # POSIX; on Windows the rename is best-effort but the failure mode
     # (partial JSON on disk) is detected by load() returning None on
     # JSONDecodeError.
     tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(info_by_field, f)
-    os.replace(tmp_path, path)
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(info_by_field, f)
+        os.replace(tmp_path, path)
+    except Exception:
+        # On any failure (disk full / permission / cross-device rename),
+        # remove the half-written tempfile so the stash directory does
+        # not accumulate ``.tmp`` leaks. The original ``path`` is left
+        # untouched — the failed write did not reach the atomic rename.
+        try:
+            os.unlink(tmp_path)
+        except FileNotFoundError:
+            pass
+        raise
     _LOG.debug(
         "dictionary_stash.save: wrote %d field(s) for resource %s to %s",
         len(info_by_field),

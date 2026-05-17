@@ -345,6 +345,34 @@ class AnalysisStage(BaseStage):
             context.existing_info = dict(
                 (f["id"], f["info"]) for f in existing.get("fields", []) if "info" in f
             )
+        else:
+            # Issue #265 — retry-after-failure path. The previous attempt
+            # may have already deleted the datastore resource and stashed
+            # the dictionary to disk before crashing. In that case the
+            # database transaction's ``_rollback_database`` hook never
+            # got a chance to fire (the delete happens *here*, outside
+            # the transaction block). Without this branch, ``existing``
+            # is falsy → ``existing_info`` stays ``None`` → the new
+            # datastore resource gets built with no dictionary → and
+            # the flow's success ``finally`` clears the orphaned stash,
+            # losing the operator's annotations forever.
+            #
+            # If a stash exists for this resource_id with no live
+            # datastore resource, treat it as if the dictionary had
+            # been freshly captured: load it into ``existing_info`` so
+            # the merge logic below applies it onto the new headers,
+            # and re-save (overwriting itself) so the on-disk copy
+            # stays current for any *further* mid-flow failure on this
+            # retry attempt.
+            stashed = dict_stash.load(context.resource_id)
+            if stashed:
+                context.logger.info(
+                    f"Found stashed Data Dictionary for "
+                    f"{context.resource_id} ({len(stashed)} field(s)) "
+                    "with no live datastore resource. Treating as "
+                    "retry-after-failure and restoring."
+                )
+                context.existing_info = stashed
 
         # Override with types from Data Dictionary
         if context.existing_info:
