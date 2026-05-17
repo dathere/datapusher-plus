@@ -1,5 +1,6 @@
 {% import 'macros/form.html' as form %}
 {% include 'scheming/snippets/suggestions_asset.html' %}
+{% include 'scheming/snippets/ai_suggestions_asset.html' %}
 
 {# Check if this is a preformulated field (i.e., has a 'formula') #}
 {% set is_preformulated = h.is_preformulated_field(field) %}
@@ -12,6 +13,7 @@
 {%- if suggestion -%}
 {%- snippet 'scheming/snippets/suggestion_button.html', field=field, data=data -%}
 {%- endif -%}
+{%- snippet 'scheming/snippets/ai_suggestion_field_button.html', field=field, data=data -%}
 {%- if is_preformulated -%}
 <span class="preformulated-icon" title="This field is automatically populated">
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"

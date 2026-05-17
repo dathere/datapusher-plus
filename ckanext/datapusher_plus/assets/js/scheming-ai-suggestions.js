@@ -21,12 +21,22 @@ ckan.module('scheming-ai-suggestions', function($) {
     
     initialize: function() {
       console.log("Initializing scheming-ai-suggestions module");
-      
-      var self = this;
+
       var el = this.el;
       var fieldName = $(el).data('field-name');
+
+      // Bail out for elements without a data-field-name. This module
+      // only knows how to drive per-field AI buttons; a dataset-level
+      // CTA / other element that grabs this module by accident would
+      // otherwise be hidden by the line below (silently breaking it)
+      // and create popovers keyed by 'undefined'. Mirrors the same
+      // guard in scheming-suggestions.js.
+      if (!fieldName) {
+        return;
+      }
+
       var globalState = window._schemingAiSuggestionsGlobalState;
-      
+
       // Hide button initially (will show when suggestions are ready)
       $(el).hide();
       

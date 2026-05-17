@@ -1,3 +1,15 @@
+{#
+  Dataset-level "Get AI Suggestions" CTA — NOT currently included from
+  any active form template. The original PR #253 design imagined this
+  rendering at the top of the scheming form, but the JS module
+  (``scheming-ai-suggestions``) currently only drives per-field
+  buttons (early-returns for elements without ``data-field-name``).
+  Wiring this CTA up needs (a) a dedicated JS module that doesn't
+  hide on init, and (b) a defined click semantic (re-trigger AI
+  generation? toggle field-level visibility? open a summary
+  popover?). Tracked as follow-up; the helper and template are kept
+  intact so a future PR can wire it without re-creating them.
+#}
 {% if h.scheming_has_ai_suggestion_fields(schema) %}
   <div class="ai-suggestions-section">
     <button type="button" class="btn btn-primary ai-suggestions-button" data-module="scheming-ai-suggestions">
