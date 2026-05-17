@@ -44,3 +44,8 @@ tests/static/*.freq.csv
 
 # Cached admin token from scripts/integration-up (never commit secrets)
 .integration-token
+
+# JS test toolchain (Vitest + jsdom) — see tests/js/README.md
+node_modules/
+package-lock.json
+coverage/
