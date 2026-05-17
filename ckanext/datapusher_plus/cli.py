@@ -15,6 +15,14 @@ from ckan.cli import error_shout
 
 if tk.check_ckan_version("2.10"):
     from ckan.types import Context
+else:
+    # ``Context`` is only a typing alias on CKAN 2.10+; on older CKANs
+    # ``cast(Context, ...)`` would NameError because ``cast`` evaluates
+    # its first argument as a name. ``cast`` itself is a runtime no-op
+    # (returns the second arg unchanged), so ``dict`` is a safe stand-in
+    # that keeps both the type-checker happy on 2.10+ and the
+    # interpreter happy on older CKANs.
+    Context = dict
 
 log = logging.getLogger(__name__)
 
@@ -165,7 +173,7 @@ def _submit(
             the list).
     """
     total = len(resources)
-    click.echo(f"Submitting {total} datastore resource(s)")
+    click.echo(f"Submitting {total} resource(s)")
     if total == 0:
         return True
 

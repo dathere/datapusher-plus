@@ -54,8 +54,18 @@ CKAN_INI_IN_CONTAINER = os.environ.get(
 def _docker_compose_available() -> bool:
     """``docker compose`` (v2) is the only invocation form we support;
     skip cleanly otherwise so this file doesn't fail collection on
-    machines without Docker."""
-    return shutil.which("docker") is not None
+    machines without Docker (or with only Compose v1 / ``docker-compose``)."""
+    if shutil.which("docker") is None:
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
 
 
 @pytest.fixture(scope="module")

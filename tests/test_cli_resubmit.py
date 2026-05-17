@@ -2,17 +2,23 @@
 """
 Unit coverage for the resubmit / submit CLI batch-error handling.
 
-Before this refactor, ``_submit`` was a 16-line loop that swallowed every
-exception, printed "OK" or "Fail" per resource, and unconditionally
-exited 0 — making ``ckan datapusher_plus resubmit`` impossible to wire
-into CI / monitoring because a fully-failed batch and a fully-succeeded
-batch were indistinguishable from a shell-exit perspective.
+Before this refactor, ``_submit`` was a 16-line loop with no exception
+isolation: the first resource whose ``datapusher_submit`` raised crashed
+the whole batch (Click surfaced the traceback to the shell), and when
+nothing raised it always exited 0 — even if every resource printed
+"Fail". Both behaviours made ``ckan datapusher_plus resubmit``
+impossible to wire into CI / monitoring: a fully-failed batch (all
+"Fail", no exceptions) and a fully-succeeded batch were
+indistinguishable from a shell-exit perspective, and a transient
+network blip on resource #1 lost every subsequent submission.
 
-The new ``_submit`` returns a bool, and the ``resubmit`` / ``submit``
-commands raise ``click.exceptions.Exit(code=1)`` when any resource
-didn't make it. The unit tests below exercise the bookkeeping in
-``_submit`` directly (so they don't need a full CKAN application
-context) plus the CLI-level exit-code wiring via Click's CliRunner.
+The new ``_submit`` catches per-resource exceptions, sorts each
+resource into ok / fail / errored, and returns ``True`` iff every
+resource ended up in ok. The ``resubmit`` / ``submit`` commands raise
+``click.exceptions.Exit(code=1)`` when any resource didn't make it.
+The unit tests below exercise the bookkeeping in ``_submit`` directly
+(so they don't need a full CKAN application context) plus the
+CLI-level exit-code wiring via Click's CliRunner.
 """
 
 from __future__ import annotations
