@@ -169,14 +169,33 @@ groups:
         description: |
           Path to qsv's ``describegpt`` prompt-file (the same one the
           ``qsv describegpt`` CLI loads via its ``--prompt-file`` flag).
-          Defines the LLM endpoint, model, prompt template, and (if set
-          there) the API key. qsv expects this to be TOML.
+          Defines the LLM endpoint (``base_url``), model, prompt
+          template, output format, timeouts, and language. qsv expects
+          this to be TOML.
 
           Empty (the default) lets qsv use its own discovery — qsv
           looks for ``dp.prompt`` / ``dp_prompt.toml`` next to its
-          binary, then falls back to the ``OPENAI_API_KEY`` env var.
-          We deliberately do NOT proxy the API key through ckan.ini
-          so it stays out of CKAN's config dump.
+          binary, then falls back to the ``QSV_LLM_BASE_URL`` env var.
+
+          For ``format``, set it to ``"JSON"`` in the prompt-file —
+          ``AISuggestionsStage`` parses qsv's structured envelope and
+          a Markdown response would fail JSON parsing (the stage's
+          non-blocking try/except would catch it, but the suggestions
+          would silently never populate).
+
+          API keys are NOT proxied through ckan.ini (would land in
+          CKAN's config dump). Operators have two paths:
+
+          * **Cloud LLM** (OpenAI / OpenRouter / etc.): set
+            ``QSV_LLM_APIKEY`` in the worker container's environment.
+
+          * **Local LLM via container-host hostname** (Ollama on
+            ``host.docker.internal``, LM Studio on
+            ``host.local``, etc.): qsv 20.0.0 treats any non-localhost
+            base URL as "needs auth" and refuses to start without a
+            key. Set ``QSV_LLM_APIKEY=NONE`` in the worker
+            environment — qsv accepts ``NONE`` as the explicit
+            "this is an unauthenticated local endpoint" sentinel.
 
           Only consulted when
           ``ckanext.datapusher_plus.enable_ai_suggestions`` is True.

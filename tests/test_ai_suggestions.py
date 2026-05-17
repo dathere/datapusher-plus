@@ -54,7 +54,13 @@ def _completed(stdout: str = "", returncode: int = 0) -> subprocess.CompletedPro
 
 
 def test_describegpt_default_flags(qsv_command):
-    """Default invocation emits --description --dictionary --tags --json."""
+    """Default invocation emits --description --dictionary --tags --format JSON.
+
+    Regression note: qsv 20.0.0 does NOT have a ``--json`` flag (an
+    earlier draft of this wrapper assumed it did, which caused real
+    invocations to fail with ``Unknown flag: '--json'``). Output
+    format is controlled by ``--format <Markdown|TSV|JSON|TOON>``.
+    """
     with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
         qsv_command.describegpt(input_file="/tmp/sample.csv")
 
@@ -64,7 +70,10 @@ def test_describegpt_default_flags(qsv_command):
     assert "--description" in args
     assert "--dictionary" in args
     assert "--tags" in args
-    assert "--json" in args
+    # JSON output via --format JSON, NOT --json.
+    assert "--format" in args
+    assert args[args.index("--format") + 1] == "JSON"
+    assert "--json" not in args
     assert args[-1] == "/tmp/sample.csv"
 
 
@@ -110,7 +119,9 @@ def test_describegpt_skips_disabled_flags(qsv_command):
     assert "--description" not in args
     assert "--dictionary" not in args
     assert "--tags" not in args
-    assert "--json" not in args
+    # ``json_output=False`` means no ``--format JSON`` — qsv falls
+    # back to its default Markdown report.
+    assert "--format" not in args
 
 
 def test_describegpt_default_timeout_from_config(qsv_command):
@@ -133,6 +144,50 @@ def test_describegpt_explicit_timeout_overrides_config(qsv_command):
         qsv_command.describegpt(input_file="/tmp/sample.csv", timeout=7)
 
     assert run.call_args.kwargs["timeout"] == 7
+
+
+def test_describegpt_api_key_threaded_through(qsv_command):
+    """``--api-key`` lets callers reach a non-localhost LLM endpoint.
+
+    qsv 20.0.0 refuses to start when the resolved base URL doesn't
+    contain ``localhost`` AND no API key is set, with the error
+    ``Neither QSV_LLM_BASE_URL nor QSV_LLM_APIKEY environment
+    variables are set``. For unauthenticated local LLMs reached via
+    container-host hostnames (``host.docker.internal`` etc.) the
+    documented incantation is ``--api-key NONE``.
+    """
+    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+        qsv_command.describegpt(input_file="/tmp/sample.csv", api_key="NONE")
+
+    args = run.call_args[0][0]
+    assert "--api-key" in args
+    assert args[args.index("--api-key") + 1] == "NONE"
+
+
+def test_describegpt_base_url_threaded_through(qsv_command):
+    """``--base-url`` overrides the endpoint without rewriting the prompt-file."""
+    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+        qsv_command.describegpt(
+            input_file="/tmp/sample.csv",
+            base_url="http://host.docker.internal:1234/v1",
+        )
+
+    args = run.call_args[0][0]
+    assert "--base-url" in args
+    assert (
+        args[args.index("--base-url") + 1]
+        == "http://host.docker.internal:1234/v1"
+    )
+
+
+def test_describegpt_optional_flags_omitted_by_default(qsv_command):
+    """``api_key`` / ``base_url`` are None by default — let qsv discover."""
+    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+        qsv_command.describegpt(input_file="/tmp/sample.csv")
+
+    args = run.call_args[0][0]
+    assert "--api-key" not in args
+    assert "--base-url" not in args
 
 
 # ---------------------------------------------------------------------------
@@ -180,24 +235,28 @@ def test_should_not_skip_when_flag_on(stage_cls, context_factory):
 
 
 def test_process_happy_path_persists_suggestions(stage_cls, context_factory):
-    """Successful qsv call + valid JSON → patch_package fires with the
-    reshaped per-field ``{value, source}`` suggestions, plus STATUS=DONE
-    and generated_at bookkeeping. The reshape is the contract with the
-    polling JS in ``scheming-ai-suggestions.js`` — it reads
-    ``ai_suggestions[fieldName].value`` directly via ``package_show``."""
+    """Successful qsv call against the REAL qsv 20.0.0 JSON envelope
+    (captured against LM Studio in ``tests/fixtures/qsv_describegpt_sample.json``)
+    → ``patch_package`` fires with the reshaped per-field
+    ``{value, source}`` suggestions, plus STATUS=DONE and generated_at
+    bookkeeping.
+
+    The fixture is committed verbatim so a future qsv schema change
+    that breaks the reshape gets caught here rather than only in
+    integration. Regenerate via::
+
+        qsv describegpt sample.csv --all --format JSON \\
+            --prompt-file <prompt> > tests/fixtures/qsv_describegpt_sample.json
+    """
+    from pathlib import Path
+
     from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
 
-    qsv_payload = {
-        "description": "A dataset of widgets.",
-        "tags": ["widgets", "production"],
-        "dictionary": [
-            {"field": "sku", "summary": "Stock keeping unit"},
-            {"field": "price", "summary": "Unit price (USD)"},
-        ],
-    }
+    fixture_path = Path(__file__).parent / "fixtures" / "qsv_describegpt_sample.json"
+    qsv_output = fixture_path.read_text()
 
     fake_qsv = mock.Mock()
-    fake_qsv.describegpt.return_value = _completed(json.dumps(qsv_payload))
+    fake_qsv.describegpt.return_value = _completed(qsv_output)
 
     captured = {}
 
@@ -217,26 +276,271 @@ def test_process_happy_path_persists_suggestions(stage_cls, context_factory):
     assert result is ctx, "stage must always return the same context object"
     ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
 
-    # Top-level dataset fields land as {value, source} entries.
-    assert ai["description"] == {
-        "value": "A dataset of widgets.",
-        "source": "qsv describegpt",
-    }
-    # Tags are comma-joined (scheming's tag field accepts that natively).
-    assert ai["tags"] == {
-        "value": "widgets, production",
-        "source": "qsv describegpt",
-    }
-    # Per-column entries flattened from qsv's ``dictionary`` list.
-    assert ai["sku"] == {
-        "value": "Stock keeping unit",
-        "source": "qsv describegpt",
-    }
-    assert ai["price"]["value"] == "Unit price (USD)"
+    # Description.response (Markdown string from qsv) lands at top
+    # level under "description".
+    assert ai["description"]["source"] == "qsv describegpt"
+    assert "Dataset Description" in ai["description"]["value"]
+
+    # Tags.response.tags list → comma-joined string.
+    assert ai["tags"]["source"] == "qsv describegpt"
+    assert ai["tags"]["value"] == (
+        "product, inventory, ecommerce, retail, pricing, "
+        "catalog_data, sku_management, stock_levels"
+    )
+
+    # Dictionary.response.fields → per-column entries keyed by ``name``,
+    # value = LLM-generated ``description``, label folded into source.
+    assert "sku" in ai
+    assert ai["sku"]["source"].startswith("qsv describegpt · ")
+    assert "Stock Keeping Unit" in ai["sku"]["source"]
+    assert "alphanumeric identifier" in ai["sku"]["value"]
+    # All four columns from the widgets.csv fixture are present.
+    for col in ("sku", "name", "price", "quantity_in_stock"):
+        assert col in ai, f"missing per-column entry for {col!r}"
+        assert "value" in ai[col]
 
     # Bookkeeping for the polling JS + audit log.
     assert ai["STATUS"] == "DONE"
     assert "generated_at" in ai
+
+
+def test_process_reshape_handles_partial_envelope(stage_cls, context_factory):
+    """Only Description present → only ``description`` populated; no
+    KeyError when ``Dictionary`` / ``Tags`` are missing entirely."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    partial = {
+        "Description": {"response": "Just a description.", "reasoning": "",
+                        "token_usage": {}},
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(partial))
+
+    captured = {}
+
+    def fake_patch(package):
+        captured["package"] = package
+
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(ai_mod.dsu, "patch_package", side_effect=fake_patch):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    assert ai["description"]["value"] == "Just a description."
+    assert "tags" not in ai
+    # STATUS + generated_at always present.
+    assert ai["STATUS"] == "DONE"
+
+
+def test_process_reshape_skips_column_named_description(stage_cls, context_factory):
+    """A CSV column literally named ``description`` must NOT overwrite the
+    dataset-level Description envelope. Same for ``tags`` / ``STATUS`` /
+    ``generated_at`` (the bookkeeping keys). Regression test for the
+    Medium finding on roborev #2206."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Description": {
+            "response": "Dataset-level description.",
+            "reasoning": "", "token_usage": {},
+        },
+        "Tags": {
+            "response": {"tags": ["dataset", "level"]},
+            "reasoning": "", "token_usage": {},
+        },
+        "Dictionary": {
+            "response": {
+                "fields": [
+                    # Two colliding columns + one good one.
+                    {"name": "description",
+                     "label": "User Notes",
+                     "description": "The notes column from the CSV."},
+                    {"name": "tags",
+                     "label": "Item Tags",
+                     "description": "The per-row tag list."},
+                    {"name": "sku",
+                     "label": "SKU",
+                     "description": "Unique stock keeping unit."},
+                ],
+            },
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+
+    # Dataset-level entries survived intact.
+    assert ai["description"]["value"] == "Dataset-level description."
+    assert ai["tags"]["value"] == "dataset, level"
+
+    # The non-colliding per-column entry came through.
+    assert ai["sku"]["value"] == "Unique stock keeping unit."
+
+    # Bookkeeping still set, despite the column entries that would
+    # have collided.
+    assert ai["STATUS"] == "DONE"
+    assert "generated_at" in ai
+
+
+def test_process_reshape_label_only_marks_source(stage_cls, context_factory):
+    """When a dictionary entry has ``label`` but no ``description``, the
+    label is surfaced as the value AND ``source`` carries a marker so
+    operators know they're seeing a label, not a description."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Dictionary": {
+            "response": {
+                "fields": [
+                    {"name": "sku", "label": "SKU"},  # no description
+                ],
+            },
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    assert ai["sku"]["value"] == "SKU"
+    assert "(label only)" in ai["sku"]["source"]
+
+
+def test_process_reshape_filters_tags_with_commas(stage_cls, context_factory):
+    """Tags containing literal commas would be split by scheming's
+    parser. Filter them out and keep the comma-free tags."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Tags": {
+            "response": {
+                "tags": ["clean_tag", "retail, b2b", "another_clean"],
+            },
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    # Comma-containing tag dropped, others survived.
+    assert ai["tags"]["value"] == "clean_tag, another_clean"
+
+
+def test_process_reshape_filters_all_tags_with_commas_drops_field(stage_cls, context_factory):
+    """If ALL tags contain commas, the tags entry isn't written
+    (vs. an empty-string entry that would render badly in the UI)."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Tags": {
+            "response": {"tags": ["one, two", "three, four"]},
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    assert "tags" not in ai
+
+
+def test_describegpt_empty_api_key_passes_through(qsv_command):
+    """``api_key=""`` is unusual but the docstring contract is
+    ``None`` ⇒ omit, anything else ⇒ pass through. ``""`` should
+    not be silently dropped."""
+    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+        qsv_command.describegpt(input_file="/tmp/sample.csv", api_key="")
+
+    args = run.call_args[0][0]
+    assert "--api-key" in args
+    assert args[args.index("--api-key") + 1] == ""
+
+
+def test_process_reshape_skips_unknown_envelope_keys(stage_cls, context_factory):
+    """Top-level keys other than Description/Tags/Dictionary are ignored
+    (forward-compat: future qsv versions may add new sections)."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    forward_compat = {
+        "Description": {"response": "Hi.", "reasoning": "", "token_usage": {}},
+        "FutureSection": {"response": "Surprise!"},  # qsv 21.x hypothetical
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(forward_compat))
+
+    captured = {}
+
+    def fake_patch(package):
+        captured["package"] = package
+
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(ai_mod.dsu, "patch_package", side_effect=fake_patch):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    # Description handled.
+    assert ai["description"]["value"] == "Hi."
+    # Unknown key ignored, not crashed on.
+    assert "FutureSection" not in ai
 
 
 # ---------------------------------------------------------------------------
