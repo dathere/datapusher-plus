@@ -44,3 +44,11 @@ tests/static/*.freq.csv
 
 # Cached admin token from scripts/integration-up (never commit secrets)
 .integration-token
+
+# JS test toolchain (Vitest + jsdom) — see tests/js/README.md
+node_modules/
+coverage/
+# NOTE: package-lock.json is committed (private test-harness; we want
+# dev + CI to install identical transitive versions of jsdom / vitest /
+# jquery so test behavior is reproducible). Standard npm practice for
+# applications and test harnesses vs. published libraries.

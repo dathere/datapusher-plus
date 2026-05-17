@@ -139,7 +139,23 @@ ckan.module('scheming-ai-suggestions', function($) {
               self._showAiSuggestionButtons(dppSuggestionsData.ai_suggestions);
               
               // Check if processing is complete
-              var currentStatus = dppSuggestionsData.STATUS ? dppSuggestionsData.STATUS.toUpperCase() : null;
+              // STATUS lives inside ai_suggestions (where AISuggestionsStage
+              // writes it), not at the top-level dpp_suggestions where
+              // FormulaStage writes its own STATUS. Reading at the
+              // wrong level would leave polling running until
+              // maxPollAttempts even after suggestions are ready,
+              // burning ~100s of redundant package_show calls. Falls
+              // back to the top-level value too, for forward-compat
+              // with custom plugins that mirror the legacy convention.
+              //
+              // Uses `?? ` (nullish-coalesce) rather than `||` so an
+              // empty-string `ai_suggestions.STATUS` is treated as
+              // "intentionally empty — keep polling" rather than
+              // silently falling through to the legacy top-level
+              // STATUS.
+              var aiStatus = dppSuggestionsData.ai_suggestions && dppSuggestionsData.ai_suggestions.STATUS;
+              var currentStatus = (aiStatus !== undefined && aiStatus !== null) ? aiStatus : dppSuggestionsData.STATUS;
+              currentStatus = currentStatus ? currentStatus.toUpperCase() : null;
               
               if (currentStatus && self.options.terminalStatuses.includes(currentStatus)) {
                 console.log("AI Suggestions: Processing complete with status " + currentStatus);
@@ -191,7 +207,9 @@ ckan.module('scheming-ai-suggestions', function($) {
 });
 
 // Add direct click handling outside of the module for buttons that might not have been initialized
-$(document).ready(function() {
+// ``$(handler)`` is the jQuery 3.0+ idiom; ``$(document).ready(handler)``
+// works but is deprecated.
+$(function() {
   console.log("Document ready - initializing AI suggestions click handlers");
   
   // Direct click handler for all AI suggestion buttons

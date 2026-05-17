@@ -1,0 +1,14 @@
+{
+  "name": "datapusher-plus-js-tests",
+  "private": true,
+  "description": "JS unit tests for the scheming-ai-suggestions module that ships with ckanext-datapusher-plus. Not a published package — exists solely so `npm test` (Vitest + jsdom) can pin the polling JS contract that the Python pipeline writes to.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "jquery": "^3.7.1",
+    "jsdom": "^25.0.0",
+    "vitest": "^2.1.0"
+  }
+}
