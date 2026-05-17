@@ -59,11 +59,15 @@ helpers:
 scripts/integration-up
 
 # After ``up``, the admin token is in ./.integration-token (gitignored).
-# Run the integration tests:
-INTEGRATION=1 \
-  CKAN_URL=http://localhost:5050 \
-  CKAN_API_KEY=$(cat .integration-token) \
+# Run the integration tests — conftest reads .integration-token
+# automatically when CKAN_API_KEY is unset, so the JWT stays out of
+# the process command line (where ``ps -ef`` would otherwise expose
+# it on a shared box).
+INTEGRATION=1 CKAN_URL=http://localhost:5050 \
   pytest tests/integration/ -v
+
+# CI / explicit-override path:
+# INTEGRATION=1 CKAN_URL=http://localhost:5050 CKAN_API_KEY=<token> pytest …
 
 # Done for now? Two choices:
 scripts/integration-down            # keep postgres volume (warm restart later)
@@ -103,7 +107,10 @@ TOKEN=$(docker exec datapusher-plus-ckan-1 cat /tmp/integration_admin_token)
 docker exec datapusher-plus-ckan-1 \
     ckan -c /etc/ckan/default/ckan.ini datapusher_plus prefect-deploy
 
-# 5. Run the integration tests
+# 5. Run the integration tests (CKAN_API_KEY env var keeps the JWT
+#    out of the shell history; for an even stricter pattern see the
+#    "Developer workflow" recommendation above, which reads the token
+#    from .integration-token via conftest).
 INTEGRATION=1 CKAN_URL=http://localhost:5050 CKAN_API_KEY=$TOKEN \
     pytest tests/integration/ -v
 
@@ -123,7 +130,7 @@ docker compose -f docker-compose.integration.yaml down -v
 | `INTEGRATION` | _(unset)_ | Set to `1` to opt into integration tests. |
 | `CKAN_URL` | `http://localhost:5000` | Where CKAN listens (set to `http://localhost:5050` if you used the helper-script default). |
 | `PREFECT_URL` | `http://localhost:4200` | Where the Prefect API listens. |
-| `CKAN_API_KEY` | _(required)_ | Token for a sysadmin user. After `scripts/integration-up`, this is `$(cat .integration-token)`. |
+| `CKAN_API_KEY` | _(optional)_ | Sysadmin token. When unset, conftest reads `./.integration-token` (written by `scripts/integration-up`). Setting the env var explicitly is the CI / override path. |
 
 ### Stack-side (override the published host ports)
 

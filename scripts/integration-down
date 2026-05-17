@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# --- help-start ---
 #
 # Tear down the DataPusher+ integration stack.
 #
@@ -13,6 +14,8 @@
 #                                       # (~5–8 min on emulated x86).
 #
 # Run from the repo root.
+#
+# --- help-end ---
 
 set -euo pipefail
 
@@ -31,14 +34,23 @@ export PREFECT_HOST_PORT="${PREFECT_HOST_PORT:-4200}"
 export SOLR_HOST_PORT="${SOLR_HOST_PORT:-8983}"
 export REDIS_HOST_PORT="${REDIS_HOST_PORT:-6379}"
 
+# Sentinel-delimited help so growing the header comment doesn't break
+# --help (matches integration-up's pattern; replaces the old
+# fixed-line-range ``sed -n '3,18p'`` which silently rotted as the
+# block grew). awk for BSD-sed compatibility on macOS.
+usage() {
+    awk '
+        /^# --- help-start ---/ { in_block = 1; next }
+        /^# --- help-end ---/   { in_block = 0 }
+        in_block { sub(/^# ?/, ""); print }
+    ' "$0"
+}
+
 WIPE=0
 for arg in "$@"; do
     case "$arg" in
-        --wipe) WIPE=1 ;;
-        -h|--help)
-            sed -n '3,18p' "$0"
-            exit 0
-            ;;
+        --wipe)    WIPE=1 ;;
+        -h|--help) usage; exit 0 ;;
         *)
             echo "unknown option: $arg" >&2
             exit 2
@@ -48,6 +60,7 @@ done
 
 info() { printf '\033[36m→\033[0m %s\n' "$*"; }
 ok()   { printf '\033[32m✓\033[0m %s\n' "$*"; }
+err()  { printf '\033[31m✗\033[0m %s\n' "$*" >&2; }
 
 if [ "$WIPE" = "1" ]; then
     info "Tearing down stack AND wiping volumes (cold start next time)…"
@@ -70,11 +83,20 @@ fi
 #
 # We use sed instead of ``git checkout`` so unrelated edits the
 # developer may have made to the ini (toggling a config option for a
-# repro, etc.) are preserved.
+# repro, etc.) are preserved. Regex tolerates optional whitespace
+# either side of ``=`` so a future ``config-tool`` formatting change
+# (currently writes ``key=value`` with no spaces, but the format isn't
+# guaranteed) doesn't silently leave the secret in place. A post-strip
+# ``grep -Eq`` makes any regex miss fail loudly.
 INI="$REPO_ROOT/tests/integration/ckan.ini"
-if [ -f "$INI" ] && grep -q '^ckanext\.datapusher_plus\.api_token=' "$INI"; then
-    sed -i.bak '/^ckanext\.datapusher_plus\.api_token=/d' "$INI"
+TOKEN_KEY_RE='^[[:space:]]*ckanext\.datapusher_plus\.api_token[[:space:]]*='
+if [ -f "$INI" ] && grep -Eq "$TOKEN_KEY_RE" "$INI"; then
+    sed -i.bak -E "/$TOKEN_KEY_RE/d" "$INI"
     rm -f "$INI.bak"
+    if grep -Eq "$TOKEN_KEY_RE" "$INI"; then
+        err "BUG: api_token line still present in $INI after strip — verify the regex by hand."
+        exit 1
+    fi
     ok "Stripped runtime-injected api_token from $INI."
 fi
 
