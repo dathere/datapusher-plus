@@ -835,7 +835,24 @@ def _rollback_database(txn) -> None:
     if not stashed:
         return
     try:
-        fields = [{"id": fid, "info": info} for fid, info in stashed.items()]
+        # Derive each field's Postgres ``type`` from the stashed
+        # ``info["type_override"]`` (mapped through ``conf.TYPE_MAPPING``
+        # values, e.g. ``numeric`` / ``timestamp`` / ``text``). This
+        # mirrors the analysis stage's ``_build_headers_dicts`` merge:
+        # otherwise CKAN's ``datastore_create`` falls back to ``text``
+        # for every column, and a column the operator originally
+        # annotated as numeric or timestamp would be restored as text —
+        # silently inconsistent with the stashed dictionary's intent.
+        valid_types = set(conf.TYPE_MAPPING.values())
+        fields = []
+        for fid, info in stashed.items():
+            field: Dict[str, Any] = {"id": fid, "info": info}
+            type_override = (info or {}).get("type_override")
+            if type_override in valid_types:
+                field["type"] = type_override
+            else:
+                field["type"] = "text"
+            fields.append(field)
         dsu.send_resource_to_datastore(
             resource=None,
             resource_id=resource_id,

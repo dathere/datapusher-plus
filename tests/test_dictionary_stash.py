@@ -417,3 +417,98 @@ def test_retry_restore_does_not_fire_when_live_datastore_exists(
 
     # The live datastore's info won, not the stale stash.
     assert context.existing_info == {"name": live_info}
+
+
+# ---------------------------------------------------------------------------
+# _rollback_database type-mapping (Copilot #307 finding)
+# ---------------------------------------------------------------------------
+
+
+def test_rollback_restore_derives_field_type_from_type_override(
+    stash_module, tmp_path, monkeypatch
+):
+    # Copilot #307: every other call site to ``send_resource_to_datastore``
+    # in this codebase passes headers with ``id``, ``type``, AND ``info``.
+    # If the rollback's restore omits ``type``, CKAN's ``datastore_create``
+    # falls back to ``text`` for every column — a column the operator
+    # originally annotated ``numeric`` or ``timestamp`` would be silently
+    # restored as ``text``. The rollback hook now derives ``type`` from
+    # each stashed entry's ``info["type_override"]`` so the rebuilt
+    # zero-row resource matches the dictionary's declared types.
+    pytest.importorskip("ckan")
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    resource_id = "res-rollback-types"
+    stashed = {
+        "name": {"label": "Name", "type_override": "text"},
+        "qty": {"label": "Quantity", "type_override": "numeric"},
+        "when": {"label": "Created at", "type_override": "timestamp"},
+        "blob": {"label": "Untyped"},  # no type_override → text fallback
+    }
+    stash_module.save(resource_id, stashed)
+
+    # Stub the runtime + dsu so the rollback runs in isolation. We only
+    # care that ``send_resource_to_datastore`` is called with the right
+    # ``headers`` shape, not that any real CKAN action fires.
+    runtime = SimpleNamespace(resource_id=resource_id, logger=mock.Mock())
+    monkeypatch.setattr(prefect_flow, "_runtime_or_none", lambda: runtime)
+    monkeypatch.setattr(
+        prefect_flow.dsu, "delete_datastore_resource", lambda rid: None
+    )
+    captured = {}
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return {}
+    monkeypatch.setattr(prefect_flow.dsu, "send_resource_to_datastore", _capture)
+
+    prefect_flow._rollback_database(txn=None)
+
+    # Headers were assembled with type derived from type_override.
+    by_id = {h["id"]: h for h in captured["headers"]}
+    assert by_id["name"]["type"] == "text"
+    assert by_id["qty"]["type"] == "numeric"
+    assert by_id["when"]["type"] == "timestamp"
+    # No type_override → safe text fallback (not omitted).
+    assert by_id["blob"]["type"] == "text"
+    # All entries still carry their info dict.
+    assert by_id["qty"]["info"]["type_override"] == "numeric"
+
+
+def test_rollback_restore_ignores_unknown_type_override(
+    stash_module, tmp_path, monkeypatch
+):
+    # Defensive: if a stash has a ``type_override`` that isn't in
+    # ``TYPE_MAPPING.values()`` (corruption / older format / future
+    # type we don't know about), fall back to ``text`` rather than
+    # passing an unknown type through to ``datastore_create``.
+    pytest.importorskip("ckan")
+    from types import SimpleNamespace
+    from unittest import mock
+
+    from ckanext.datapusher_plus.jobs import prefect_flow
+
+    resource_id = "res-rollback-unknown-type"
+    stash_module.save(
+        resource_id,
+        {"weird": {"label": "Weird", "type_override": "not-a-real-pg-type"}},
+    )
+
+    runtime = SimpleNamespace(resource_id=resource_id, logger=mock.Mock())
+    monkeypatch.setattr(prefect_flow, "_runtime_or_none", lambda: runtime)
+    monkeypatch.setattr(
+        prefect_flow.dsu, "delete_datastore_resource", lambda rid: None
+    )
+    captured = {}
+    monkeypatch.setattr(
+        prefect_flow.dsu,
+        "send_resource_to_datastore",
+        lambda **kwargs: captured.update(kwargs) or {},
+    )
+
+    prefect_flow._rollback_database(txn=None)
+
+    by_id = {h["id"]: h for h in captured["headers"]}
+    assert by_id["weird"]["type"] == "text"
