@@ -28,6 +28,19 @@ from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.qsv_utils import QSVCommand
 
 
+# Keys that the dataset-level / bookkeeping entries occupy in the
+# on-disk ``ai_suggestions`` map. Per-column entries from
+# ``Dictionary.response.fields`` are skipped when their ``name``
+# collides with one of these — otherwise a CSV with a column literally
+# named ``description`` / ``tags`` would silently overwrite the
+# dataset-level Description / Tags envelopes, and a column named
+# ``STATUS`` would break the polling-termination signal the JS reads.
+# Skipping (rather than nesting per-column entries under a sub-key)
+# preserves the flat-map contract the polling JS depends on
+# (``Object.keys(aiSuggestions).forEach`` → ``[data-field-name=X]``).
+_RESERVED_AI_KEYS = frozenset({"description", "tags", "STATUS", "generated_at"})
+
+
 class AISuggestionsStage(BaseStage):
     """
     Generate AI-assisted metadata suggestions via ``qsv describegpt``.
@@ -301,10 +314,18 @@ class AISuggestionsStage(BaseStage):
           scheming markdown form snippet handles natively).
         * ``Tags.response.tags`` → top-level ``tags`` (comma-joined).
           scheming's tag field accepts a comma-joined string natively.
+          Tags containing literal commas are filtered out with a
+          warning — they'd be split into multiple tags by scheming's
+          parser, silently corrupting the dataset.
         * ``Dictionary.response.fields[i]`` → per-column entry keyed
           by ``name``. The value is the LLM-generated ``description``;
           ``label`` is folded into ``source`` so reviewers see both
-          when they hover the popover.
+          when they hover the popover. Per-column entries whose
+          ``name`` collides with a reserved key (``description``,
+          ``tags``, ``STATUS``, ``generated_at``) are skipped with a
+          warning — otherwise they'd silently overwrite the
+          dataset-level Description / Tags entries or the
+          polling-termination ``STATUS`` signal.
 
         Done in the stage (rather than letting the helpers cope with
         both shapes) so the on-disk schema is uniform — the existing
@@ -337,10 +358,30 @@ class AISuggestionsStage(BaseStage):
                 # Some prompt-file variants might emit the list directly.
                 tags_list = tags_response
             if isinstance(tags_list, list) and tags_list:
-                out["tags"] = {
-                    "value": ", ".join(str(t) for t in tags_list),
-                    "source": base_source,
-                }
+                # Filter out tags containing commas — scheming's tag
+                # field uses comma as the separator, so a tag like
+                # ``"retail, b2b"`` would be silently split into two
+                # tags by downstream parsers.
+                safe_tags: list = []
+                for raw in tags_list:
+                    s = str(raw)
+                    if "," in s:
+                        # Best-effort: warn via the module logger so
+                        # operators can find it in worker logs without
+                        # us needing a context handle here.
+                        import logging
+                        logging.getLogger(__name__).warning(
+                            "Skipping qsv describegpt tag %r — contains a comma "
+                            "which scheming's tag field would split into multiple tags",
+                            s,
+                        )
+                        continue
+                    safe_tags.append(s)
+                if safe_tags:
+                    out["tags"] = {
+                        "value": ", ".join(safe_tags),
+                        "source": base_source,
+                    }
 
         # ---- Dictionary (per-column entries) ----
         dict_envelope = suggestions.get("Dictionary")
@@ -355,18 +396,37 @@ class AISuggestionsStage(BaseStage):
                         name = entry.get("name")
                         if not name:
                             continue
-                        value = entry.get("description") or entry.get("label")
-                        if not value:
+                        if name in _RESERVED_AI_KEYS:
+                            # Don't overwrite dataset-level / bookkeeping
+                            # entries with a per-column entry sharing
+                            # the same name.
+                            import logging
+                            logging.getLogger(__name__).warning(
+                                "Skipping per-column AI suggestion for %r — "
+                                "name collides with reserved dataset-level / "
+                                "bookkeeping key",
+                                name,
+                            )
                             continue
-                        # Fold the LLM-generated label into ``source``
-                        # so the popover surfaces both. When the label
-                        # is missing or identical to the value, just
-                        # use the base source.
+                        # ``description`` is the canonical LLM-generated
+                        # narrative; ``label`` is a shorter human-friendly
+                        # heading. Prefer description; fall back to
+                        # label with a marker in source so operators
+                        # know the popover is showing a label rather
+                        # than a description.
+                        description = entry.get("description")
                         label = entry.get("label")
-                        if label and label != value:
-                            source = f"{base_source} · {label}"
+                        if description:
+                            value = description
+                            if label and label != value:
+                                source = f"{base_source} · {label}"
+                            else:
+                                source = base_source
+                        elif label:
+                            value = label
+                            source = f"{base_source} (label only)"
                         else:
-                            source = base_source
+                            continue
                         out[name] = {"value": value, "source": source}
 
         return out

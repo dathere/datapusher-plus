@@ -752,9 +752,15 @@ class QSVCommand:
             args.extend(["--prompt-file", prompt_file])
         if output_file:
             args.extend(["--output", output_file])
-        if api_key:
+        # Use ``is not None`` rather than truthiness so an explicit
+        # empty string isn't silently dropped — the docstring says
+        # ``None`` is the documented "omit" sentinel, so anything else
+        # (including ``""``) should pass through. In practice ``""``
+        # is nonsensical for these flags, but matching the documented
+        # contract keeps the wrapper predictable.
+        if api_key is not None:
             args.extend(["--api-key", api_key])
-        if base_url:
+        if base_url is not None:
             args.extend(["--base-url", base_url])
 
         args.append(input_file)

@@ -336,6 +336,181 @@ def test_process_reshape_handles_partial_envelope(stage_cls, context_factory):
     assert ai["STATUS"] == "DONE"
 
 
+def test_process_reshape_skips_column_named_description(stage_cls, context_factory):
+    """A CSV column literally named ``description`` must NOT overwrite the
+    dataset-level Description envelope. Same for ``tags`` / ``STATUS`` /
+    ``generated_at`` (the bookkeeping keys). Regression test for the
+    Medium finding on roborev #2206."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Description": {
+            "response": "Dataset-level description.",
+            "reasoning": "", "token_usage": {},
+        },
+        "Tags": {
+            "response": {"tags": ["dataset", "level"]},
+            "reasoning": "", "token_usage": {},
+        },
+        "Dictionary": {
+            "response": {
+                "fields": [
+                    # Two colliding columns + one good one.
+                    {"name": "description",
+                     "label": "User Notes",
+                     "description": "The notes column from the CSV."},
+                    {"name": "tags",
+                     "label": "Item Tags",
+                     "description": "The per-row tag list."},
+                    {"name": "sku",
+                     "label": "SKU",
+                     "description": "Unique stock keeping unit."},
+                ],
+            },
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+
+    # Dataset-level entries survived intact.
+    assert ai["description"]["value"] == "Dataset-level description."
+    assert ai["tags"]["value"] == "dataset, level"
+
+    # The non-colliding per-column entry came through.
+    assert ai["sku"]["value"] == "Unique stock keeping unit."
+
+    # Bookkeeping still set, despite the column entries that would
+    # have collided.
+    assert ai["STATUS"] == "DONE"
+    assert "generated_at" in ai
+
+
+def test_process_reshape_label_only_marks_source(stage_cls, context_factory):
+    """When a dictionary entry has ``label`` but no ``description``, the
+    label is surfaced as the value AND ``source`` carries a marker so
+    operators know they're seeing a label, not a description."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Dictionary": {
+            "response": {
+                "fields": [
+                    {"name": "sku", "label": "SKU"},  # no description
+                ],
+            },
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    assert ai["sku"]["value"] == "SKU"
+    assert "(label only)" in ai["sku"]["source"]
+
+
+def test_process_reshape_filters_tags_with_commas(stage_cls, context_factory):
+    """Tags containing literal commas would be split by scheming's
+    parser. Filter them out and keep the comma-free tags."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Tags": {
+            "response": {
+                "tags": ["clean_tag", "retail, b2b", "another_clean"],
+            },
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    # Comma-containing tag dropped, others survived.
+    assert ai["tags"]["value"] == "clean_tag, another_clean"
+
+
+def test_process_reshape_filters_all_tags_with_commas_drops_field(stage_cls, context_factory):
+    """If ALL tags contain commas, the tags entry isn't written
+    (vs. an empty-string entry that would render badly in the UI)."""
+    from ckanext.datapusher_plus.jobs.stages import ai_suggestions as ai_mod
+
+    envelope = {
+        "Tags": {
+            "response": {"tags": ["one, two", "three, four"]},
+            "reasoning": "", "token_usage": {},
+        },
+    }
+    fake_qsv = mock.Mock()
+    fake_qsv.describegpt.return_value = _completed(json.dumps(envelope))
+
+    captured = {}
+    with mock.patch.object(ai_mod, "QSVCommand", return_value=fake_qsv), \
+         mock.patch.object(
+             ai_mod.dsu, "get_scheming_yaml",
+             return_value=({}, {"id": "pkg-1"}),
+         ), \
+         mock.patch.object(
+             ai_mod.dsu, "patch_package",
+             side_effect=lambda pkg: captured.update(package=pkg),
+         ):
+        stage_cls().process(context_factory())
+
+    ai = captured["package"]["dpp_suggestions"]["ai_suggestions"]
+    assert "tags" not in ai
+
+
+def test_describegpt_empty_api_key_passes_through(qsv_command):
+    """``api_key=""`` is unusual but the docstring contract is
+    ``None`` ⇒ omit, anything else ⇒ pass through. ``""`` should
+    not be silently dropped."""
+    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+        qsv_command.describegpt(input_file="/tmp/sample.csv", api_key="")
+
+    args = run.call_args[0][0]
+    assert "--api-key" in args
+    assert args[args.index("--api-key") + 1] == ""
+
+
 def test_process_reshape_skips_unknown_envelope_keys(stage_cls, context_factory):
     """Top-level keys other than Description/Tags/Dictionary are ignored
     (forward-compat: future qsv versions may add new sections)."""
