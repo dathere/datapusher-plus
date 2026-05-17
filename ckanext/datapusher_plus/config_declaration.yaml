@@ -141,6 +141,57 @@ groups:
           resources already get this from FormatConverterStage; this
           flag only governs the CSV path.
 
+      - key: ckanext.datapusher_plus.enable_ai_suggestions
+        type: bool
+        editable: true
+        default: false
+        description: |
+          Opt-in flag for the AISuggestionsStage. When True, after the
+          AnalysisStage produces stats / frequency caches, DP+ shells
+          out to ``qsv describegpt --description --dictionary --tags
+          --json`` and stores the returned description / tags /
+          dictionary under ``package["dpp_suggestions"]["ai_suggestions"]``
+          for scheming form helpers to surface.
+
+          Off by default because the LLM round-trip needs an
+          OpenAI-compatible endpoint that the operator must configure
+          (Ollama, OpenRouter, OpenAI, vLLM, …) and would otherwise
+          burn API budget / wall-clock seconds on every push.
+
+          Stage failures (endpoint unreachable, qsv timeout, malformed
+          JSON, …) are non-blocking — the rest of the pipeline still
+          completes successfully and the suggestions key is simply
+          absent.
+
+      - key: ckanext.datapusher_plus.describegpt_config_path
+        editable: true
+        default: ""
+        description: |
+          Path to qsv's ``describegpt`` config file (the same one the
+          ``qsv describegpt`` CLI looks for). Defines the LLM endpoint,
+          model, prompt template, and (if set there) the API key.
+
+          Empty (the default) lets qsv use its own discovery — typically
+          ``~/.qsv/describegpt.json`` plus the ``OPENAI_API_KEY``
+          environment variable. We deliberately do NOT proxy the API
+          key through ckan.ini so it stays out of CKAN's config dump.
+
+          Only consulted when
+          ``ckanext.datapusher_plus.enable_ai_suggestions`` is True.
+
+      - key: ckanext.datapusher_plus.describegpt_timeout_seconds
+        type: int
+        editable: true
+        default: 120
+        description: |
+          Per-invocation timeout for the ``qsv describegpt`` subprocess
+          call, in seconds. A hung LLM endpoint hits this rather than
+          ``QSV_COMMAND_TIMEOUT`` (default 1800s), keeping a stuck
+          describegpt from delaying the rest of the pipeline.
+
+          Only consulted when
+          ``ckanext.datapusher_plus.enable_ai_suggestions`` is True.
+
       - key: ckanext.datapusher_plus.sort_and_dupe_check
         type: bool
         editable: true

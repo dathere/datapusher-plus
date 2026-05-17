@@ -209,6 +209,7 @@ from ckanext.datapusher_plus.jobs.runtime_context import (
     reset_runtime_context,
     set_runtime_context,
 )
+from ckanext.datapusher_plus.jobs.stages.ai_suggestions import AISuggestionsStage
 from ckanext.datapusher_plus.jobs.stages.analysis import AnalysisStage
 from ckanext.datapusher_plus.jobs.stages.database import DatabaseStage
 from ckanext.datapusher_plus.jobs.stages.download import DownloadStage
@@ -653,6 +654,40 @@ def analyze_task(prev: ValidateResult) -> AnalyzeResult:
             ctx.tmp, ctx.file_hash, "analyze", "csv"
         ),
     )
+
+
+
+@task(
+    name="ai_suggestions",
+    # No retries: the stage is non-blocking by design and swallows all
+    # of its own failures. A Prefect-level retry would just duplicate
+    # the LLM call (and potentially the API spend) for no benefit —
+    # the stage has already decided "skip, move on".
+    retries=0,
+    tags=["datapusher-plus", "ai", "external-api"],
+    # Persisted for observability (the latest stdout / logs are visible
+    # on the Prefect flow-run page) but NOT cached: an LLM call is
+    # non-deterministic, so caching its result by input content would
+    # hide what the operator presumably wants to re-run.
+    persist_result=True,
+    result_storage=DEFAULT_RESULT_STORAGE,
+)
+def ai_suggestions_task(prev: AnalyzeResult) -> AnalyzeResult:
+    """Optional qsv describegpt round-trip → package.dpp_suggestions.ai_suggestions.
+
+    Returns ``prev`` unchanged so downstream tasks (``database_task``,
+    ``indexing_task``, ``formula_task``, ``metadata_task``) see exactly
+    the ``AnalyzeResult`` they would have without this stage — the AI
+    stage's only output is the side-effect ``patch_package`` call.
+
+    Sequencing AI between analyze and the database transaction (rather
+    than emitting it as a fire-and-forget sibling) keeps the LLM round-
+    trip from racing the datastore writes: any errors there happen
+    before TRUNCATE+COPY runs, and operator-visible flow timing reflects
+    AI latency as part of the run, not silently in the background.
+    """
+    _stage_run(AISuggestionsStage(), prev)
+    return prev
 
 
 @task(
@@ -1192,6 +1227,17 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
             cv = format_convert_task(dl)
             vl = validate_task(cv)
             an = analyze_task(vl)
+            _check_deadline()
+
+            # Optional AI suggestions, before the database transaction
+            # so a (rare) failure to patch the package can't poison the
+            # @on_rollback hooks below. The stage is gated on
+            # ``ckanext.datapusher_plus.enable_ai_suggestions`` (default
+            # False) and swallows every internal failure, so when the
+            # flag is off this is a near-zero-cost no-op, and when it's
+            # on the worst case is a logged warning and an unchanged
+            # ``AnalyzeResult`` passed through.
+            an = ai_suggestions_task(an)
             _check_deadline()
 
             # Human-in-the-loop gate. When PII screening flags more

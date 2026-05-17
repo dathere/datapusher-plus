@@ -216,6 +216,36 @@ AUTO_CSV_SPATIAL_EXTENT = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_csv_spatial_extent", True)
 )
 
+# AI suggestions via ``qsv describegpt``.
+#
+# Opt-in by design: ``ENABLE_AI_SUGGESTIONS`` defaults to False because
+# the LLM call requires an OpenAI-compatible endpoint that the operator
+# has to bring (Ollama, OpenRouter, OpenAI, vLLM, etc.) AND because
+# every push of every resource would otherwise burn API budget /
+# inference time / wall-clock seconds without consent.
+#
+# When enabled, the ``AISuggestionsStage`` shells out to
+# ``qsv describegpt --description --dictionary --tags --json`` with the
+# cached stats + frequency files from ``AnalysisStage``. The LLM
+# endpoint, model, prompt, and API key all live in qsv's own config
+# file (pointed at by ``DESCRIBEGPT_CONFIG_PATH``) or qsv's environment
+# (``OPENAI_API_KEY``) — we deliberately do NOT proxy any of that
+# through ckan.ini, both because it's qsv's surface and to keep
+# secrets out of CKAN's config dump.
+#
+# Stage failure is non-blocking by design (try/except in the stage,
+# never raises) — an LLM-endpoint outage must not gate datastore
+# ingestion.
+ENABLE_AI_SUGGESTIONS = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.enable_ai_suggestions", False)
+)
+DESCRIBEGPT_CONFIG_PATH = tk.config.get(
+    "ckanext.datapusher_plus.describegpt_config_path", ""
+)
+DESCRIBEGPT_TIMEOUT_SECONDS = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.describegpt_timeout_seconds", "120")
+)
+
 # Jinja2 bytecode cache settings
 JINJA2_BYTECODE_CACHE_DIR = tk.config.get(
     "ckanext.datapusher_plus.jinja2_bytecode_cache_dir", "/tmp/jinja2_bytecode_cache"

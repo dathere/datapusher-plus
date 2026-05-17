@@ -583,6 +583,80 @@ def scheming_get_suggestion_value(field_name, data=None, errors=None, lang=None)
         logger.warning(f"Error getting suggestion value: {e}")
         return ''
 
+
+
+def scheming_get_ai_suggestion(field_name, data=None, errors=None, lang=None):
+    """
+    Return an AI-derived suggestion for ``field_name`` from
+    ``package["dpp_suggestions"]["ai_suggestions"]``, or ``""`` when
+    none is available.
+
+    Parallel to ``scheming_get_suggestion_value`` (which reads from the
+    formula-derived ``dpp_suggestions["package"]`` sub-key). The two
+    namespaces co-exist on purpose: a formula-driven suggestion is
+    typically deterministic per-resource (and may be the operator's
+    "authoritative" suggestion), while an AI-derived one is
+    probabilistic and operator-reviewed. Keeping them in separate keys
+    lets a single field surface either or both without collision.
+
+    Output shape on a populated package::
+
+        package["dpp_suggestions"]["ai_suggestions"] = {
+            "description": "...",
+            "tags": [...],
+            "dictionary": [ {"field": "...", "summary": "..."}, ... ],
+            "generated_at": "<ISO 8601>",
+        }
+
+    The ``dictionary`` entries are scanned for a ``field`` matching
+    ``field_name`` and the matching ``summary`` (or ``description``)
+    is returned. ``description`` / ``tags`` are returned as-is when
+    ``field_name`` matches them literally — that lets a scheming form
+    bind the dataset-level description field to
+    ``scheming_get_ai_suggestion('description')``.
+
+    Defensive in the same way ``scheming_get_suggestion_value`` is:
+    any exception is logged and ``""`` is returned so a malformed
+    suggestion never breaks form rendering.
+    """
+    if not data:
+        return ''
+
+    try:
+        package_data = data
+        if not (package_data
+                and 'dpp_suggestions' in package_data
+                and isinstance(package_data['dpp_suggestions'], dict)
+                and 'ai_suggestions' in package_data['dpp_suggestions']):
+            return ''
+
+        ai = package_data['dpp_suggestions']['ai_suggestions']
+        if not isinstance(ai, dict):
+            return ''
+
+        # Direct lookup first — handles top-level keys like
+        # ``description`` and ``tags`` plus any future qsv describegpt
+        # output shapes that flatten field metadata to the top level.
+        if field_name in ai:
+            return ai[field_name]
+
+        # Per-field dictionary lookup — qsv describegpt's ``dictionary``
+        # output is a list of ``{"field": "...", "summary": "..."}``
+        # objects. Walk it for a match.
+        dictionary = ai.get('dictionary')
+        if isinstance(dictionary, list):
+            for entry in dictionary:
+                if isinstance(entry, dict) and entry.get('field') == field_name:
+                    # ``summary`` is qsv's canonical key, ``description``
+                    # is a common alternate from custom prompts —
+                    # accept either.
+                    return entry.get('summary') or entry.get('description') or ''
+
+        return ''
+    except Exception as e:
+        logger.warning(f"Error getting AI suggestion value: {e}")
+        return ''
+
 def scheming_is_valid_suggestion(field, value):
     """
     Check if a suggested value is valid for a field, particularly for select fields
