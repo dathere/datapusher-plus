@@ -43,8 +43,8 @@ Required env, and why:
 - `-o addopts=` — overrides `setup.cfg`'s `--pdbcls=IPython...` addopt.
 - `tests/integration/` excluded — needs the integration stack (see below).
 
-## Known result (as of 2026-05-17)
-**171/171 Python unit tests pass** on `main` (post-PR-#298 → #304 merges).
+## Known result (as of 2026-05-18)
+**196/196 Python unit tests pass** on `main` (post-PR-#298 → #308 merges).
 Earlier handoff noted a flow-test that pre-imported a CKAN context; that
 path is no longer in the unit suite.
 
@@ -132,3 +132,69 @@ End-to-end shape of the AI suggestions feature now on `main`:
    captured response from a LM Studio gemma-4-e4b run; use it for
    shape-of-envelope assertions in Python tests instead of hand-rolling
    one.
+
+## Data Dictionary stash/restore (PR #307, issue #265)
+
+End-to-end shape of the Data Dictionary preservation across DP+ job
+failures now on `main`:
+
+1. **Module** — `ckanext/datapusher_plus/dictionary_stash.py` is a tiny
+   on-disk persistence layer (`save` / `load` / `clear` / `stash_path`).
+   Atomic writes via `os.replace` with `.tmp` cleanup on failure. Stash
+   dir is configurable via `ckanext.datapusher_plus.dictionary_stash_dir`
+   (defaults to `<tempdir>/dpp_dict_stash`). Path-traversal guard on
+   `resource_id`. `load`/`clear` deliberately do NOT bootstrap the
+   directory — only `save` does.
+2. **Stash** — `AnalysisStage._parse_stats` writes `existing_info` to
+   the stash BEFORE deleting the existing datastore resource. Best-effort:
+   a stash failure logs a warning but does not block ingestion.
+3. **Restore — in-transaction failure** — `_rollback_database`
+   (`@database_task.on_rollback`) drops the half-written table and, if a
+   stash exists, re-creates the datastore resource with the stashed
+   `info` dicts and zero rows. Each field's Postgres `type` is derived
+   from `info["type_override"]` (mapped through `conf.TYPE_MAPPING.values()`,
+   falling back to `text`) — otherwise CKAN's `datastore_create` defaults
+   columns to `text` and `numeric`/`timestamp` annotations get silently
+   downgraded.
+4. **Restore — failure outside the transaction** — `analyze_task`,
+   `ai_suggestions_task`, and `_maybe_suspend_for_pii_review` run BEFORE
+   the `with transaction():` block, so failures there don't fire any
+   rollback hook. On retry, `AnalysisStage._parse_stats` checks for a
+   stash when no live datastore exists and loads it as `existing_info`
+   — the merge logic then propagates it onto the rebuilt headers, and
+   the success-finally clears the stash.
+5. **Cleanup** — `datapusher_plus_flow`'s `finally` clears the stash on
+   any successful exit (including `_StageAbort` complete-with-skip).
+   Error paths leave the stash for the rollback hook or a subsequent
+   retry. Stash mtime is surfaced in restore logs so operators can
+   distinguish genuine retry-after-failure from stale-restore caused by
+   an orphaned stash being applied to an unrelated upload.
+
+Test coverage: `tests/test_dictionary_stash.py` has 21 tests pinning
+the module, the `_parse_stats` retry-restore branch, and the
+`_rollback_database` type-mapping behavior.
+
+## UTC timestamps (PR #308, issue #145)
+
+DP+ now uses a single helper `ckanext.datapusher_plus.utils.utcnow_naive()`
+for every persisted timestamp. It returns
+`datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)` —
+naive (so it fits the `TIMESTAMP WITHOUT TIME ZONE` columns) AND UTC
+(so a worker running in a non-UTC tz doesn't silently record local
+time). All seven call sites that previously used
+`datetime.datetime.now()` (local — wrong) or `datetime.datetime.utcnow()`
+(deprecated in Python 3.12+) have been migrated:
+
+- `helpers.py:345,364` — `mark_job_as_completed` / `mark_job_as_errored`
+  `finished_timestamp`. **The actual bug** — these were on local time.
+- `cli.py:452` — `migrate_from_rq` `ts.last_updated`.
+- `logic/action.py:101,132,230,264` — `task_status.last_updated` reads
+  and writes through the submit / hook actions. Reads switched from
+  `strptime("%Y-%m-%dT%H:%M:%S.%f")` to `fromisoformat(...)`; writes
+  switched from `str(dt)` to `dt.isoformat()` — symmetric, microsecond-
+  safe, no T-vs-space mismatch.
+
+The resource-data UI template now surfaces "UTC" suffix in timestamp
+tooltips. Test coverage: `tests/test_utcnow_naive.py` (4 tests, including
+a real `TZ=Pacific/Auckland` + `time.tzset()` flip that proves the
+helper returns UTC even when the process tz is not UTC).
