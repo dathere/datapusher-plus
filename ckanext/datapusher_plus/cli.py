@@ -417,10 +417,11 @@ def migrate_from_rq(resubmit: bool, yes: bool):
 
     # Reset any ``pending`` task_status rows so the UI does not falsely
     # show in-flight ingestions that no longer have a worker.
-    import datetime
     import json
 
     from ckan import model as ckan_model
+
+    from ckanext.datapusher_plus.utils import utcnow_naive
 
     session = ckan_model.Session
     reset_count = 0
@@ -449,7 +450,7 @@ def migrate_from_rq(resubmit: bool, yes: bool):
             resubmit_resource_ids.append(ts.entity_id)
         ts.state = "error"
         ts.error = json.dumps({"message": "migrated to Prefect; please resubmit"})
-        ts.last_updated = datetime.datetime.utcnow()
+        ts.last_updated = utcnow_naive()
         reset_count += 1
         if value.get("job_id"):
             drained.append(value["job_id"])  # Not a resource_id but harmless

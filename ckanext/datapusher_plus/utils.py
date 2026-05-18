@@ -14,6 +14,31 @@ from ckanext.datapusher_plus.model import Logs
 from .job_exceptions import HTTPError
 
 
+def utcnow_naive() -> datetime.datetime:
+    """Return the current UTC time as a *naive* datetime (no tzinfo).
+
+    DP+ persists timestamps in TIMESTAMP WITHOUT TIME ZONE columns
+    (``Jobs.finished``, ``Logs.timestamp``, CKAN's ``task_status.last_updated``),
+    so the value must be naive to avoid SQLAlchemy / psycopg2 rejecting
+    tz-aware datetimes on insert.
+
+    Why this helper exists (issue #145):
+
+    * ``datetime.datetime.now()`` returns *local time* — incorrect, because
+      a worker running in a non-UTC tz would silently log local-time
+      timestamps that look like UTC on read.
+    * ``datetime.datetime.utcnow()`` is deprecated in Python 3.12+ and
+      slated for removal.
+    * The PEP-recommended replacement ``datetime.datetime.now(tz=utc)``
+      returns a *tz-aware* datetime, which the DP+ columns reject.
+
+    Centralizing the idiom here so every persisted timestamp uses the same
+    correct form, and so the inevitable next deprecation is a one-line
+    update instead of an audit.
+    """
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
 class StoringHandler(logging.Handler):
     """A handler that stores the logging records in a database."""
 
@@ -29,9 +54,7 @@ class StoringHandler(logging.Handler):
         funcName = str(record.funcName)
         job_log = Logs(
             job_id=self.task_id,
-            # this needs to be a naive datetime, and utcnow() is deprecated and its
-            # replacement is not naive, so we need to remove the tzinfo
-            timestamp=datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None),
+            timestamp=utcnow_naive(),
             message=message,
             level=level,
             module=module,
