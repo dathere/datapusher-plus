@@ -305,12 +305,26 @@ def _apply_result(ctx: RuntimeContext, result: Any) -> None:
     the current run's tempdir.
     """
     if isinstance(result, DownloadResult):
-        # Defensive copy: later stages mutate ``ctx.resource`` in place
-        # (e.g. ``FormulaStage`` adds ``dpp_suggestions``), so without a
-        # copy here that mutation would also mutate the ``DownloadResult``
-        # stored in the result chain — making it no longer a true snapshot
-        # of the download stage's output.
-        ctx.resource = dict(result.resource)
+        # Issue #311: deliberately DO NOT apply ``result.resource`` to
+        # ``ctx.resource``. The resource dict is per-flow-run identity
+        # — its ``id``, ``package_id``, and other fields are specific
+        # to the resource the current flow is ingesting. Wholesale
+        # overwriting from the cached value contaminates downstream
+        # stages when a content-keyed cache hit on ``analyze_task`` /
+        # ``validate_task`` walks back to a ``DownloadResult`` from a
+        # *different* flow (same file content, different resource_id).
+        # The pre-#311 behavior caused ``database_task``'s TRUNCATE to
+        # fire against the wrong table (the cached resource_id's,
+        # which doesn't exist for the current flow).
+        #
+        # ``_build_runtime_context`` already fetched the current flow's
+        # resource from CKAN at flow start, and ``DownloadStage`` (when
+        # it runs in this flow) mutates that dict in place to set
+        # ``["hash"]``. On a cache hit the body doesn't run, but
+        # ``ctx.file_hash`` is propagated through this same rehydrate
+        # branch below and the metadata stage's #310 fix restores
+        # ``ctx.resource["hash"]`` from it. Net: ctx.resource ends up
+        # correct without us needing to copy the cached dict.
         ctx.resource_url = result.resource_url
         ctx.file_hash = result.file_hash
         ctx.content_length = result.content_length

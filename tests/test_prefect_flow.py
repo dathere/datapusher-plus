@@ -581,14 +581,32 @@ def test_rehydrate_reconstitutes_context_from_nested_results():
         pii_candidate_count=2,
     )
 
-    # A bare context, as _build_runtime_context hands to the first task:
-    # only build-time fields are set, everything else is at its default.
-    ctx = ProcessingContext(task_id="t1", input={})
+    # A bare context, as _build_runtime_context hands to the first task,
+    # but with a "current flow" resource dict pre-populated — this is
+    # what _build_runtime_context actually does (fetches the current
+    # resource from CKAN). Setting it explicitly here pins the #311
+    # contract: the cached DownloadResult.resource MUST NOT clobber
+    # the current flow's resource dict.
+    ctx = ProcessingContext(
+        task_id="t1",
+        input={},
+        resource={"id": "current-r1", "format": "CSV", "package_id": "current-pkg"},
+        resource_id="current-r1",
+    )
 
     rehydrate(ctx, analyze)
 
-    # Root DownloadResult fields.
-    assert ctx.resource == {"id": "r1", "format": "CSV"}
+    # Issue #311: ctx.resource MUST NOT be overwritten by the cached
+    # DownloadResult.resource. The current flow's resource dict
+    # (set by ``_build_runtime_context``) is the source of truth —
+    # otherwise cross-resource cache hits leak the wrong resource_id
+    # into ``database_task`` and TRUNCATE fails with "relation does
+    # not exist".
+    assert ctx.resource == {
+        "id": "current-r1",
+        "format": "CSV",
+        "package_id": "current-pkg",
+    }
     assert ctx.resource_url == "http://x/r1.csv"
     assert ctx.file_hash == "abc123"
     assert ctx.content_length == 4096
