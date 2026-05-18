@@ -101,17 +101,27 @@ class IndexingStage(BaseStage):
 
     def _get_datetime_columns(self, context: ProcessingContext) -> List[str]:
         """
-        Extract datetime column names from headers_dicts.
+        Extract date / datetime column names from headers_dicts.
+
+        Both Postgres ``timestamp`` and ``date`` columns count as
+        "date-like" for auto-indexing purposes — the ``AUTO_INDEX_DATES``
+        knob means "index columns that represent points in time",
+        whether or not those points include a time-of-day component.
+        Pre-#179, only ``timestamp`` columns existed (the buggy
+        declaration default mapped qsv ``Date`` to ``timestamp``), so
+        a single match was sufficient. After #179 a date-only column
+        is Postgres ``date`` and would silently lose its auto-index
+        unless we include ``"date"`` here.
 
         Args:
             context: Processing context
 
         Returns:
-            List of datetime column names
+            List of date / datetime column names
         """
         datetimecols_list = []
         for header in context.headers_dicts:
-            if header.get("type") == "timestamp":
+            if header.get("type") in ("timestamp", "date"):
                 datetimecols_list.append(header["id"])
         return datetimecols_list
 

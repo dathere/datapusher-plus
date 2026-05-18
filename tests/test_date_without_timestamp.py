@@ -50,6 +50,15 @@ def minimal_stats_csv_dates(tmp_path):
     """A stats CSV with a Date column, a DateTime column, and one each
     of String / Integer for control. ``qsv_*`` row is the sentinel
     trailer that ``_parse_stats``' loop breaks on.
+
+    Columns kept minimal — ``_parse_stats`` only reads ``field``,
+    ``type``, ``min``, ``max``, and ``cardinality``. qsv's real
+    ``stats.csv`` carries many more columns (``sum``, ``mean``,
+    ``stddev``, ``nullcount``, etc.) but the parser doesn't index
+    into them, so we omit them here. If a future change starts
+    consuming an additional column, this fixture needs the matching
+    field added — otherwise the test would fail with a KeyError
+    rather than a clear assertion (called out in roborev #2257 LOW).
     """
     csv_path = tmp_path / "stats.csv"
     csv_path.write_text(
@@ -257,27 +266,95 @@ def test_config_declaration_default_maps_date_to_date_not_timestamp():
         "config_declaration default has ``Date`` mapped to "
         f"{declared_default.get('Date')!r} — must be ``date`` (issue #179)."
     )
-    # Belt-and-braces: ensure the inline fallback in config.py agrees.
-    # If they ever drift again, this test catches it before a real
-    # operator does.
+
+    # Belt-and-braces: also verify the inline fallback in ``config.py``
+    # agrees with the declaration. We do this by AST-parsing the module
+    # rather than regex-matching the source — a regex on
+    # ``"ckanext.datapusher_plus.type_mapping",\s*'...'`` would false-fail
+    # on any reformat (double-quoted strings, line-broken concatenation,
+    # an apostrophe in a nearby comment) and the failure message
+    # ("test grep needs updating") would obscure the real signal
+    # (roborev #2257 LOW). Walking the AST is reformat-immune.
+    import ast
+
     config_py = (
         Path(__file__).resolve().parents[1]
         / "ckanext"
         / "datapusher_plus"
         / "config.py"
     )
-    config_text = config_py.read_text()
-    # Find the inline fallback JSON literal in the tk.config.get(...) call.
-    match = re.search(
-        r'"ckanext\.datapusher_plus\.type_mapping",\s*\'([^\']+)\'',
-        config_text,
+    tree = ast.parse(config_py.read_text())
+    inline_default = None
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        # We're looking for ``tk.config.get("ckanext.datapusher_plus.type_mapping", "<json>")``.
+        func = node.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr == "get"
+            and len(node.args) == 2
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == "ckanext.datapusher_plus.type_mapping"
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        ):
+            continue
+        inline_default = json.loads(node.args[1].value)
+        break
+
+    assert inline_default is not None, (
+        "Could not find ``tk.config.get('ckanext.datapusher_plus.type_mapping', '<json>')`` "
+        "in config.py — the AST walk needs updating."
     )
-    assert match, (
-        "Could not find inline type_mapping fallback in config.py — "
-        "the test grep needs updating."
-    )
-    inline_default = json.loads(match.group(1))
     assert inline_default.get("Date") == "date", (
         f"config.py inline default has Date={inline_default.get('Date')!r}, "
         "expected 'date'."
     )
+
+
+# ---------------------------------------------------------------------------
+# AUTO_INDEX_DATES still picks up Postgres ``date`` columns post-#179.
+# (Regression caught by roborev #2257 MEDIUM.)
+# ---------------------------------------------------------------------------
+
+
+def test_auto_index_dates_still_indexes_date_only_columns():
+    # Pre-#179, qsv-inferred Date columns mapped to Postgres
+    # ``timestamp``, so ``IndexingStage._get_datetime_columns``'s
+    # ``header["type"] == "timestamp"`` check correctly picked them up
+    # for the ``AUTO_INDEX_DATES`` auto-indexing branch.
+    #
+    # Post-#179, date-only columns are Postgres ``date``. The narrow
+    # equality check would silently exclude them — operators relying
+    # on AUTO_INDEX_DATES would see their date-only indexes
+    # disappear after upgrade. Fix: include both ``"timestamp"`` and
+    # ``"date"`` in the date-like check.
+    pytest.importorskip("ckan")
+    from types import SimpleNamespace
+
+    from ckanext.datapusher_plus.jobs.stages.indexing import IndexingStage
+
+    stage = IndexingStage()
+    ctx = SimpleNamespace(
+        headers_dicts=[
+            {"id": "name", "type": "text"},
+            {"id": "qty", "type": "numeric"},
+            {"id": "birthday", "type": "date"},       # Date-only — #179 fix
+            {"id": "logged_at", "type": "timestamp"}, # With time-of-day
+            {"id": "bigint_id", "type": "bigint"},    # Control
+        ],
+    )
+
+    result = stage._get_datetime_columns(ctx)
+
+    # Both ``date`` AND ``timestamp`` columns count as date-like for
+    # auto-indexing purposes. Other types are excluded.
+    assert "birthday" in result, (
+        "Date-only columns lost their AUTO_INDEX_DATES auto-indexing "
+        "after #179 — _get_datetime_columns must include type='date'."
+    )
+    assert "logged_at" in result
+    assert "name" not in result
+    assert "qty" not in result
+    assert "bigint_id" not in result
