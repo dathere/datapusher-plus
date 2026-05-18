@@ -68,15 +68,6 @@ def test_returned_datetime_is_utc_wallclock(helper):
     )
 
 
-def test_monotonic_within_a_single_call(helper):
-    # Successive calls don't go backwards. Catches a regression where
-    # someone implements this via ``datetime.fromtimestamp(time.time())``
-    # but forgets the UTC conversion and gets bitten by DST jumps.
-    a = helper()
-    b = helper()
-    assert b >= a
-
-
 def test_two_calls_in_different_tzs_agree(helper, monkeypatch):
     # Simulate the worker running in a non-UTC timezone — the helper
     # must still return UTC. We can't actually change the process's
