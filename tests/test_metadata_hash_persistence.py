@@ -7,9 +7,9 @@ hash that ``DownloadStage`` computed because the re-fetch added by
 wholesale replaced ``context.resource`` with the on-disk CKAN copy —
 which still had an empty hash at that point in the flow.
 
-The bug was masked for ~2 days because the resulting empty hash
-looked the same regardless of which algorithm DP+ used internally;
-PR #309's BLAKE3-default smoke test caught it via the
+The bug was briefly masked because the resulting empty hash looked
+the same regardless of which algorithm DP+ used internally; PR
+#309's BLAKE3-default smoke test caught it via the
 "CKAN persists a 64-hex digest" assertion.
 
 These tests pin the contract:
