@@ -49,16 +49,31 @@ Required env, and why:
 ## Known result (as of 2026-05-18, `main` @ `9a8a6c7` + WIP)
 **222/222 Python unit tests pass** on `main` after the #299 → #314 merges
 plus the in-flight `tests/test_issue_173_date_format_inference.py`.
-Net delta from the prior handoff (196 tests): +26 tests, mainly from
-- `tests/test_dictionary_stash.py` (21 tests, PR #307)
-- `tests/test_utcnow_naive.py` (4 tests, PR #308)
-- `tests/test_file_hash_algorithms.py` (PR #309)
-- `tests/test_metadata_stage_file_hash.py` (PR #312, regression for #310)
-- `tests/test_download_result_rehydrate.py` (PR #313, regression for #311)
-- `tests/test_date_without_timestamp.py` (PR #314, regression for #179)
-- `tests/test_issue_173_date_format_inference.py` (4 tests, regression
+
+Test count moved from 196 (prior handoff baseline) to 222 over this
+arc — a **net +26**. The breakdown isn't a simple "+47 added across
+the new files" because the #307–#314 refactors also removed or
+consolidated some pre-existing tests (e.g. earlier helpers superseded
+by `dictionary_stash`, hash-related tests folded into the
+algorithm-aware suite). The net is reproducible (`pytest tests/
+--ignore=tests/integration --collect-only -q`); the per-file gross
+adds below are the new-file additions only — not the net delta.
+
+New-file gross additions (collected via ``pytest --collect-only -q``):
+- `tests/test_dictionary_stash.py` — 21 tests (PR #307)
+- `tests/test_utcnow_naive.py` — 4 tests (PR #308)
+- `tests/test_file_hash_algorithm.py` — 10 tests (PR #309)
+- `tests/test_metadata_hash_persistence.py` — 3 tests (PR #312, regression for #310)
+- `tests/test_rehydrate_resource_identity.py` — 4 tests (PR #313, regression for #311)
+- `tests/test_date_without_timestamp.py` — 5 tests (PR #314, regression for #179)
+- `tests/test_issue_173_date_format_inference.py` — 4 tests (regression
   for #173 — qsv date-format inference coverage + malformed-CSV
-  quarantine precondition; needs `QSV_BIN` env var to run)
+  quarantine precondition; needs `QSV_BIN` env var to run, otherwise
+  skips cleanly)
+- Gross sum of the rows above: **51**. Net delta vs. prior handoff: **+26**.
+  The 25-test gap is the removed/consolidated subset across the same
+  PRs; if you need the exact accounting, walk `git log --diff-filter=D
+  --name-only -- tests/` across the #299..#314 range.
 
 The JS unit suite (Vitest + jsdom, PR #304) is unchanged at **12 tests**
 for `scheming-ai-suggestions.js`. Runs on the host, not in `dpp-test`:
@@ -226,7 +241,7 @@ checks, selectable via `ckanext.datapusher_plus.file_hash_algorithm`:
 Implementation lives in `ckanext/datapusher_plus/file_hash.py` with a
 single `compute_file_hash(path, algorithm)` dispatcher. `blake3` shells
 out to `b3sum --no-names`; `sha256`/`md5` use Python `hashlib` with
-chunked reads. Tests in `tests/test_file_hash_algorithms.py` pin all
+chunked reads. Tests in `tests/test_file_hash_algorithm.py` pin all
 three algorithms against known fixtures.
 
 ## file_hash preservation across metadata-stage re-fetch (PR #312, issue #310)
@@ -246,7 +261,7 @@ if ctx.file_hash:
 
 `context.file_hash` is the authoritative value (set by `DownloadStage`),
 so the re-fetched resource dict's stale/missing `file_hash` should never
-win. Regression test: `tests/test_metadata_stage_file_hash.py`.
+win. Regression test: `tests/test_metadata_hash_persistence.py`.
 
 ## DownloadResult rehydrate cross-resource cache leak (PR #313, issue #311)
 
@@ -263,7 +278,7 @@ resource had been deleted). Fix:
 - `ctx.resource` keeps the live resource dict that the orchestrator
   populated at job start.
 
-Regression test: `tests/test_download_result_rehydrate.py` asserts that
+Regression test: `tests/test_rehydrate_resource_identity.py` asserts that
 two consecutive runs with different `resource_id`s but identical content
 hash don't cross-pollinate.
 
@@ -276,7 +291,13 @@ issue #173 comment.
 
 Known qsv 20.0.0 gaps on the reporter's 9-format CSV:
 - `ISO 8601 (YYYY-MM-DDTHH:MM:SS)` values like `2024-10-11T14:30:00`
-  (no tz, T-separator) → inferred as **String**. Recognized in qsv ≥ 20.1.
+  (no tz, T-separator) → inferred as **String**. Empirically verified
+  to be recognized as **DateTime** on qsv 20.1.0 (macOS host check
+  during #173 investigation; the regression test
+  `test_quoted_csv_inference_matrix` explicitly skips on qsv ≥ 20.1
+  with an actionable message so the next maintainer who bumps the
+  `Dockerfile.worker` `QSV_VERSION` pin past 20.0.x is forced to
+  update the matrix + this memory together).
 - `DD-MM-YYYY` (dash-separated, day-first, e.g. `11-10-2024`) →
   **String**. qsv has no heuristic for this format regardless of
   `--prefer-dmy`.
@@ -313,5 +334,5 @@ previously only matched `timestamp` columns when picking candidates for
 `AUTO_INDEX_DATES`. It now matches both `date` and `timestamp`, so the
 indexer still creates dates indexes after the type-mapping fix.
 
-Regression test: `tests/test_date_type_mapping.py` asserts the
+Regression test: `tests/test_date_without_timestamp.py` asserts the
 declaration default and the indexer's column-type filter agree.
