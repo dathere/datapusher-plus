@@ -22,6 +22,28 @@ groups:
         description: |
           Ignore file hash
 
+      - key: ckanext.datapusher_plus.file_hash_algorithm
+        editable: true
+        default: blake3
+        description: |
+          Algorithm used to hash the downloaded resource file. The hash
+          is used internally for upload-skip (dedup) and as the Redis
+          cache key, and is stored on the CKAN resource record's
+          ``hash`` field. Allowed values (case-insensitive):
+
+          * ``blake3`` (default) — ~10x faster than sha256 on commodity
+            hardware. Requires the ``blake3`` Python package (already
+            in requirements.txt). The ``b3sum`` CLI is also installed
+            in the worker image for ad-hoc / debugging use.
+          * ``sha256`` — DCAT3 + Croissant interop format. Pick this
+            when the published resource hash needs to match those
+            standards.
+          * ``md5`` — legacy compatibility with pre-#221 stored hashes.
+            Do not use for security purposes.
+
+          Switching the algorithm invalidates all prior hash comparisons
+          — every resource will be re-ingested once after the change.
+
       - key: ckanext.datapusher_plus.chunk_size
         editable: true
         default: 16384

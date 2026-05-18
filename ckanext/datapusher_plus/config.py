@@ -93,6 +93,15 @@ IGNORE_FILE_HASH = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False)
 )
 
+# Issue #221: ``ckanext.datapusher_plus.file_hash_algorithm`` is declared in
+# ``config_declaration.yaml`` but intentionally NOT mirrored here as a
+# module-level constant. The setting is ``editable: true`` and the download
+# stage's ``_get_file_hasher`` reads it from ``tk.config`` live at each
+# call so a runtime change via the admin UI takes effect without a worker
+# restart. A module-import-time snapshot here would silently break that
+# contract for any code that imported the snapshot instead of the live
+# config — kept as a docstring rather than a constant on purpose.
+
 # Indexing settings
 AUTO_INDEX_THRESHOLD = tk.asint(
     tk.config.get("ckanext.datapusher_plus.auto_index_threshold", "3")

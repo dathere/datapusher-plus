@@ -24,6 +24,58 @@ from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
 
 
+# Issue #221: factory for the configured file-hash algorithm. Returns an
+# object with the standard ``.update(bytes)`` / ``.hexdigest()`` shape
+# so the streaming-download loop doesn't care which algorithm it's
+# feeding. ``hashlib`` exposes sha256 and md5 directly; ``blake3`` ships
+# the same protocol via a separate package (already in requirements.txt).
+#
+# Returning a fresh hasher per call (rather than caching) is intentional
+# — hashlib objects are stateful and must not be reused across downloads.
+def _get_file_hasher():
+    """Return a new hasher instance for the configured algorithm.
+
+    Reads ``ckanext.datapusher_plus.file_hash_algorithm`` from
+    ``tk.config`` **live** at each call. Because the config key is
+    declared ``editable: true`` in ``config_declaration.yaml``,
+    operators expect a runtime change via the admin UI to take effect
+    without a worker restart — caching the value at import would
+    silently break that contract. The factory is called once per
+    resource download, so the dict lookup overhead is negligible.
+
+    Raises ``utils.JobError`` for an unknown algorithm name rather than
+    silently falling back, so a typo in ``ckan.ini`` surfaces at the
+    first download instead of producing inscrutable hash mismatches
+    downstream.
+    """
+    # ``tk`` is the CKAN toolkit; ``tk.config`` is the live config dict
+    # the admin UI mutates. Local import keeps the module-load time
+    # path of this file unchanged and matches the rest of the codebase
+    # idiom of pulling ``tk`` in where needed.
+    import ckan.plugins.toolkit as tk
+
+    algo = tk.config.get(
+        "ckanext.datapusher_plus.file_hash_algorithm", "blake3"
+    ).lower()
+    if algo == "blake3":
+        # ``blake3`` is a hard requirement in requirements.txt; if the
+        # import fails the install is broken, not a config issue.
+        from blake3 import blake3 as _blake3  # type: ignore[import-untyped]
+
+        return _blake3()
+    if algo == "sha256":
+        return hashlib.sha256()
+    if algo == "md5":
+        # DevSkim flags md5 as DS126858; we keep it as a legacy
+        # compatibility knob, not for security. Same suppression as the
+        # original site this factory replaces.
+        return hashlib.md5()  # DevSkim: ignore DS126858
+    raise utils.JobError(
+        f"Unknown ckanext.datapusher_plus.file_hash_algorithm={algo!r}. "
+        f"Allowed values: 'blake3', 'sha256', 'md5'."
+    )
+
+
 class DownloadStage(BaseStage):
     """
     Downloads the resource file, validates it, and handles ZIP extraction.
@@ -284,8 +336,12 @@ class DownloadStage(BaseStage):
         context.update_tmp(tmp)
 
         length = 0
-        # Using MD5 for file deduplication only (not for security)
-        m = hashlib.md5()  # DevSkim: ignore DS126858
+        # Issue #221: algorithm is selected from
+        # ``ckanext.datapusher_plus.file_hash_algorithm`` (default
+        # ``blake3``). See ``_get_file_hasher`` for the contract. The
+        # hash is used for upload-skip / cache-key / resource ``hash``
+        # field — not for cryptographic integrity.
+        m = _get_file_hasher()
 
         # Log download start
         cl = response.headers.get("content-length")
@@ -318,7 +374,10 @@ class DownloadStage(BaseStage):
 
         Args:
             context: Processing context
-            file_hash: MD5 hash of downloaded file
+            file_hash: Hash of the downloaded file (algorithm per
+                ``ckanext.datapusher_plus.file_hash_algorithm`` —
+                blake3 by default, can be ``sha256`` or ``md5``;
+                see #221).
             response_headers: HTTP response headers
 
         Returns:
