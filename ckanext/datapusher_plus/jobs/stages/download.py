@@ -33,14 +33,30 @@ from ckanext.datapusher_plus.jobs.context import ProcessingContext
 # Returning a fresh hasher per call (rather than caching) is intentional
 # — hashlib objects are stateful and must not be reused across downloads.
 def _get_file_hasher():
-    """Return a new hasher instance for ``conf.FILE_HASH_ALGORITHM``.
+    """Return a new hasher instance for the configured algorithm.
+
+    Reads ``ckanext.datapusher_plus.file_hash_algorithm`` from
+    ``tk.config`` **live** at each call. Because the config key is
+    declared ``editable: true`` in ``config_declaration.yaml``,
+    operators expect a runtime change via the admin UI to take effect
+    without a worker restart — caching the value at import would
+    silently break that contract. The factory is called once per
+    resource download, so the dict lookup overhead is negligible.
 
     Raises ``utils.JobError`` for an unknown algorithm name rather than
     silently falling back, so a typo in ``ckan.ini`` surfaces at the
     first download instead of producing inscrutable hash mismatches
     downstream.
     """
-    algo = conf.FILE_HASH_ALGORITHM
+    # ``tk`` is the CKAN toolkit; ``tk.config`` is the live config dict
+    # the admin UI mutates. Local import keeps the module-load time
+    # path of this file unchanged and matches the rest of the codebase
+    # idiom of pulling ``tk`` in where needed.
+    import ckan.plugins.toolkit as tk
+
+    algo = tk.config.get(
+        "ckanext.datapusher_plus.file_hash_algorithm", "blake3"
+    ).lower()
     if algo == "blake3":
         # ``blake3`` is a hard requirement in requirements.txt; if the
         # import fails the install is broken, not a config issue.
@@ -358,7 +374,10 @@ class DownloadStage(BaseStage):
 
         Args:
             context: Processing context
-            file_hash: MD5 hash of downloaded file
+            file_hash: Hash of the downloaded file (algorithm per
+                ``ckanext.datapusher_plus.file_hash_algorithm`` —
+                blake3 by default, can be ``sha256`` or ``md5``;
+                see #221).
             response_headers: HTTP response headers
 
         Returns:

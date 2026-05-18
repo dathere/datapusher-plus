@@ -3,8 +3,8 @@
 Unit coverage for ``ckanext.datapusher_plus.jobs.stages.download._get_file_hasher``.
 
 This is the seam introduced by #221 that picks the per-job hasher
-from ``conf.FILE_HASH_ALGORITHM``. Three things matter and are pinned
-here:
+from ``ckanext.datapusher_plus.file_hash_algorithm``. Three things
+matter and are pinned here:
 
 1. The default algorithm IS blake3 — operators upgrading to v3 with no
    config change must get the faster algorithm by default, not silently
@@ -20,6 +20,11 @@ Round-trip is tested via ``hasher.update(bytes)`` + ``hexdigest()``
 matching reference digests computed via the stdlib (or, for blake3,
 via the ``blake3`` package directly) on a fixed payload — there's no
 external file or network dependency.
+
+After roborev #2242: the factory now reads ``tk.config`` live (the
+key is declared ``editable: true``), so these tests can simply
+``monkeypatch.setitem`` the config and the next ``_get_file_hasher()``
+call sees the change. No ``importlib.reload`` dance needed.
 """
 
 from __future__ import annotations
@@ -64,8 +69,8 @@ def factory():
 def test_default_algorithm_is_blake3(factory, monkeypatch):
     # The most important contract from #221: operators get blake3 by
     # default, not md5 by silent legacy fallback. A regression where
-    # someone changes ``FILE_HASH_ALGORITHM = "blake3"`` to ``"md5"``
-    # would slip through every other test in this file.
+    # someone changes the default in either ``config.py`` or the
+    # factory itself would slip through every other test in this file.
     if BLAKE3_HEX is None:
         pytest.skip("blake3 package not installed")
 
@@ -78,19 +83,7 @@ def test_default_algorithm_is_blake3(factory, monkeypatch):
         "ckanext.datapusher_plus.file_hash_algorithm",
         raising=False,
     )
-    # Reimport conf so FILE_HASH_ALGORITHM picks up the cleared config.
-    import importlib
-
-    from ckanext.datapusher_plus import config as conf_mod
-
-    importlib.reload(conf_mod)
-    assert conf_mod.FILE_HASH_ALGORITHM == "blake3"
-
-    # And the factory wires it to a real blake3 hasher.
-    import ckanext.datapusher_plus.jobs.stages.download as dl_mod
-
-    importlib.reload(dl_mod)
-    h = dl_mod._get_file_hasher()
+    h = factory()
     h.update(HELLO_DPP)
     assert h.hexdigest() == BLAKE3_HEX
 
@@ -115,7 +108,7 @@ def test_default_algorithm_is_blake3(factory, monkeypatch):
     ],
 )
 def test_factory_returns_hasher_matching_algorithm(
-    algo, expected_hex, monkeypatch
+    factory, algo, expected_hex, monkeypatch
 ):
     # For each supported algorithm: setting the config to that algorithm
     # makes the factory return a hasher that produces the canonical
@@ -127,17 +120,7 @@ def test_factory_returns_hasher_matching_algorithm(
     monkeypatch.setitem(
         tk.config, "ckanext.datapusher_plus.file_hash_algorithm", algo
     )
-    # Reimport conf so the module-level constant re-reads the config.
-    import importlib
-
-    from ckanext.datapusher_plus import config as conf_mod
-
-    importlib.reload(conf_mod)
-
-    import ckanext.datapusher_plus.jobs.stages.download as dl_mod
-
-    importlib.reload(dl_mod)
-    h = dl_mod._get_file_hasher()
+    h = factory()
     h.update(HELLO_DPP)
     assert h.hexdigest() == expected_hex
 
@@ -147,27 +130,17 @@ def test_factory_returns_hasher_matching_algorithm(
 # ---------------------------------------------------------------------------
 
 
-def test_algorithm_name_is_case_insensitive(monkeypatch):
+def test_algorithm_name_is_case_insensitive(factory, monkeypatch):
     # Operators typing ``SHA256`` (or ``Blake3``) in ckan.ini should
-    # work — config.py applies ``.lower()`` at module-load time. Catches
-    # a regression where someone "cleans up" the .lower() call.
+    # work — the factory applies ``.lower()`` to the live config value.
+    # Catches a regression where someone "cleans up" the .lower() call.
     pytest.importorskip("ckan")
     import ckan.plugins.toolkit as tk
 
     monkeypatch.setitem(
         tk.config, "ckanext.datapusher_plus.file_hash_algorithm", "SHA256"
     )
-    import importlib
-
-    from ckanext.datapusher_plus import config as conf_mod
-
-    importlib.reload(conf_mod)
-    assert conf_mod.FILE_HASH_ALGORITHM == "sha256"
-
-    import ckanext.datapusher_plus.jobs.stages.download as dl_mod
-
-    importlib.reload(dl_mod)
-    h = dl_mod._get_file_hasher()
+    h = factory()
     h.update(HELLO_DPP)
     assert h.hexdigest() == SHA256_HEX
 
@@ -177,7 +150,7 @@ def test_algorithm_name_is_case_insensitive(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_unknown_algorithm_raises_job_error(monkeypatch):
+def test_unknown_algorithm_raises_job_error(factory, monkeypatch):
     # A typo in ckan.ini (``shA256``? ``blakethree``?) MUST surface at
     # the first download with a clear error message, not silently fall
     # back to md5 (or worse, an empty hasher that produces a constant
@@ -190,19 +163,11 @@ def test_unknown_algorithm_raises_job_error(monkeypatch):
         "ckanext.datapusher_plus.file_hash_algorithm",
         "not-a-real-algo",
     )
-    import importlib
 
-    from ckanext.datapusher_plus import config as conf_mod
-
-    importlib.reload(conf_mod)
-
-    import ckanext.datapusher_plus.jobs.stages.download as dl_mod
     from ckanext.datapusher_plus import utils as utils_mod
 
-    importlib.reload(dl_mod)
-
     with pytest.raises(utils_mod.JobError) as exc_info:
-        dl_mod._get_file_hasher()
+        factory()
 
     # Error message identifies the offending value AND lists what IS
     # valid — so the operator can fix the config without grepping.
@@ -210,6 +175,46 @@ def test_unknown_algorithm_raises_job_error(monkeypatch):
     assert "blake3" in str(exc_info.value)
     assert "sha256" in str(exc_info.value)
     assert "md5" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# Live config: the factory must reflect runtime config changes
+# (the key is ``editable: true``).
+# ---------------------------------------------------------------------------
+
+
+def test_factory_reads_live_config_not_import_time_snapshot(factory, monkeypatch):
+    # Because the config key is declared ``editable: true``, an operator
+    # changing the algorithm via the admin UI must take effect without
+    # a worker restart. The factory reads ``tk.config`` at call time
+    # rather than caching at module load — this test pins that contract.
+    # A regression that caches the algorithm at module-import time
+    # would pass the other tests in this file by accident (they
+    # monkeypatch the config before the first factory call) but fail
+    # here, where the algorithm changes BETWEEN two factory calls in
+    # the same test.
+    pytest.importorskip("ckan")
+    import ckan.plugins.toolkit as tk
+
+    if BLAKE3_HEX is None:
+        pytest.skip("blake3 package not installed")
+
+    # Set to sha256 and verify.
+    monkeypatch.setitem(
+        tk.config, "ckanext.datapusher_plus.file_hash_algorithm", "sha256"
+    )
+    h1 = factory()
+    h1.update(HELLO_DPP)
+    assert h1.hexdigest() == SHA256_HEX
+
+    # Now flip to blake3 WITHOUT a fresh import / module reload — the
+    # next factory call must reflect the change.
+    monkeypatch.setitem(
+        tk.config, "ckanext.datapusher_plus.file_hash_algorithm", "blake3"
+    )
+    h2 = factory()
+    h2.update(HELLO_DPP)
+    assert h2.hexdigest() == BLAKE3_HEX
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +237,7 @@ def test_unknown_algorithm_raises_job_error(monkeypatch):
     ],
 )
 def test_chunked_update_matches_single_update(
-    algo, expected_hex, monkeypatch
+    factory, algo, expected_hex, monkeypatch
 ):
     # The download loop calls ``m.update(chunk)`` once per CHUNK_SIZE
     # bytes — the resulting digest MUST match a single ``update(full)``
@@ -245,16 +250,7 @@ def test_chunked_update_matches_single_update(
     monkeypatch.setitem(
         tk.config, "ckanext.datapusher_plus.file_hash_algorithm", algo
     )
-    import importlib
-
-    from ckanext.datapusher_plus import config as conf_mod
-
-    importlib.reload(conf_mod)
-
-    import ckanext.datapusher_plus.jobs.stages.download as dl_mod
-
-    importlib.reload(dl_mod)
-    h = dl_mod._get_file_hasher()
+    h = factory()
     # Tiny chunks — exercises the chunked-update path the download loop
     # actually uses (different from a single big update call).
     for i in range(0, len(HELLO_DPP), 3):
