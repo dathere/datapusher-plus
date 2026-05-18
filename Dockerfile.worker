@@ -17,7 +17,7 @@
 # with ``no match for platform in manifest``.
 FROM --platform=linux/amd64 ckan/ckan-dev:2.11
 
-ARG QSV_VERSION=20.0.0
+ARG QSV_VERSION=20.1.0
 ARG QSV_RELEASE=https://github.com/dathere/qsv/releases/download
 
 # Root for the apt installs and pip writes. ckan-dev's default user is
