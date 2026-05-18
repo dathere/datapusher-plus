@@ -95,7 +95,7 @@ def _isolate_dictionary_stash(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def analysis_stage_context(tmp_path):
+def analysis_stage_context():
     """Minimal ProcessingContext stand-in for ``_parse_stats``."""
     pytest.importorskip("ckan")
     from ckanext.datapusher_plus.jobs.stages.analysis import AnalysisStage
@@ -248,7 +248,6 @@ def test_config_declaration_default_maps_date_to_date_not_timestamp():
     # type_mapping section, parse, assert. Doing the parse rather
     # than a substring grep so reordering of keys doesn't false-fail
     # the test.
-    import re
     import yaml
 
     docs = yaml.safe_load(text)
@@ -321,7 +320,7 @@ def test_config_declaration_default_maps_date_to_date_not_timestamp():
 
 def test_auto_index_dates_still_indexes_date_only_columns():
     # Pre-#179, qsv-inferred Date columns mapped to Postgres
-    # ``timestamp``, so ``IndexingStage._get_datetime_columns``'s
+    # ``timestamp``, so ``IndexingStage._get_date_like_columns``'s
     # ``header["type"] == "timestamp"`` check correctly picked them up
     # for the ``AUTO_INDEX_DATES`` auto-indexing branch.
     #
@@ -329,7 +328,9 @@ def test_auto_index_dates_still_indexes_date_only_columns():
     # equality check would silently exclude them — operators relying
     # on AUTO_INDEX_DATES would see their date-only indexes
     # disappear after upgrade. Fix: include both ``"timestamp"`` and
-    # ``"date"`` in the date-like check.
+    # ``"date"`` in the date-like check (also renamed the method from
+    # ``_get_datetime_columns`` to ``_get_date_like_columns`` to match
+    # the broadened scope — Copilot review on PR #314).
     pytest.importorskip("ckan")
     from types import SimpleNamespace
 
@@ -346,13 +347,13 @@ def test_auto_index_dates_still_indexes_date_only_columns():
         ],
     )
 
-    result = stage._get_datetime_columns(ctx)
+    result = stage._get_date_like_columns(ctx)
 
     # Both ``date`` AND ``timestamp`` columns count as date-like for
     # auto-indexing purposes. Other types are excluded.
     assert "birthday" in result, (
         "Date-only columns lost their AUTO_INDEX_DATES auto-indexing "
-        "after #179 — _get_datetime_columns must include type='date'."
+        "after #179 — _get_date_like_columns must include type='date'."
     )
     assert "logged_at" in result
     assert "name" not in result
