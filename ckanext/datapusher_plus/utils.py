@@ -18,9 +18,9 @@ def utcnow_naive() -> datetime.datetime:
     """Return the current UTC time as a *naive* datetime (no tzinfo).
 
     DP+ persists timestamps in TIMESTAMP WITHOUT TIME ZONE columns
-    (``Jobs.finished``, ``Logs.timestamp``, CKAN's ``task_status.last_updated``),
-    so the value must be naive to avoid SQLAlchemy / psycopg2 rejecting
-    tz-aware datetimes on insert.
+    (``Jobs.finished_timestamp``, ``Logs.timestamp``, CKAN's
+    ``task_status.last_updated``), so the value must be naive to avoid
+    SQLAlchemy / psycopg2 rejecting tz-aware datetimes on insert.
 
     Why this helper exists (issue #145):
 
