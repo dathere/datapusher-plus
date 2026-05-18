@@ -53,10 +53,24 @@ from typing import Dict, Optional, Tuple
 import pytest
 
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = Path(__file__).parent / "static"
 MALFORMED_FIXTURE = FIXTURES_DIR / "issue_173_date_test_malformed.csv"
 QUOTED_FIXTURE = FIXTURES_DIR / "issue_173_date_test_quoted.csv"
+
+# NOTE on fixture differences: the malformed CSV preserves the
+# reporter's original verbatim — including stray leading spaces in
+# the header after commas (``ID, Event Name, ISO 8601 ...``). The
+# quoted variant normalizes that whitespace away (``ID,Event Name,
+# ISO 8601 ...``). The two fixtures therefore differ in *two*
+# dimensions (quoting + header whitespace), but only the quoting
+# difference is what makes the reporter's CSV malformed. The
+# whitespace divergence is intentional: the quoted variant exists
+# to lock in qsv's inference matrix against clean field names that
+# read naturally in ``EXPECTED_INFERENCE`` below, not to be a
+# minimal-edit-distance partner of the malformed file. If a future
+# maintainer wants to test the malformed file's inference behavior
+# specifically (rather than its rejection-by-validate behavior),
+# that's a separate test against a separate fixture.
 
 
 def _locate_qsv() -> Optional[str]:
@@ -135,6 +149,17 @@ def test_malformed_csv_fails_rfc4180_validation_with_field_count_error():
     a different diagnostic, worth knowing about. Pinned loosely.
     """
     result = _qsv("validate", str(MALFORMED_FIXTURE))
+
+    # Prove validation FAILED before reaching for the diagnostic shape.
+    # Without this guard a future qsv that prints a row-count summary
+    # to stdout on success (e.g. "4 records validated") would
+    # false-pass the substring check below — defeating the
+    # phase-1-fails-→-phase-2-engages precondition the docstring above
+    # describes.
+    assert result.returncode != 0, (
+        f"qsv validate exited 0 on the malformed fixture; "
+        f"stdout:{result.stdout!r} stderr:{result.stderr!r}"
+    )
 
     # qsv writes the diagnostic to stderr OR stdout depending on
     # build flags / version; concatenate to be tolerant.
@@ -230,6 +255,20 @@ def test_quoted_csv_inference_matrix():
     Either way the test gives the next maintainer a clean diff against
     a known baseline.
     """
+    # The matrix is pinned to qsv 20.0.x specifically — newer qsv
+    # versions narrow some of the gaps (e.g. qsv ≥ 20.1 recognizes
+    # the ISO 8601 column as DateTime). Skip rather than false-fail
+    # when the host's qsv is newer than the production-pinned 20.0.x
+    # in Dockerfile.worker / CI / dpp-test. When the production pin
+    # moves, bump this guard AND update EXPECTED_INFERENCE in lockstep.
+    if QSV_VERSION is not None and QSV_VERSION >= (20, 1, 0):
+        pytest.skip(
+            f"EXPECTED_INFERENCE is pinned to qsv 20.0.x baseline; "
+            f"detected qsv {'.'.join(map(str, QSV_VERSION))}. Update the "
+            "matrix and the comment on issue #173 when the production "
+            "Dockerfile.worker QSV_VERSION pin moves past 20.0.x."
+        )
+
     types = _qsv_stats_types(QUOTED_FIXTURE)
 
     diffs = []
