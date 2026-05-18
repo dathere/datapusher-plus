@@ -82,9 +82,15 @@ groups:
         default: csv xls xlsx tsv application/csv application/vnd.ms-excel application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 
       - key: ckanext.datapusher_plus.type_mapping
-        default: '{"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "timestamp","NULL": "text"}'
+        default: '{"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}'
         description: |
-          Mapping of file types to their respective processors
+          Mapping of qsv-inferred field types to their Postgres
+          datastore types. ``Date`` maps to Postgres ``date`` (not
+          ``timestamp``) so a CSV column containing date-only values
+          (e.g. ``2023-02-02``) is stored as a date and rendered
+          accordingly — issue #179. Only ``DateTime`` (date + time)
+          maps to ``timestamp`` and gets the RFC-3339 normalization
+          that adds ``T00:00:00`` for the time component.
 
       - key: ckanext.datapusher_plus.pii_screening
         type: bool

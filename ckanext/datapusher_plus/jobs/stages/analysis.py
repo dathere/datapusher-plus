@@ -390,13 +390,25 @@ class AnalysisStage(BaseStage):
                 )
                 context.existing_info = stashed
 
-        # Override with types from Data Dictionary
+        # Override with types from Data Dictionary.
+        #
+        # The Data Dictionary stores ``type_override`` as a *Postgres*
+        # type (the value of TYPE_MAPPING, e.g. ``"date"``). The code
+        # below uses qsv's stat-output types (``"Date"``, ``"DateTime"``,
+        # etc.) which then get re-mapped through TYPE_MAPPING to land
+        # back at Postgres types — so we need a reverse map here.
+        # ``"date": "Date"`` (added for issue #179) prevents an operator's
+        # explicit ``date`` override from being silently fallen-through
+        # to qsv's ``DateTime`` (and thus mapped back to Postgres
+        # ``timestamp``), which is the exact "Date without timestamp"
+        # bug.
         if context.existing_info:
             types = [
                 {
                     "text": "String",
                     "numeric": "Float",
                     "timestamp": "DateTime",
+                    "date": "Date",
                 }.get(context.existing_info.get(h, {}).get("type_override"), t)
                 for t, h in zip(types, headers)
             ]
