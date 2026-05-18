@@ -24,6 +24,42 @@ from ckanext.datapusher_plus.jobs.stages.base import BaseStage
 from ckanext.datapusher_plus.jobs.context import ProcessingContext
 
 
+# Issue #221: factory for the configured file-hash algorithm. Returns an
+# object with the standard ``.update(bytes)`` / ``.hexdigest()`` shape
+# so the streaming-download loop doesn't care which algorithm it's
+# feeding. ``hashlib`` exposes sha256 and md5 directly; ``blake3`` ships
+# the same protocol via a separate package (already in requirements.txt).
+#
+# Returning a fresh hasher per call (rather than caching) is intentional
+# — hashlib objects are stateful and must not be reused across downloads.
+def _get_file_hasher():
+    """Return a new hasher instance for ``conf.FILE_HASH_ALGORITHM``.
+
+    Raises ``utils.JobError`` for an unknown algorithm name rather than
+    silently falling back, so a typo in ``ckan.ini`` surfaces at the
+    first download instead of producing inscrutable hash mismatches
+    downstream.
+    """
+    algo = conf.FILE_HASH_ALGORITHM
+    if algo == "blake3":
+        # ``blake3`` is a hard requirement in requirements.txt; if the
+        # import fails the install is broken, not a config issue.
+        from blake3 import blake3 as _blake3  # type: ignore[import-untyped]
+
+        return _blake3()
+    if algo == "sha256":
+        return hashlib.sha256()
+    if algo == "md5":
+        # DevSkim flags md5 as DS126858; we keep it as a legacy
+        # compatibility knob, not for security. Same suppression as the
+        # original site this factory replaces.
+        return hashlib.md5()  # DevSkim: ignore DS126858
+    raise utils.JobError(
+        f"Unknown ckanext.datapusher_plus.file_hash_algorithm={algo!r}. "
+        f"Allowed values: 'blake3', 'sha256', 'md5'."
+    )
+
+
 class DownloadStage(BaseStage):
     """
     Downloads the resource file, validates it, and handles ZIP extraction.
@@ -284,8 +320,12 @@ class DownloadStage(BaseStage):
         context.update_tmp(tmp)
 
         length = 0
-        # Using MD5 for file deduplication only (not for security)
-        m = hashlib.md5()  # DevSkim: ignore DS126858
+        # Issue #221: algorithm is selected from
+        # ``ckanext.datapusher_plus.file_hash_algorithm`` (default
+        # ``blake3``). See ``_get_file_hasher`` for the contract. The
+        # hash is used for upload-skip / cache-key / resource ``hash``
+        # field — not for cryptographic integrity.
+        m = _get_file_hasher()
 
         # Log download start
         cl = response.headers.get("content-length")

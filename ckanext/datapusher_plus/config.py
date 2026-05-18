@@ -93,6 +93,24 @@ IGNORE_FILE_HASH = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False)
 )
 
+# Issue #221: algorithm used to hash the downloaded file. The hash is
+# used internally for upload-skip (dedup) and as the Redis cache key
+# for the persisted file blob (``dpp:files:{file_hash}:...``), and is
+# stored on the CKAN resource record's ``hash`` field. Switching the
+# algorithm invalidates all prior comparisons — every resource will be
+# re-ingested once after the change.
+#
+# Allowed values:
+#   * ``"blake3"`` (default) — ~10x faster than sha256 on commodity
+#     hardware, ideal for the large CSVs DP+ chews through.
+#   * ``"sha256"`` — DCAT3 + Croissant interop format. Pick this when
+#     the published resource hash needs to match those standards.
+#   * ``"md5"`` — legacy compatibility with pre-#221 stored hashes
+#     (still flagged as DS126858 by DevSkim; not for security use).
+FILE_HASH_ALGORITHM = tk.config.get(
+    "ckanext.datapusher_plus.file_hash_algorithm", "blake3"
+).lower()
+
 # Indexing settings
 AUTO_INDEX_THRESHOLD = tk.asint(
     tk.config.get("ckanext.datapusher_plus.auto_index_threshold", "3")

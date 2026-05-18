@@ -47,6 +47,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         # crashes at the FormatConverter stage with ``FileNotFoundError:
         # [Errno 2] No such file or directory: 'uchardet'``.
         uchardet file \
+        # Issue #221: ``b3sum`` is the Rust BLAKE3 CLI. DP+'s download
+        # stage hashes via the Python ``blake3`` package (from
+        # requirements.txt) — ``b3sum`` itself is installed so operators
+        # / debugging sessions can verify hashes ad-hoc against the
+        # same algorithm, and so test scripts can compute reference
+        # digests without spinning up Python.
+        b3sum \
     && rm -rf /var/lib/apt/lists/* \
     # MUSL build, not GNU — ckan/ckan-dev:2.11 (Debian bookworm)
     # ships GLIBC 2.36, and qsv's GNU build requires GLIBC 2.38+.

@@ -137,8 +137,13 @@ jobs:
             libgdal-dev \
             libspatialindex-dev \
             libgeos-dev \
-            libproj-dev
-          
+            libproj-dev \
+            b3sum
+          # ^ Issue #221: ``b3sum`` is the BLAKE3 CLI; DP+'s download
+          # stage hashes via the Python ``blake3`` package, but the
+          # CLI is installed here so test scripts and ad-hoc CI
+          # diagnostics can verify hashes against the same algorithm.
+
           # Get GDAL version for Python bindings
           export GDAL_VERSION=$(gdal-config --version)
           echo "GDAL version: $GDAL_VERSION"

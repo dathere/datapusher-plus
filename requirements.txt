@@ -6,3 +6,8 @@ pandas==2.2.3
 shapely==2.1.0
 pyproj>=3.7.1
 prefect>=3.7,<3.8
+# blake3: default for ckanext.datapusher_plus.file_hash_algorithm (issue #221).
+# Pure-Python fallback is in stdlib's hashlib for sha256/md5; blake3 is the
+# only one that needs an external package. Pinned loose because the wheel
+# contract is stable and the Rust binding is fast across versions.
+blake3>=1.0.7
