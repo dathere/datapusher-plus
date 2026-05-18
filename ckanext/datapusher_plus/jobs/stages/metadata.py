@@ -475,6 +475,17 @@ class MetadataStage(BaseStage):
         # layering our preview-related fields on top.
         context.resource = dsu.get_resource(context.resource_id)
 
+        # The re-fetch above discards any field we set on the in-flight
+        # ``context.resource`` between download and here — notably
+        # ``hash``, which the DownloadStage writes at the top of the
+        # pipeline. Restore it so the resource record on CKAN reflects
+        # the computed digest and downstream DCAT3 / Croissant exporters
+        # can read it. (Pre-existing regression introduced by the
+        # re-fetch that landed for preview_rows; surfaced by the #309
+        # smoke test.)
+        if context.file_hash:
+            context.resource["hash"] = context.file_hash
+
         context.resource["datastore_active"] = True
         context.resource["total_record_count"] = record_count
 
