@@ -24,7 +24,9 @@ rebuilding.
   libproj-dev` + `build-essential` etc.
 - GDAL python 3.6.2, `requirements.txt` + `requirements-dev.txt`,
   `pip install -e .` (→ `datapusher-plus 3.0.0a0`, editable).
-- qsv 20.0.0 at `/usr/local/bin/qsvdp`.
+- qsv 20.1.0 at `/usr/local/bin/qsvdp` (bumped from 20.0.0 — no
+  breaking changes per the qsv 20.1.0 release notes; pipelines built
+  against 20.0.0 upgrade in place).
 - `b3sum` CLI at `/usr/local/bin/b3sum` (added by PR #309 for the
   configurable file-hash feature — required by tests that exercise the
   `blake3` algorithm via the external `b3sum` binary path).
@@ -39,7 +41,8 @@ Required env, and why:
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` — ckan-dev's site-packages registers a
   pytest plugin that calls `make_app()` in `pytest_sessionstart`, needing a
   fully-configured CKAN. Disable autoload so plain pytest runs.
-- `QSV_BIN=/usr/local/bin/qsvdp` — for `test_qsv_v20_regression.py`.
+- `QSV_BIN=/usr/local/bin/qsvdp` — for `test_qsv_v20_regression.py`
+  and `test_issue_173_date_format_inference.py`.
 - `CKAN_INI=/srv/app/src/ckan/test-core.ini` — the image's default
   `/srv/app/ckan.ini` is NOT populated when the entrypoint is bypassed;
   `test-core.ini` has a real `SECRET_KEY`.
@@ -96,7 +99,7 @@ module registration state doesn't bleed.
   -v <repo>:/repo -w /repo ckan/ckan-dev:2.11 sleep infinity`, then re-run
   the `ci.yml`-style install (apt geo libs → `pip install GDAL==$(gdal-config
   --version)` → `pip install -r requirements.txt -r requirements-dev.txt -e .`
-  → download qsv 20.0.0 musl zip → `qsvdp` to `/usr/local/bin/` → download
+  → download qsv 20.1.0 musl zip → `qsvdp` to `/usr/local/bin/` → download
   `b3sum` musl binary to `/usr/local/bin/` and `chmod +x`).
 
 ## Integration stack (separate from `dpp-test`)
@@ -284,27 +287,30 @@ hash don't cross-pollinate.
 
 ## qsv date-format inference gaps (issue #173 baseline)
 
-Captured against qsv 20.0.0 (pinned in `Dockerfile.worker` and CI).
-The matrix is pinned in `tests/test_issue_173_date_format_inference.py`;
-when the production qsv version moves, update both the test and the
-issue #173 comment.
+Captured against qsv 20.1.0 (pinned in `Dockerfile.worker` and CI as
+of the qsv 20.0.0 → 20.1.0 bump). The matrix is pinned in
+`tests/test_issue_173_date_format_inference.py`; the test's
+`test_quoted_csv_inference_matrix` skips on qsv ≥ 20.2.0 with an
+actionable message so the next maintainer who bumps the pin past
+20.1.x is forced to update the matrix + this memory together.
 
-Known qsv 20.0.0 gaps on the reporter's 9-format CSV:
-- `ISO 8601 (YYYY-MM-DDTHH:MM:SS)` values like `2024-10-11T14:30:00`
-  (no tz, T-separator) → inferred as **String**. Empirically verified
-  to be recognized as **DateTime** on qsv 20.1.0 (macOS host check
-  during #173 investigation; the regression test
-  `test_quoted_csv_inference_matrix` explicitly skips on qsv ≥ 20.1
-  with an actionable message so the next maintainer who bumps the
-  `Dockerfile.worker` `QSV_VERSION` pin past 20.0.x is forced to
-  update the matrix + this memory together).
+Known qsv 20.1.0 gaps on the reporter's 9-format CSV:
 - `DD-MM-YYYY` (dash-separated, day-first, e.g. `11-10-2024`) →
   **String**. qsv has no heuristic for this format regardless of
   `--prefer-dmy`.
 - `Unix Timestamp` (bare epoch integers) → **Integer**. qsv has no
   heuristic to flag a 10-digit integer column as epoch seconds.
 
-What works on qsv 20.0.0:
+Closed in qsv 20.1.0 vs. 20.0.0:
+- `ISO 8601 (YYYY-MM-DDTHH:MM:SS)` values like `2024-10-11T14:30:00`
+  (no tz, T-separator) — qsv 20.0.0 inferred this as String because
+  qsv-dateparser 0.14 didn't handle the T-separated-no-tz form. qsv
+  20.1.0 bumped qsv-dateparser to 0.15 which adds that format (see
+  qsv 20.1.0 release notes "Changed" section). Now inferred as
+  **DateTime** correctly.
+
+What works on qsv 20.1.0:
+- ISO 8601 (`2024-10-11T14:30:00`) → DateTime ✓ (new in 20.1.0)
 - RFC 2822 (`Fri, 11 Oct 2024 14:30:00 +0000`) → DateTime ✓
 - MM/DD/YYYY → Date ✓
 - YYYY/MM/DD → Date ✓
