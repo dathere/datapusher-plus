@@ -14,6 +14,7 @@ from typing import Any, Optional, Union, Dict, List, Tuple
 import ckan.plugins.toolkit as toolkit
 
 from ckanext.datapusher_plus.model import Jobs, Metadata, Logs
+from ckanext.datapusher_plus.utils import utcnow_naive
 import ckanext.datapusher_plus.job_exceptions as jex
 import ckanext.datapusher_plus.config as conf
 
@@ -342,7 +343,10 @@ def mark_job_as_completed(job_id: str, data: Optional[Any] = None) -> None:
     update_dict = {
         "status": "complete",
         "data": json.dumps(data),
-        "finished_timestamp": datetime.datetime.now(),
+        # Issue #145: persist as naive UTC so the job-status UI shows
+        # a portable timestamp instead of whatever local tz the worker
+        # happens to be running in.
+        "finished_timestamp": utcnow_naive(),
     }
     update_job(job_id, update_dict)
 
@@ -361,7 +365,8 @@ def mark_job_as_errored(job_id: str, error_object: Union[str, Dict[str, str]]) -
     update_dict = {
         "status": "error",
         "error": error_object,
-        "finished_timestamp": datetime.datetime.now(),
+        # Issue #145: see ``mark_job_as_completed`` — UTC, not local.
+        "finished_timestamp": utcnow_naive(),
     }
     update_job(job_id, update_dict)
 

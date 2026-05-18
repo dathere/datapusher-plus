@@ -52,7 +52,7 @@
     <tr>
       <th>{{ _('Last updated') }}</th>
       {% if status.status %}
-        <td><span class="date" title="{{ h.render_datetime(status.last_updated, with_hours=True) }}">{{ h.time_ago_from_timestamp(status.last_updated) }}</span></td>
+        <td><span class="date" title="{{ h.render_datetime(status.last_updated, with_hours=True) }} UTC">{{ h.time_ago_from_timestamp(status.last_updated) }}</span></td>
       {% else %}
         <td>{{ _('Never') }}</td>
       {% endif %}
@@ -74,7 +74,7 @@
           {% for line in item.message.strip().split('\n') %}
             {{ line | urlize }}<br />
           {% endfor %}
-          <span class="date" title="{{ h.render_datetime(item.timestamp, with_hours=True, with_seconds=True) }}">
+          <span class="date" title="{{ h.render_datetime(item.timestamp, with_hours=True, with_seconds=True) }} UTC">
             {{ h.time_ago_from_timestamp(item.timestamp) }}
             <a href="#" data-module="datapusher_popover" data-module-title="Details <a href='#' class='popover-close'>X</a>" data-module-content="<ul class='list-unstyled'>{% for key, value in item.items() %}<li><b>{{ key }}</b>: {{ h.clean_html(value|string) }}</li>{% endfor %}</ul>">              
               {{ _('Details') }}

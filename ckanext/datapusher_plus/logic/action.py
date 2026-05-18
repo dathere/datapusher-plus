@@ -19,6 +19,7 @@ from ckan.common import config
 import ckanext.datapusher_plus.logic.schema as dpschema
 import ckanext.datapusher_plus.interfaces as interfaces
 import ckanext.datapusher_plus.prefect_client as prefect_client
+from ckanext.datapusher_plus.utils import utcnow_naive
 import ckanext.datapusher_plus.utils as utils
 from ckanext.datapusher_plus.jobs.runtime_context import JobInput
 
@@ -98,7 +99,7 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
         "entity_id": res_id,
         "entity_type": "resource",
         "task_type": "datapusher_plus",
-        "last_updated": str(datetime.datetime.utcnow()),
+        "last_updated": utcnow_naive().isoformat(),
         "state": "submitting",
         "key": "datapusher_plus",
         "value": "{}",
@@ -126,10 +127,18 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
             # Query Prefect for resource_ids currently in non-terminal flow
             # runs. Replaces the v2 RQ-queue regex scan.
             queued_res_ids = prefect_client.get_running_resource_ids()
-            updated = datetime.datetime.strptime(
-                existing_task["last_updated"], "%Y-%m-%dT%H:%M:%S.%f"
+            # Symmetric with the write sites that serialize via
+            # ``utcnow_naive().isoformat()`` — ``fromisoformat`` round-trips
+            # the same value cleanly and handles the missing-microseconds
+            # edge case (which the old ``strptime("%Y-%m-%dT%H:%M:%S.%f")``
+            # would raise ``ValueError`` on). Pre-roborev-#2232, the write
+            # side used ``str(datetime)`` which produces a space separator
+            # instead of ``T`` — that latent format mismatch is also
+            # closed by the matched-pair switch.
+            updated = datetime.datetime.fromisoformat(
+                existing_task["last_updated"]
             )
-            time_since_last_updated = datetime.datetime.utcnow() - updated
+            time_since_last_updated = utcnow_naive() - updated
             if (
                 res_id not in queued_res_ids
                 and time_since_last_updated > assume_task_stillborn_after
@@ -227,7 +236,7 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
     value = json.dumps({"job_id": job_id, "flow_run_id": flow_run_id})
     task["value"] = value
     task["state"] = "pending"
-    task["last_updated"] = str(datetime.datetime.utcnow())
+    task["last_updated"] = utcnow_naive().isoformat()
     p.toolkit.get_action("task_status_update")(context, task)
 
     return True
@@ -261,7 +270,7 @@ def datapusher_hook(context: Context, data_dict: dict[str, Any]):
     )
 
     task["state"] = status
-    task["last_updated"] = str(datetime.datetime.utcnow())
+    task["last_updated"] = utcnow_naive().isoformat()
 
     resubmit = False
     if status == "complete":
