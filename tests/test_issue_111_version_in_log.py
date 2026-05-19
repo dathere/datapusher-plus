@@ -26,7 +26,6 @@ rather than drifting via a hand-maintained constant.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -58,18 +57,36 @@ def test_dpp_version_matches_pyproject():
     metadata drifts from the source-of-truth pyproject. Without this
     pin, a botched build could ship a banner reading
     ``"DATAPUSHER+ v0.0.0 starting ..."`` without any test failing.
+
+    Uses a real TOML parser (``tomllib`` on Python 3.11+, falling back
+    to ``tomli`` on 3.10) rather than a regex so the comparison is
+    anchored to the ``[project]`` table specifically — a future edit
+    adding a ``[tool.<x>] version = "..."`` above ``[project]``
+    can't cause a silent wrong-value pass.
     """
     pytest.importorskip("ckanext.datapusher_plus")
     from ckanext.datapusher_plus import __version__
 
-    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    m = re.search(
-        r'^\s*version\s*=\s*"([^"]+)"',
-        pyproject,
-        re.MULTILINE,
+    try:
+        import tomllib
+    except ImportError:
+        try:
+            import tomli as tomllib
+        except ImportError:
+            pytest.skip(
+                "Neither tomllib (Python 3.11+) nor tomli (Python 3.10) "
+                "is available — install tomli to run this test on 3.10."
+            )
+
+    with (REPO_ROOT / "pyproject.toml").open("rb") as fh:
+        data = tomllib.load(fh)
+
+    declared = data.get("project", {}).get("version")
+    assert declared, (
+        "[project].version not found in pyproject.toml — the file "
+        "structure may have drifted from the PEP 621 layout this "
+        "test expects."
     )
-    assert m, "version field not found in pyproject.toml"
-    declared = m.group(1)
 
     # Editable installs that don't register metadata fall back to
     # "unknown" — flag that as a setup issue rather than silently
@@ -82,7 +99,7 @@ def test_dpp_version_matches_pyproject():
     )
     assert __version__ == declared, (
         f"ckanext.datapusher_plus.__version__ ({__version__!r}) does "
-        f"not match pyproject.toml version ({declared!r})"
+        f"not match pyproject.toml [project].version ({declared!r})"
     )
 
 

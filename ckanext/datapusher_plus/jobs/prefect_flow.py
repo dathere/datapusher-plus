@@ -185,6 +185,7 @@ import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.job_exceptions as job_exceptions
 import ckanext.datapusher_plus.prefect_client as prefect_client
 import ckanext.datapusher_plus.utils as utils
+from ckanext.datapusher_plus import __version__ as _dpp_version
 from ckanext.datapusher_plus.jobs import artifacts, events, quarantine
 from ckanext.datapusher_plus.jobs.caching import (
     CONTENT_CACHE_POLICY,
@@ -1174,8 +1175,8 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
     # Issue #111: surface the DP+ version at flow start so the log
     # banner reads "DATAPUSHER+ v3.0.0a0 starting ..." — operators
     # can grep one line to confirm which DP+ they're running without
-    # having to crack open the CKAN container.
-    from ckanext.datapusher_plus import __version__ as _dpp_version
+    # having to crack open the CKAN container. ``_dpp_version`` is
+    # imported at module top.
     prefect_logger.info(
         f"DATAPUSHER+ v{_dpp_version} starting flow for resource "
         f"{job_input.resource_id}"
@@ -1272,6 +1273,17 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
             if _resource_is_datastore_dump(runtime):
                 runtime.logger.info("Dump files are managed with the Datastore API")
                 dph.mark_job_as_completed(job_id, {"skipped": "datastore-managed"})
+                # Issue #111: emit the JOB DONE capstone on this
+                # short-circuit too, with the skip-reason marker —
+                # operators grepping for "JOB DONE!" should hit one
+                # line per completed job regardless of which
+                # success-path the flow took.
+                total_elapsed = time.time() - runtime.timer_start
+                runtime.logger.info(
+                    f"DATAPUSHER+ v{_dpp_version} JOB DONE! "
+                    f"(skipped: datastore-managed) "
+                    f"Total elapsed time: {total_elapsed:,.2f} seconds."
+                )
                 return None
 
             # Read-only / non-destructive stages. ``download_task`` gets
@@ -1326,6 +1338,13 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
             if job_input.dry_run:
                 dph.mark_job_as_completed(
                     job_id, {"headers": runtime.headers_dicts}
+                )
+                # Issue #111: capstone for the dry-run completion.
+                total_elapsed = time.time() - runtime.timer_start
+                runtime.logger.info(
+                    f"DATAPUSHER+ v{_dpp_version} JOB DONE! "
+                    f"(dry-run) "
+                    f"Total elapsed time: {total_elapsed:,.2f} seconds."
                 )
                 return None
 
