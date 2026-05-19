@@ -8,8 +8,7 @@
 
 DataPusher+ is a fork of [Datapusher](https://github.com/ckan/datapusher) that combines the speed and robustness of [ckanext-xloader](https://github.com/ckan/ckanext-xloader) with the data type guessing of Datapusher - [super-powered with the ability to infer, calculate & suggest metadata using Jinja2 formulas defined in the scheming configuration file](docs/dataset_schema.yaml).
 
-
-https://github.com/user-attachments/assets/b2fc2c3a-d244-4d11-9cf3-8270f0e99162
+![DRUF + Suggestions demo: DP+ ingesting a CSV, inferring metadata via Jinja2 formulas, and surfacing per-field Suggestions in the CKAN scheming form](docs/images/druf-suggestions-demo.gif)
 
 
 The Formulas have access to not just the `package` and `resource` fields (in the same namespaces), it also has access to the following information in these additional namespaces that can be used in Jinja2 expressions:
