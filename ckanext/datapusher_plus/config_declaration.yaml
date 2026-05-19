@@ -63,6 +63,32 @@ groups:
         description: |
           Download proxy
 
+      - key: ckanext.datapusher_plus.download_always_whitelist
+        editable: true
+        default: ""
+        description: |
+          Whitespace-separated list of hostnames whose resources should
+          always be re-processed by DP+, bypassing the file-hash-based
+          upload-skip optimization (see ``_should_skip_upload`` in the
+          download stage). Use this for hosts that update content in
+          place without changing the published byte hash (e.g., daily-
+          refreshed reports that overwrite the same URL with the same
+          bytes but logically-different rows), or for local/peered
+          hosts where re-download cost is negligible and operators
+          want forced re-analysis on every push.
+
+          Matching is case-insensitive on the URL hostname; ports are
+          ignored. Empty (default) → all hosts go through the normal
+          hash-skip path. Worker restart is required for changes to
+          take effect.
+
+          Example::
+
+              ckanext.datapusher_plus.download_always_whitelist =
+                  data.internal.gov data.partner.org localhost
+
+          Issue #61.
+
       - key: ckanext.datapusher_plus.dictionary_stash_dir
         editable: true
         default: ""

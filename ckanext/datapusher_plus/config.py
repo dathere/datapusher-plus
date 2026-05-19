@@ -112,6 +112,24 @@ IGNORE_FILE_HASH = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False)
 )
 
+# Issue #61: hostnames whose resources should always be re-processed by
+# DP+, bypassing the file-hash-based upload-skip optimization in the
+# download stage's ``_should_skip_upload``. Use this for hosts that
+# update content in place without changing the published byte hash
+# (e.g., daily-refreshed reports that overwrite the same URL), or for
+# local/peered hosts where re-download is cheap and operators want
+# forced re-analysis. Whitespace-separated string in ckan.ini; parsed
+# once at import and lowercased into a ``set`` for O(1) lookups.
+# Empty (default) → all hosts go through the normal hash-skip path.
+DOWNLOAD_ALWAYS_WHITELIST = tk.config.get(
+    "ckanext.datapusher_plus.download_always_whitelist", ""
+)
+if isinstance(DOWNLOAD_ALWAYS_WHITELIST, str):
+    DOWNLOAD_ALWAYS_WHITELIST = DOWNLOAD_ALWAYS_WHITELIST.split()
+DOWNLOAD_ALWAYS_WHITELIST = frozenset(
+    h.lower() for h in DOWNLOAD_ALWAYS_WHITELIST if h
+)
+
 # Issue #221: ``ckanext.datapusher_plus.file_hash_algorithm`` is declared in
 # ``config_declaration.yaml`` but intentionally NOT mirrored here as a
 # module-level constant. The setting is ``editable: true`` and the download

@@ -76,6 +76,38 @@ def _get_file_hasher():
     )
 
 
+def _host_in_always_whitelist(url: str) -> bool:
+    """Return True if ``url``'s hostname is in DOWNLOAD_ALWAYS_WHITELIST.
+
+    Used by the download stage to bypass the hash-skip optimization
+    in ``_should_skip_upload`` for trusted/peered hosts or hosts
+    that update content in place without changing the published
+    byte hash. See issue #61 for the operator-side rationale and
+    ``config.py:DOWNLOAD_ALWAYS_WHITELIST`` for the parsed shape.
+
+    Args:
+        url: The resource URL as stored in ``resource["url"]``.
+
+    Returns:
+        ``True`` if the URL's hostname (case-folded, port stripped)
+        is in the configured whitelist. ``False`` when the whitelist
+        is empty, the URL is missing or unparseable, or the URL has
+        no hostname (relative URLs, ``file://`` with empty host,
+        etc.) — i.e., the safe default is "do not bypass."
+    """
+    if not conf.DOWNLOAD_ALWAYS_WHITELIST:
+        return False
+    if not url:
+        return False
+    try:
+        host = urlparse(url).hostname
+    except (ValueError, AttributeError):
+        return False
+    if not host:
+        return False
+    return host.lower() in conf.DOWNLOAD_ALWAYS_WHITELIST
+
+
 class DownloadStage(BaseStage):
     """
     Downloads the resource file, validates it, and handles ZIP extraction.
@@ -383,6 +415,23 @@ class DownloadStage(BaseStage):
         Returns:
             True if upload should be skipped, False otherwise
         """
+        # Issue #61: forced re-processing for operator-whitelisted hosts.
+        # Bypasses the hash-skip path entirely so resources from these
+        # hosts get re-downloaded + re-analyzed on every push. This is
+        # intended for hosts that update content in place without
+        # changing the byte hash (e.g., a daily report that overwrites
+        # the same URL with the same template but new underlying data),
+        # or for local/peered hosts where re-download is essentially
+        # free and operators want forced re-analysis.
+        url = context.resource.get("url", "") if context.resource else ""
+        if _host_in_always_whitelist(url):
+            context.logger.info(
+                "Host %r is in DOWNLOAD_ALWAYS_WHITELIST; forcing "
+                "re-processing (bypassing hash-skip).",
+                urlparse(url).hostname,
+            )
+            return False
+
         # Check if resource metadata was updated
         resource_updated = False
         resource_last_modified = context.resource.get("last_modified")
