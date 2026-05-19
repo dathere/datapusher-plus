@@ -433,22 +433,37 @@ def test_config_declaration_default_matches_live_read_fallback():
     rather than ``config.py`` — AST-parse that file instead.
     """
     import ast
-    import yaml
 
-    # Read declaration default
+    # PyYAML import guarded the same way the #112 / #142 drift-guards
+    # do — CI environments that run pytest without the extension's
+    # full dep set still get a useful skip rather than an ImportError.
+    try:
+        import yaml
+    except ImportError:
+        pytest.skip("PyYAML not available")
+
+    # Iterate all groups + options so this guard survives a future
+    # ``config_declaration.yaml`` restructure (additional groups, key
+    # moved between groups, etc.) — same shape as #112's drift guard.
     yaml_path = (
         REPO_ROOT
         / "ckanext"
         / "datapusher_plus"
         / "config_declaration.yaml"
     )
-    with yaml_path.open() as fh:
-        decl = yaml.safe_load(fh)
-    options = decl["groups"][0]["options"]
-    whitelist_decl = next(
-        opt
-        for opt in options
-        if opt["key"] == "ckanext.datapusher_plus.download_always_whitelist"
+    decl = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    target_key = "ckanext.datapusher_plus.download_always_whitelist"
+    whitelist_decl = None
+    for group in decl.get("groups", []):
+        for opt in group.get("options", []):
+            if opt.get("key") == target_key:
+                whitelist_decl = opt
+                break
+        if whitelist_decl is not None:
+            break
+    assert whitelist_decl is not None, (
+        f"{target_key} is missing from config_declaration.yaml — "
+        "issue #61 should declare it."
     )
     assert whitelist_decl["default"] == ""
     assert whitelist_decl["editable"] is True
