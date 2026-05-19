@@ -16,7 +16,7 @@ on:
       qsv_version:
         description: 'qsv version to install'
         required: false
-        default: '20.0.0'
+        default: '20.1.0'
         type: string
       polling_timeout_seconds:
         description: 'Max seconds to wait for DataPusher to process each file'
@@ -33,7 +33,7 @@ permissions:
 
 env:
   FILES_DIR: ${{ github.event.inputs.testing_directory || 'quick' }}
-  QSV_VER: ${{ github.event.inputs.qsv_version || '20.0.0' }}
+  QSV_VER: ${{ github.event.inputs.qsv_version || '20.1.0' }}
   # 90s ceiling (45 polls x 2s): a Prefect flow run spawns a fresh interpreter
   # and bootstraps the full CKAN app context, so per-job latency is ~20-30s --
   # well above the old RQ path. Matches main.yml's polling window.

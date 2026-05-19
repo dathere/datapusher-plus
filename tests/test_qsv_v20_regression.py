@@ -4,7 +4,7 @@
 qsv 20.0.0 upgrade regression tests.
 
 Exercises the qsv behaviors that changed between the previous
-MINIMUM_QSV_VERSION (4.0.0) and the new floor (20.0.0). These tests shell
+MINIMUM_QSV_VERSION (4.0.0) and the current floor (20.1.0; previously 20.0.0). These tests shell
 out directly to the qsv binary (resolved from the QSV_BIN env var or `qsv` /
 `qsvdp` on PATH) rather than through QSVCommand so that they exercise the
 qsv contract DP+ depends on without requiring CKAN config bootstrap.
@@ -449,7 +449,11 @@ class TestMinimumQsvVersion:
     importing `ckanext.*` so the test runs in any env (CI, local) without
     a CKAN bootstrap."""
 
-    def test_minimum_qsv_version_constant_is_20(self):
+    def test_minimum_qsv_version_constant_is_pinned(self):
+        # Bumped from 20.0.0 → 20.1.0 alongside the qsv-dateparser
+        # 0.14→0.15 bump that closes the ISO 8601 T-separated-no-tz
+        # inference gap (one of the #173 gaps). See CHANGELOG entry
+        # under [Unreleased] for the operator-facing breaking note.
         config_py = REPO_ROOT / "ckanext" / "datapusher_plus" / "config.py"
         text = config_py.read_text(encoding="utf-8")
         m = re.search(
@@ -458,6 +462,6 @@ class TestMinimumQsvVersion:
             re.MULTILINE,
         )
         assert m, f"MINIMUM_QSV_VERSION constant not found in {config_py}"
-        assert m.group(1) == "20.0.0", (
-            f"MINIMUM_QSV_VERSION must be '20.0.0' (got {m.group(1)!r})"
+        assert m.group(1) == "20.1.0", (
+            f"MINIMUM_QSV_VERSION must be '20.1.0' (got {m.group(1)!r})"
         )

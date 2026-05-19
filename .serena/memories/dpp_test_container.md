@@ -24,7 +24,12 @@ rebuilding.
   libproj-dev` + `build-essential` etc.
 - GDAL python 3.6.2, `requirements.txt` + `requirements-dev.txt`,
   `pip install -e .` (→ `datapusher-plus 3.0.0a0`, editable).
-- qsv 20.0.0 at `/usr/local/bin/qsvdp`.
+- qsv 20.1.0 at `/usr/local/bin/qsvdp` (bumped from 20.0.0 — no
+  breaking changes per the qsv 20.1.0 release notes; pipelines built
+  against 20.0.0 upgrade in place).
+- `b3sum` CLI at `/usr/local/bin/b3sum` (added by PR #309 for the
+  configurable file-hash feature — required by tests that exercise the
+  `blake3` algorithm via the external `b3sum` binary path).
 
 ## Run the unit suite
 ```bash
@@ -36,20 +41,45 @@ Required env, and why:
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` — ckan-dev's site-packages registers a
   pytest plugin that calls `make_app()` in `pytest_sessionstart`, needing a
   fully-configured CKAN. Disable autoload so plain pytest runs.
-- `QSV_BIN=/usr/local/bin/qsvdp` — for `test_qsv_v20_regression.py`.
+- `QSV_BIN=/usr/local/bin/qsvdp` — for `test_qsv_v20_regression.py`
+  and `test_issue_173_date_format_inference.py`.
 - `CKAN_INI=/srv/app/src/ckan/test-core.ini` — the image's default
   `/srv/app/ckan.ini` is NOT populated when the entrypoint is bypassed;
   `test-core.ini` has a real `SECRET_KEY`.
 - `-o addopts=` — overrides `setup.cfg`'s `--pdbcls=IPython...` addopt.
 - `tests/integration/` excluded — needs the integration stack (see below).
 
-## Known result (as of 2026-05-18)
-**196/196 Python unit tests pass** on `main` (post-PR-#298 → #308 merges).
-Earlier handoff noted a flow-test that pre-imported a CKAN context; that
-path is no longer in the unit suite.
+## Known result (as of 2026-05-18, `main` @ `9a8a6c7` + WIP)
+**222/222 Python unit tests pass** on `main` after the #299 → #314 merges
+plus the in-flight `tests/test_issue_173_date_format_inference.py`.
 
-The JS unit suite (Vitest + jsdom, PR #304) adds **12 tests** for
-`scheming-ai-suggestions.js`. Runs on the host, not in `dpp-test`:
+Test count moved from 196 (prior handoff baseline) to 222 over this
+arc — a **net +26**. The breakdown isn't a simple "+47 added across
+the new files" because the #307–#314 refactors also removed or
+consolidated some pre-existing tests (e.g. earlier helpers superseded
+by `dictionary_stash`, hash-related tests folded into the
+algorithm-aware suite). The net is reproducible (`pytest tests/
+--ignore=tests/integration --collect-only -q`); the per-file gross
+adds below are the new-file additions only — not the net delta.
+
+New-file gross additions (collected via ``pytest --collect-only -q``):
+- `tests/test_dictionary_stash.py` — 21 tests (PR #307)
+- `tests/test_utcnow_naive.py` — 4 tests (PR #308)
+- `tests/test_file_hash_algorithm.py` — 10 tests (PR #309)
+- `tests/test_metadata_hash_persistence.py` — 3 tests (PR #312, regression for #310)
+- `tests/test_rehydrate_resource_identity.py` — 4 tests (PR #313, regression for #311)
+- `tests/test_date_without_timestamp.py` — 5 tests (PR #314, regression for #179)
+- `tests/test_issue_173_date_format_inference.py` — 4 tests (regression
+  for #173 — qsv date-format inference coverage + malformed-CSV
+  quarantine precondition; needs `QSV_BIN` env var to run, otherwise
+  skips cleanly)
+- Gross sum of the rows above: **51**. Net delta vs. prior handoff: **+26**.
+  The 25-test gap is the removed/consolidated subset across the same
+  PRs; if you need the exact accounting, walk `git log --diff-filter=D
+  --name-only -- tests/` across the #299..#314 range.
+
+The JS unit suite (Vitest + jsdom, PR #304) is unchanged at **12 tests**
+for `scheming-ai-suggestions.js`. Runs on the host, not in `dpp-test`:
 ```bash
 npm install                     # first time only
 npx vitest run                  # one-shot
@@ -69,7 +99,8 @@ module registration state doesn't bleed.
   -v <repo>:/repo -w /repo ckan/ckan-dev:2.11 sleep infinity`, then re-run
   the `ci.yml`-style install (apt geo libs → `pip install GDAL==$(gdal-config
   --version)` → `pip install -r requirements.txt -r requirements-dev.txt -e .`
-  → download qsv 20.0.0 musl zip → `qsvdp` to `/usr/local/bin/`).
+  → download qsv 20.1.0 musl zip → `qsvdp` to `/usr/local/bin/` → download
+  `b3sum` musl binary to `/usr/local/bin/` and `chmod +x`).
 
 ## Integration stack (separate from `dpp-test`)
 
@@ -198,3 +229,116 @@ The resource-data UI template now surfaces "UTC" suffix in timestamp
 tooltips. Test coverage: `tests/test_utcnow_naive.py` (4 tests, including
 a real `TZ=Pacific/Auckland` + `time.tzset()` flip that proves the
 helper returns UTC even when the process tz is not UTC).
+
+## Configurable file-hash algorithm (PR #309, issue #221)
+
+DP+ now supports three file-hash algorithms for resource integrity
+checks, selectable via `ckanext.datapusher_plus.file_hash_algorithm`:
+
+- `blake3` (default) — ~10x faster than sha256, computed via the
+  `b3sum` CLI installed in worker / CI / `dpp-test`.
+- `sha256` — for DCAT3 / Croissant interoperability (those specs
+  require sha256).
+- `md5` — legacy compatibility only.
+
+Implementation lives in `ckanext/datapusher_plus/file_hash.py` with a
+single `compute_file_hash(path, algorithm)` dispatcher. `blake3` shells
+out to `b3sum --no-names`; `sha256`/`md5` use Python `hashlib` with
+chunked reads. Tests in `tests/test_file_hash_algorithm.py` pin all
+three algorithms against known fixtures.
+
+## file_hash preservation across metadata-stage re-fetch (PR #312, issue #310)
+
+Caught during #309 smoke testing: `MetadataStage` re-fetches the resource
+dict (to get the latest CKAN state before applying suggestions) and that
+re-fetched dict OVERWRITES `ctx.resource`, discarding the `file_hash`
+that the download stage had just computed. Fix is a single line in
+`jobs/stages/metadata.py` that restores `file_hash` from `context.file_hash`
+after the re-fetch:
+
+```python
+ctx.resource = refreshed
+if ctx.file_hash:
+    ctx.resource["file_hash"] = ctx.file_hash
+```
+
+`context.file_hash` is the authoritative value (set by `DownloadStage`),
+so the re-fetched resource dict's stale/missing `file_hash` should never
+win. Regression test: `tests/test_metadata_hash_persistence.py`.
+
+## DownloadResult rehydrate cross-resource cache leak (PR #313, issue #311)
+
+Also caught during #309 smoke testing. The `_apply_result` codepath for
+the cached `DownloadResult` was wholesale-replacing `ctx.resource` with
+the CACHED resource dict — which had a different `resource_id` than the
+job currently being processed. Downstream `TRUNCATE` then targeted the
+wrong table (or failed with "relation does not exist" if the cached
+resource had been deleted). Fix:
+
+- `_apply_result` for `DownloadResult` no longer overwrites `ctx.resource`
+  on a cache hit. Only the truly download-derived fields
+  (`file_path`, `file_hash`, `mime_type`, `file_size`) are applied.
+- `ctx.resource` keeps the live resource dict that the orchestrator
+  populated at job start.
+
+Regression test: `tests/test_rehydrate_resource_identity.py` asserts that
+two consecutive runs with different `resource_id`s but identical content
+hash don't cross-pollinate.
+
+## qsv date-format inference gaps (issue #173 baseline)
+
+Captured against qsv 20.1.0 (pinned in `Dockerfile.worker` and CI as
+of the qsv 20.0.0 → 20.1.0 bump). The matrix is pinned in
+`tests/test_issue_173_date_format_inference.py`; the test's
+`test_quoted_csv_inference_matrix` skips on qsv ≥ 20.2.0 with an
+actionable message so the next maintainer who bumps the pin past
+20.1.x is forced to update the matrix + this memory together.
+
+Known qsv 20.1.0 gaps on the reporter's 9-format CSV:
+- `DD-MM-YYYY` (dash-separated, day-first, e.g. `11-10-2024`) →
+  **String**. qsv has no heuristic for this format regardless of
+  `--prefer-dmy`.
+- `Unix Timestamp` (bare epoch integers) → **Integer**. qsv has no
+  heuristic to flag a 10-digit integer column as epoch seconds.
+
+Closed in qsv 20.1.0 vs. 20.0.0:
+- `ISO 8601 (YYYY-MM-DDTHH:MM:SS)` values like `2024-10-11T14:30:00`
+  (no tz, T-separator) — qsv 20.0.0 inferred this as String because
+  qsv-dateparser 0.14 didn't handle the T-separated-no-tz form. qsv
+  20.1.0 bumped qsv-dateparser to 0.15 which adds that format (see
+  qsv 20.1.0 release notes "Changed" section). Now inferred as
+  **DateTime** correctly.
+
+What works on qsv 20.1.0:
+- ISO 8601 (`2024-10-11T14:30:00`) → DateTime ✓ (new in 20.1.0)
+- RFC 2822 (`Fri, 11 Oct 2024 14:30:00 +0000`) → DateTime ✓
+- MM/DD/YYYY → Date ✓
+- YYYY/MM/DD → Date ✓
+- DD/MM/YYYY HH:MM → DateTime (interpreted as MDY by default — set
+  `ckanext.datapusher_plus.prefer_dmy = True` to flip)
+- YYYY-MM-DD HH:MM:SS → DateTime ✓
+
+The reporter's actual CSV in #173 is malformed (unquoted comma inside
+RFC 2822 values → header has 10 fields, every data row has 11).
+v3.0's `ValidationStage` catches this cleanly via the quarantine pass
+(see #265 stash / quarantine sections + `tests/test_validation_quarantine.py`).
+The original "wrong format" symptom in v1.0.3 was column shifting
+masquerading as a date-format issue.
+
+## qsv Date → Postgres date (PR #314, issue #179)
+
+`config_declaration.yaml`'s default for `qsv_dp_type_to_pg_type` had
+`"Date": "timestamp"` while `config.py`'s inline fallback (which always
+loses against the declaration) had `"Date": "date"`. Result: every
+column qsv inferred as `Date` got stored as Postgres `timestamp` with
+midnight time-of-day, defeating the point of having a separate `Date`
+type. Fix is a one-line change to `config_declaration.yaml`:
+`"Date": "date"`.
+
+Knock-on change: `_get_date_like_columns` in `jobs/stages/indexing.py`
+previously only matched `timestamp` columns when picking candidates for
+`AUTO_INDEX_DATES`. It now matches both `date` and `timestamp`, so the
+indexer still creates dates indexes after the type-mapping fix.
+
+Regression test: `tests/test_date_without_timestamp.py` asserts the
+declaration default and the indexer's column-type filter agree.
