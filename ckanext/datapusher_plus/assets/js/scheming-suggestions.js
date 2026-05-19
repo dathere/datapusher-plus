@@ -144,6 +144,46 @@ ckan.module('scheming-suggestions', function($) {
 
                 if (dppPackageSuggestions.hasOwnProperty(fieldName)) {
                     var suggestionValue = dppPackageSuggestions[fieldName];
+
+                    // Disable the button when the field has no usable suggestion.
+                    // - null/undefined: backend correctly emitted JSON null (post-#261 fix).
+                    // - '': empty string after Jinja2 render (kept as a safety net even though the
+                    //   backend now coerces these to null).
+                    // - 'None': backwards-compat for resources ingested BEFORE the #261 backend fix
+                    //   landed — those have the literal string "None" stored in dpp_suggestions
+                    //   from when Jinja2's str(None) was passed through verbatim. Safe to drop
+                    //   once cached/legacy data has been re-ingested. roborev #2289 LOW.
+                    // - whitespace-only strings: legacy data + templates without trim markers may
+                    //   carry " " / "\n" through; treat as no-suggestion. Copilot review on #322.
+                    var isWhitespaceOnlyString = (
+                        typeof suggestionValue === 'string'
+                        && suggestionValue.trim() === ''
+                    );
+                    if (suggestionValue === null
+                        || suggestionValue === undefined
+                        || suggestionValue === 'None'
+                        || isWhitespaceOnlyString
+                    ) {
+                        // Strip any state classes left by a prior _processPackageSuggestions pass
+                        // (polling updates, re-renders) so the button doesn't end up with a mixed
+                        // error/ready/disabled visual. roborev #2289 LOW.
+                        $buttonEl.removeClass('suggestion-btn-error suggestion-btn-ready');
+                        $buttonEl.addClass('suggestion-btn-disabled');
+                        $buttonEl.attr('title', self.options.noSuggestionTitle);
+                        $buttonEl.prop('disabled', true);
+                        $buttonEl.show();
+                        self._hideFieldLoadingIndicator($buttonEl);
+                        return;
+                    }
+
+                    // Non-disabled branch — explicitly re-enable in case a
+                    // prior pass over the same DOM (polling, edit flow) had
+                    // left the button in the disabled state. Without this,
+                    // a field that transitions from null → real-suggestion
+                    // stays greyed out and unclickable. Copilot review on #322.
+                    $buttonEl.removeClass('suggestion-btn-disabled');
+                    $buttonEl.prop('disabled', false);
+                    
                     var isErrorSuggestion = typeof suggestionValue === 'string' && suggestionValue.startsWith(self.options.errorPrefix);
                     var suggestionLabel = fieldSchema.suggestion_label || fieldSchema.label || 'Suggestion';
                     var suggestionFormula = fieldSchema.suggestion_formula || 'N/A'; 
@@ -501,6 +541,12 @@ ckan.module('scheming-suggestions', function($) {
             $(el).on('click', function(e) {
                 e.preventDefault();
                 e.stopPropagation();
+                
+                // Prevent clicks on disabled buttons
+                if ($(el).hasClass('suggestion-btn-disabled') || $(el).prop('disabled')) {
+                    return;
+                }
+                
                 if ($popoverDiv.is(':empty') && !$popoverDiv.html().trim()) { return; } // Check if truly empty
                 $('.custom-suggestion-popover').not($popoverDiv).hide();
                 var buttonPos = $(el).offset();

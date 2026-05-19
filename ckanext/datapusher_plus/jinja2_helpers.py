@@ -211,6 +211,36 @@ class FormulaProcessor:
             try:
                 formula = jinja2_env.get_template(field_name)
                 rendered_formula = formula.render(**context)
+                
+                # Coerce Jinja2's stringified empty/none outputs back to
+                # actual Python ``None`` so ``dpp_suggestions`` JSON serializes
+                # ``null`` and the frontend can grey out the suggestion button
+                # (issue #261). We ``.strip()`` first so whitespace-only renders
+                # (the ``" "`` / ``"\n"`` output of ``{% if %}`` blocks missing
+                # ``-`` trim markers) are caught too — roborev #2289 LOW.
+                #
+                # Gated on ``formula_type == "suggestion_formula"`` because
+                # this method also handles direct ``formula`` updates (see
+                # ``jobs/stages/formula.py:290,321``) that write straight into
+                # the package/resource dict. Coercing ``""`` → ``None`` on
+                # those would change patch semantics for fields where the
+                # CKAN validator treats empty string and null differently
+                # (caught by Copilot review on PR #322).
+                #
+                # KNOWN LIMITATION for the suggestion path: a formula that
+                # legitimately renders the literal string ``"None"`` (e.g. a
+                # license field) will also coerce to ``None``. Deliberate —
+                # ``scheming-suggestions.js`` relies on ``null`` (not
+                # ``"None"``) to distinguish "no suggestion" from a real
+                # value. Scheming YAMLs that need to emit the literal text
+                # "None" should pick a different label (``"none"`` lowercase,
+                # ``"N/A"``, etc.).
+                if (
+                    formula_type == "suggestion_formula"
+                    and rendered_formula.strip() in ("", "None")
+                ):
+                    rendered_formula = None
+
                 updates[field_name] = rendered_formula
 
                 self.logger.debug(
