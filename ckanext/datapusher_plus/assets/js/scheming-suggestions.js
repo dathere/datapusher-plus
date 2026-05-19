@@ -153,7 +153,17 @@ ckan.module('scheming-suggestions', function($) {
                     //   landed — those have the literal string "None" stored in dpp_suggestions
                     //   from when Jinja2's str(None) was passed through verbatim. Safe to drop
                     //   once cached/legacy data has been re-ingested. roborev #2289 LOW.
-                    if (suggestionValue === null || suggestionValue === undefined || suggestionValue === 'None' || suggestionValue === '') {
+                    // - whitespace-only strings: legacy data + templates without trim markers may
+                    //   carry " " / "\n" through; treat as no-suggestion. Copilot review on #322.
+                    var isWhitespaceOnlyString = (
+                        typeof suggestionValue === 'string'
+                        && suggestionValue.trim() === ''
+                    );
+                    if (suggestionValue === null
+                        || suggestionValue === undefined
+                        || suggestionValue === 'None'
+                        || isWhitespaceOnlyString
+                    ) {
                         // Strip any state classes left by a prior _processPackageSuggestions pass
                         // (polling updates, re-renders) so the button doesn't end up with a mixed
                         // error/ready/disabled visual. roborev #2289 LOW.
@@ -165,6 +175,14 @@ ckan.module('scheming-suggestions', function($) {
                         self._hideFieldLoadingIndicator($buttonEl);
                         return;
                     }
+
+                    // Non-disabled branch — explicitly re-enable in case a
+                    // prior pass over the same DOM (polling, edit flow) had
+                    // left the button in the disabled state. Without this,
+                    // a field that transitions from null → real-suggestion
+                    // stays greyed out and unclickable. Copilot review on #322.
+                    $buttonEl.removeClass('suggestion-btn-disabled');
+                    $buttonEl.prop('disabled', false);
                     
                     var isErrorSuggestion = typeof suggestionValue === 'string' && suggestionValue.startsWith(self.options.errorPrefix);
                     var suggestionLabel = fieldSchema.suggestion_label || fieldSchema.label || 'Suggestion';
