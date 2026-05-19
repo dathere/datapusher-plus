@@ -77,10 +77,17 @@ groups:
           hosts where re-download cost is negligible and operators
           want forced re-analysis on every push.
 
-          Matching is case-insensitive on the URL hostname; ports are
-          ignored. Empty (default) → all hosts go through the normal
-          hash-skip path. Worker restart is required for changes to
-          take effect.
+          The download stage reads this value live from ``tk.config``
+          (per the ``file_hash_algorithm`` pattern from #221), so
+          admin-UI edits take effect on the next download — no worker
+          restart needed.
+
+          Matching is case-insensitive on the URL hostname and ports
+          are ignored. **Exact-match only** — ``data.gov`` in the
+          whitelist does NOT match ``subdomain.data.gov``; list each
+          host separately if you need multiple subdomains. Empty
+          (default) → all hosts go through the normal hash-skip
+          path.
 
           Example::
 
