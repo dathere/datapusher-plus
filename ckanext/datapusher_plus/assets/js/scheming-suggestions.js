@@ -144,9 +144,20 @@ ckan.module('scheming-suggestions', function($) {
 
                 if (dppPackageSuggestions.hasOwnProperty(fieldName)) {
                     var suggestionValue = dppPackageSuggestions[fieldName];
-                    
-                    // Check if suggestion value is null/undefined/None string - disable button if so
+
+                    // Disable the button when the field has no usable suggestion.
+                    // - null/undefined: backend correctly emitted JSON null (post-#261 fix).
+                    // - '': empty string after Jinja2 render (kept as a safety net even though the
+                    //   backend now coerces these to null).
+                    // - 'None': backwards-compat for resources ingested BEFORE the #261 backend fix
+                    //   landed — those have the literal string "None" stored in dpp_suggestions
+                    //   from when Jinja2's str(None) was passed through verbatim. Safe to drop
+                    //   once cached/legacy data has been re-ingested. roborev #2289 LOW.
                     if (suggestionValue === null || suggestionValue === undefined || suggestionValue === 'None' || suggestionValue === '') {
+                        // Strip any state classes left by a prior _processPackageSuggestions pass
+                        // (polling updates, re-renders) so the button doesn't end up with a mixed
+                        // error/ready/disabled visual. roborev #2289 LOW.
+                        $buttonEl.removeClass('suggestion-btn-error suggestion-btn-ready');
                         $buttonEl.addClass('suggestion-btn-disabled');
                         $buttonEl.attr('title', self.options.noSuggestionTitle);
                         $buttonEl.prop('disabled', true);

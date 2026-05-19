@@ -157,6 +157,41 @@ def test_empty_template_render_is_coerced_to_python_none():
     )
 
 
+
+def test_whitespace_only_template_render_is_coerced_to_python_none():
+    """Roborev #2289 LOW caught this: the initial fix used ``== ""``,
+    which doesn't match whitespace-only Jinja2 output. A common case is
+    a ``{% if %}`` block missing the ``-`` trim markers — the template
+    renders to ``" "`` or ``"\\n"`` instead of an empty string, and
+    that string would have leaked through as a "non-empty suggestion."
+
+    The strengthened check (``.strip() in ("", "None")``) catches all
+    three: empty, whitespace-only, and the ``"None"`` sentinel.
+    """
+    proc = _build_stub_processor()
+    proc.scheming_yaml = _yaml_with([
+        # ``{% if %}`` without trim markers — common source of stray
+        # whitespace in Jinja2 outputs.
+        ("publisher", "  \n  {% if dpp.LAT_FIELD %}{{ dpp.LAT_FIELD }}{% endif %}  \n"),
+        ("notes", "   "),
+        ("category", "\n\t  "),
+    ])
+
+    updates = proc.process_formulae(
+        entity_type="package",
+        fields_key="dataset_fields",
+        formula_type=SUGGEST_FORMULA,
+    )
+
+    for field in ("publisher", "notes", "category"):
+        assert updates[field] is None, (
+            f"Whitespace-only Jinja2 output for {field!r} must coerce to "
+            f"Python None; got {updates[field]!r} — if this regresses, "
+            "the suggestion button will display whitespace as a "
+            "'clickable suggestion' (roborev #2289 LOW)."
+        )
+
+
 def test_real_values_pass_through_unchanged():
     """Negative control: the None-coercion must not swallow
     legitimate non-empty formula outputs. ``"None"`` and ``""`` are

@@ -212,10 +212,24 @@ class FormulaProcessor:
                 formula = jinja2_env.get_template(field_name)
                 rendered_formula = formula.render(**context)
                 
-                # Convert Jinja2's string "None" back to actual None for proper JSON serialization
-                if rendered_formula == "None" or rendered_formula == "":
+                # Coerce Jinja2's stringified empty/none outputs back to
+                # actual Python ``None`` so ``dpp_suggestions`` JSON serializes
+                # ``null`` and the frontend can grey out the suggestion button
+                # (issue #261). We ``.strip()`` first so whitespace-only renders
+                # (the ``" "`` / ``"\n"`` output of ``{% if %}`` blocks missing
+                # ``-`` trim markers) are caught too — roborev #2289 LOW.
+                #
+                # KNOWN LIMITATION: a formula that legitimately renders the
+                # literal string ``"None"`` (e.g. a license field) will also
+                # coerce to ``None``. This is deliberate — the front-end
+                # ``scheming-suggestions.js`` relies on ``null`` (not ``"None"``)
+                # to distinguish "no suggestion" from a real value. Scheming
+                # YAMLs that need to emit the literal text "None" should pick a
+                # different label (``"none"`` lowercase, ``"N/A"``, etc.).
+                if rendered_formula.strip() in ("", "None"):
                     rendered_formula = None
-                    
+
+
                 updates[field_name] = rendered_formula
 
                 self.logger.debug(
