@@ -185,6 +185,7 @@ import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.job_exceptions as job_exceptions
 import ckanext.datapusher_plus.prefect_client as prefect_client
 import ckanext.datapusher_plus.utils as utils
+from ckanext.datapusher_plus import __version__ as _dpp_version
 from ckanext.datapusher_plus.jobs import artifacts, events, quarantine
 from ckanext.datapusher_plus.jobs.caching import (
     CONTENT_CACHE_POLICY,
@@ -1171,8 +1172,14 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
         job_input = JobInput(**job_input)
 
     prefect_logger = get_run_logger()
+    # Issue #111: surface the DP+ version at flow start so the log
+    # banner reads "DATAPUSHER+ v3.0.0a0 starting ..." — operators
+    # can grep one line to confirm which DP+ they're running without
+    # having to crack open the CKAN container. ``_dpp_version`` is
+    # imported at module top.
     prefect_logger.info(
-        f"Starting datapusher-plus flow for resource {job_input.resource_id}"
+        f"DATAPUSHER+ v{_dpp_version} starting flow for resource "
+        f"{job_input.resource_id}"
     )
 
     flow_run_id = prefect_client.get_current_flow_run_id()
@@ -1266,6 +1273,17 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
             if _resource_is_datastore_dump(runtime):
                 runtime.logger.info("Dump files are managed with the Datastore API")
                 dph.mark_job_as_completed(job_id, {"skipped": "datastore-managed"})
+                # Issue #111: emit the JOB DONE capstone on this
+                # short-circuit too, with the skip-reason marker —
+                # operators grepping for "JOB DONE!" should hit one
+                # line per completed job regardless of which
+                # success-path the flow took.
+                total_elapsed = time.time() - runtime.timer_start
+                runtime.logger.info(
+                    f"DATAPUSHER+ v{_dpp_version} JOB DONE! "
+                    f"(skipped: datastore-managed) "
+                    f"Total elapsed time: {total_elapsed:,.2f} seconds."
+                )
                 return None
 
             # Read-only / non-destructive stages. ``download_task`` gets
@@ -1321,6 +1339,13 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
                 dph.mark_job_as_completed(
                     job_id, {"headers": runtime.headers_dicts}
                 )
+                # Issue #111: capstone for the dry-run completion.
+                total_elapsed = time.time() - runtime.timer_start
+                runtime.logger.info(
+                    f"DATAPUSHER+ v{_dpp_version} JOB DONE! "
+                    f"(dry-run) "
+                    f"Total elapsed time: {total_elapsed:,.2f} seconds."
+                )
                 return None
 
             # Observability surface for a successful run: a Data Quality
@@ -1360,6 +1385,16 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
                     "headers": runtime.headers_dicts,
                 },
             )
+
+            # Issue #111: capstone log line carrying the DP+ version
+            # and total wall-clock — mirrors the pre-v2 "DATAPUSHER+
+            # JOB DONE!" banner the reporter remembered, restored on
+            # the new v3 pipeline.
+            total_elapsed = time.time() - runtime.timer_start
+            runtime.logger.info(
+                f"DATAPUSHER+ v{_dpp_version} JOB DONE! "
+                f"Total elapsed time: {total_elapsed:,.2f} seconds."
+            )
             return None
 
         except _StageAbort as e:
@@ -1373,6 +1408,18 @@ def datapusher_plus_flow(job_input: JobInput) -> Optional[str]:
                 runtime.logger.info(str(e))
             prefect_logger.info(str(e))
             dph.mark_job_as_completed(job_id, {"skipped": e.stage_name})
+
+            # Issue #111: emit the JOB DONE banner on the
+            # complete-with-skip path too, with a "(skipped: <stage>)"
+            # marker so operators can distinguish a real success from
+            # an early-out without parsing the rest of the log.
+            if runtime is not None:
+                total_elapsed = time.time() - runtime.timer_start
+                runtime.logger.info(
+                    f"DATAPUSHER+ v{_dpp_version} JOB DONE! "
+                    f"(skipped: {e.stage_name}) "
+                    f"Total elapsed time: {total_elapsed:,.2f} seconds."
+                )
             return None
         except utils.JobError as e:
             errored = True
