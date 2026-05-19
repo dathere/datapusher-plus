@@ -144,7 +144,6 @@ groups:
           Prefer DMY
 
       - key: ckanext.datapusher_plus.default_locale
-        type: str
         editable: true
         default: ""
         description: |
@@ -187,7 +186,6 @@ groups:
           Added in resolution of issue #112.
 
       - key: ckanext.datapusher_plus.decimal_separator
-        type: str
         editable: true
         default: ""
         description: |

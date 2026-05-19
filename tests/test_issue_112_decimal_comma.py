@@ -154,6 +154,15 @@ def test_config_declaration_defaults_match_python_fallback():
     fallbacks. Drift between the two (the #179-style failure mode)
     would mean operators on different CKAN versions silently see
     different defaults.
+
+    NOTE on ``type``: CKAN's config_declaration loader accepts only
+    ``base``, ``bool``, ``int``, ``dynamic``, ``list`` — there's no
+    ``str`` type. The convention for string-valued settings is to
+    OMIT the ``type`` key entirely (see ``download_proxy``,
+    ``file_hash_algorithm``). The loader then defaults to ``base``,
+    which validates as a free-form string. So we explicitly assert
+    that ``type`` is *absent* — declaring it as ``str`` is the bug
+    that broke CI on the first push of this PR.
     """
     try:
         import yaml
@@ -178,9 +187,12 @@ def test_config_declaration_defaults_match_python_fallback():
             f"{key} is missing from config_declaration.yaml — "
             "issue #112 should declare it."
         )
-        assert found[key].get("type") == "str", (
-            f"{key} must be declared as type 'str' (got "
-            f"{found[key].get('type')!r})."
+        assert "type" not in found[key], (
+            f"{key} must NOT declare a ``type`` (string settings "
+            "omit it so the loader defaults to ``base``). CKAN's "
+            "config_declaration loader rejects ``type: str`` with "
+            "``Value must be one of ['base', 'bool', 'int', "
+            "'dynamic', 'list']`` — that's what broke CI initially."
         )
         assert found[key].get("default") == "", (
             f"{key} declared default is {found[key].get('default')!r}; "
