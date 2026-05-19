@@ -143,6 +143,37 @@ groups:
         description: |
           Prefer DMY
 
+      - key: ckanext.datapusher_plus.decimal_comma
+        type: bool
+        editable: true
+        default: false
+        description: |
+          Treat ``,`` as the decimal separator for whole-cell numeric
+          values during type inference (German / French / other
+          comma-decimal locales).
+
+          When enabled, the analysis stage runs a regex-anchored
+          ``qsv replace`` over the working CSV that swaps ``,`` for
+          ``.`` ONLY in cells matching ``^-?\d+,\d+$`` — i.e. the entire
+          cell must look like a signed-or-unsigned integer, a comma, and
+          a fractional part. Strings such as ``GRÜNE`` or
+          ``Wahlbeteiligung, %`` are left untouched because they don't
+          match the anchored pattern.
+
+          Limitations:
+
+          * Only the simple ``<int>,<frac>`` shape is converted.
+            Thousands-separator forms like ``1.234,56`` are NOT
+            recognized (PRs welcome — see issue #112).
+          * Mixed locale within one column is not handled — if some
+            rows use ``.`` and some use ``,``, qsv stats will still
+            fall back to ``String``.
+
+          Default: ``false`` (preserves pre-issue-#112 behavior, which
+          inferred comma-decimal numbers as ``String``).
+
+          Added in resolution of issue #112.
+
       - key: ckanext.datapusher_plus.preview_rows
         type: int
         editable: true

@@ -89,6 +89,15 @@ DEDUP = tk.asbool(tk.config.get("ckanext.datapusher_plus.dedup", True))
 UNSAFE_PREFIX = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
 RESERVED_COLNAMES = tk.config.get("ckanext.datapusher_plus.reserved_colnames", "_id")
 PREFER_DMY = tk.asbool(tk.config.get("ckanext.datapusher_plus.prefer_dmy", False))
+
+# Issue #112: when enabled, the analysis stage runs a regex-anchored
+# ``qsv replace`` over the working CSV that swaps ``,`` for ``.`` ONLY
+# in cells that match ``^-?\d+,\d+$`` (whole-cell comma-decimal). Strings
+# like ``GRÜNE`` or ``Wahlbeteiligung, %`` are left untouched. Default
+# off — opt in for German / French / other comma-decimal locales.
+DECIMAL_COMMA = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.decimal_comma", False)
+)
 IGNORE_FILE_HASH = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False)
 )

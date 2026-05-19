@@ -513,6 +513,52 @@ class QSVCommand:
 
         return self._run_command(args, uses_stdio=uses_stdio)
 
+    def replace(
+        self,
+        input_file: str,
+        pattern: str,
+        replacement: str,
+        output_file: Optional[str] = None,
+        select: Optional[str] = None,
+        not_one: bool = False,
+    ) -> subprocess.CompletedProcess:
+        """
+        Replace occurrences of a regex pattern across a CSV file.
+
+        Thin wrapper around ``qsv replace``. The pattern is a Rust regex;
+        anchor it with ``^`` / ``$`` and use capture groups + ``${1}``-style
+        backrefs in the replacement to do whole-cell conditional rewrites
+        (e.g. comma-decimal → dot-decimal for issue #112).
+
+        Args:
+            input_file: Path to the CSV file
+            pattern: Regex pattern to match
+            replacement: Replacement string (supports ``${1}``-style backrefs)
+            output_file: Path to the output file (stdout if omitted)
+            select: Comma-separated column selector; defaults to all columns
+            not_one: Pass ``--not-one`` to make a zero-replacement run exit
+                with code 0 instead of 1. Set this when the caller treats
+                "no matches" as a normal outcome rather than an error.
+
+        Returns:
+            The result of the command
+
+        Raises:
+            utils.JobError: If the command fails
+        """
+        args = ["replace", pattern, replacement, input_file]
+
+        if output_file:
+            args.extend(["--output", output_file])
+
+        if select:
+            args.extend(["--select", select])
+
+        if not_one:
+            args.append("--not-one")
+
+        return self._run_command(args)
+
     def index(self, input_file: str) -> subprocess.CompletedProcess:
         """
         Create an index for a CSV file.

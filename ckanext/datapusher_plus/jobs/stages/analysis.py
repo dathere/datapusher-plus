@@ -56,6 +56,12 @@ class AnalysisStage(BaseStage):
         original_header_dict = self._extract_headers(context)
         self._sanitize_headers(context)
 
+        # Issue #112: convert whole-cell comma-decimal values
+        # (``57,957`` → ``57.957``) before the index + stats run, so
+        # qsv's number parser picks them up as ``Float`` instead of
+        # ``String``. No-op when ``DECIMAL_COMMA`` is off.
+        self._convert_decimal_comma(context)
+
         # Create index for faster operations
         self._create_index(context)
 
@@ -190,6 +196,73 @@ class AnalysisStage(BaseStage):
             context.update_tmp(qsv_safenames_csv)
         else:
             context.logger.info("No unsafe header names found...")
+
+    def _convert_decimal_comma(self, context: ProcessingContext) -> None:
+        """
+        Convert whole-cell comma-decimal numbers to dot-decimal.
+
+        Issue #112: a CSV from a German / French / other comma-decimal
+        locale stores numbers like ``57,957`` where ``,`` is the decimal
+        separator. qsv's number parser only recognizes ``.`` as the
+        decimal separator, so without this preprocessing those values
+        get inferred as ``String`` and stored as Text in Postgres.
+
+        Strategy: a single regex-anchored ``qsv replace`` over the
+        working CSV. The pattern ``^(-?\\d+),(\\d+)$`` matches ONLY when
+        the entire cell is a signed-or-unsigned integer, a comma, and a
+        fractional part — strings like ``GRÜNE`` or
+        ``Wahlbeteiligung, %`` don't match the anchored pattern and are
+        left untouched. After the replace, qsv stats correctly infers
+        ``Float`` for the converted columns.
+
+        Gated on ``ckanext.datapusher_plus.decimal_comma``; no-op
+        otherwise. ``--not-one`` is passed so a file with no
+        comma-decimal cells (the all-pure-strings case) doesn't trip
+        qsv's "no replacements made" non-zero exit.
+
+        Args:
+            context: Processing context
+
+        Raises:
+            utils.JobError: If qsv replace fails
+        """
+        if not conf.DECIMAL_COMMA:
+            return
+
+        context.logger.info(
+            "DECIMAL_COMMA on — scanning for whole-cell comma-decimal "
+            "values (``^-?\\d+,\\d+$``) and converting ``,`` → ``.``..."
+        )
+
+        decimal_comma_csv = os.path.join(context.temp_dir, "qsv_decimal_comma.csv")
+        try:
+            result = context.qsv.replace(
+                input_file=context.tmp,
+                pattern=r"^(-?\d+),(\d+)$",
+                replacement=r"${1}.${2}",
+                output_file=decimal_comma_csv,
+                not_one=True,
+            )
+        except utils.JobError as e:
+            raise utils.JobError(f"decimal_comma conversion failed: {e}")
+
+        # qsv replace reports the replacement count to stderr; surface
+        # it so operators can confirm the conversion did what they
+        # expected (or didn't, if their data wasn't actually in
+        # comma-decimal locale).
+        stderr_text = (
+            result.stderr.decode("utf-8", errors="replace")
+            if isinstance(result.stderr, bytes)
+            else (result.stderr or "")
+        ).strip()
+        if stderr_text:
+            context.logger.info(
+                f"decimal_comma conversion: {stderr_text} cell replacement(s)."
+            )
+        else:
+            context.logger.info("decimal_comma conversion: 0 cell replacements.")
+
+        context.update_tmp(decimal_comma_csv)
 
     def _create_index(self, context: ProcessingContext) -> None:
         """
