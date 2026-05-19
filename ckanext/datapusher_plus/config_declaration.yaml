@@ -153,9 +153,46 @@ groups:
       - key: ckanext.datapusher_plus.auto_index_threshold
         type: int
         editable: true
+        default: 10
+        description: |
+          Upper-bound cardinality (number of distinct values) for which a
+          column gets an auto-generated B-tree index. A column qualifies
+          when its cardinality is in the closed range
+          ``[auto_index_min_threshold, auto_index_threshold]``.
+
+          The intent is to accelerate filtering UIs (DataTables
+          SearchBuilder, CKAN's facet-style views) and SQL aggregations
+          over enum-shaped columns (Borough = 5 values, status = 3-10,
+          etc.). Indexing higher-cardinality columns rarely helps because
+          the Postgres planner won't pick the index over a sequential
+          scan for selective queries.
+
+          Set to ``-1`` to remove the upper bound entirely (interpreted
+          as ``record_count``). Set to ``0`` to disable cardinality-based
+          auto-indexing (date / unique-index auto-creation is unaffected).
+
+          Default raised from 3 → 10 with issue #142 — the prior default
+          was tuned for small enum columns but mis-skipped the typical
+          DataTables filtering range.
+
+      - key: ckanext.datapusher_plus.auto_index_min_threshold
+        type: int
+        editable: true
         default: 3
         description: |
-          Auto index threshold
+          Lower-bound cardinality for the auto-index sweet spot
+          (``[auto_index_min_threshold, auto_index_threshold]``).
+
+          A column with cardinality below this threshold (e.g. a
+          single-value text column producing a 10-40MB index the Postgres
+          planner will never use) is skipped — that was issue #142's
+          concrete failure mode under the old single-knob design.
+
+          Set to ``0`` to disable the floor entirely (legacy behavior;
+          required when ``auto_index_threshold = -1`` is used to mean
+          "index every column").
+
+          Added in resolution of issue #142.
 
       - key: ckanext.datapusher_plus.auto_unique_index
         type: bool
