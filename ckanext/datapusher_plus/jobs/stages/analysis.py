@@ -10,7 +10,6 @@ import csv
 import re
 import time
 import json
-from decimal import Decimal
 from typing import List, Dict, Any
 
 import babel.numbers
@@ -413,9 +412,13 @@ class AnalysisStage(BaseStage):
                 )
             except babel.numbers.NumberFormatError:
                 return None
-            # ``str(Decimal('1E-7'))`` would emit scientific notation;
-            # qsv prefers fixed-point. ``format(d, 'f')`` forces it.
-            return format(value, "f") if isinstance(value, Decimal) else str(value)
+            # ``babel.numbers.parse_decimal`` is annotated
+            # ``-> decimal.Decimal`` and only ever raises on failure
+            # (caught above), so we can ``format`` directly without
+            # an isinstance guard. ``format(d, 'f')`` forces
+            # fixed-point output — ``str(Decimal('1E-7'))`` would emit
+            # scientific notation which qsv doesn't infer as Float.
+            return format(value, "f")
 
         # Separator-only path. Anchored regex — non-matches stay
         # verbatim, no string parsing risk.
