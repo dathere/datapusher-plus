@@ -424,6 +424,136 @@ def test_unknown_locale_logs_warning_and_short_circuits(tmp_path):
     )
 
 
+
+def test_de_de_does_not_corrupt_date_like_data_cells(tmp_path):
+    """Critical regression test for the bug Copilot caught on PR #320.
+
+    Under a comma-decimal locale like de_DE, ``babel.parse_decimal``
+    with ``strict=False`` treats ``.`` as a permissive thousands
+    separator and silently rewrites date-like strings::
+
+        parse_decimal('12.06.1994', locale='de_DE', strict=False)
+        # → Decimal('12061994')   ← SILENT DATA CORRUPTION
+
+    ``strict=True`` enforces canonical grouping (3-digit thousands)
+    and correctly raises ``NumberFormatError`` for non-canonical
+    inputs, so the cell is left verbatim. This test pins that
+    behavior: a German CSV with dates in DATA cells (not just headers)
+    must survive locale normalization unmolested.
+    """
+    from ckanext.datapusher_plus.jobs.stages.analysis import AnalysisStage
+    from ckanext.datapusher_plus import config as conf
+
+    # Three-column CSV with: name, decimal-number, date.
+    # The middle column has valid comma-decimal numbers (should
+    # convert). The last column has German-format dates (must NOT
+    # convert — that's the bug).
+    src = tmp_path / "german_with_dates.csv"
+    src.write_text(
+        '"name","value","date"\n'
+        '"Wahl",\"57,957\","12.06.1994"\n'
+        '"GRÜNE",\"10,16194\","13.06.1999"\n'
+        '"SPD",\"1.234,56\","26.05.2019"\n',
+        encoding="utf-8",
+    )
+    ctx = SimpleNamespace(
+        tmp=str(src),
+        temp_dir=str(tmp_path),
+        logger=mock.Mock(),
+        resource={},
+    )
+    def _update_tmp(new_tmp):
+        ctx.tmp = new_tmp
+    ctx.update_tmp = _update_tmp
+
+    stage = AnalysisStage()
+    with mock.patch.object(conf, "DEFAULT_LOCALE", "de_DE"), \
+         mock.patch.object(conf, "DECIMAL_SEPARATOR", ""):
+        stage._normalize_locale_numbers(ctx)
+
+    rows = _read_csv_rows(ctx.tmp)
+    # Sanity: comma-decimal numbers DO convert.
+    assert rows[1][1] == "57.957", (
+        f"Comma-decimal value should still convert; got {rows[1][1]!r}."
+    )
+    assert rows[3][1] == "1234.56", (
+        f"Thousands+decimal value should still convert; got {rows[3][1]!r}."
+    )
+    # The fix: date cells must be left VERBATIM, not silently rewritten
+    # to enormous integers like Decimal('12061994') / '12061994'.
+    assert rows[1][2] == "12.06.1994", (
+        f"Date '12.06.1994' must NOT be number-parsed under de_DE; "
+        f"got {rows[1][2]!r}. If you see '12061994' here, "
+        "``strict=True`` is not wired in _rewrite_cell — that's the "
+        "Copilot-caught data corruption bug from PR #320."
+    )
+    assert rows[2][2] == "13.06.1999", (
+        f"Date '13.06.1999' must stay verbatim; got {rows[2][2]!r}."
+    )
+    assert rows[3][2] == "26.05.2019", (
+        f"Date '26.05.2019' must stay verbatim; got {rows[3][2]!r}."
+    )
+
+
+def test_dpp_locale_dot_decimal_does_not_fall_through_to_separator(tmp_path):
+    """Regression test for the second Copilot finding on PR #320.
+
+    If an operator explicitly declares a per-resource
+    ``dpp_locale='en_US'`` (or the global ``default_locale='en_US'``
+    is set), that's an intentional "this resource is en_US" signal.
+    The global ``decimal_separator`` must NOT silently apply to it,
+    because the operator's declared locale already settles the
+    question — applying the separator would be a surprise.
+
+    Pinning: with ``dpp_locale='en_US'`` and a global
+    ``decimal_separator=','`` set, ``57,957`` stays verbatim
+    (NOT rewritten to ``57.957``).
+    """
+    from ckanext.datapusher_plus.jobs.stages.analysis import AnalysisStage
+    from ckanext.datapusher_plus import config as conf
+
+    src = tmp_path / "english.csv"
+    src.write_text('col\n"57,957"\n"GRÜNE"\n', encoding="utf-8")
+    ctx = SimpleNamespace(
+        tmp=str(src),
+        temp_dir=str(tmp_path),
+        logger=mock.Mock(),
+        resource={"dpp_locale": "en_US"},  # per-resource opts into en_US
+    )
+    original_tmp = ctx.tmp
+    def _update_tmp(new_tmp):
+        ctx.tmp = new_tmp
+    ctx.update_tmp = _update_tmp
+
+    stage = AnalysisStage()
+    with mock.patch.object(conf, "DEFAULT_LOCALE", ""), \
+         mock.patch.object(conf, "DECIMAL_SEPARATOR", ","):
+        # Global separator says "rewrite comma-decimal" — but the
+        # per-resource locale says "this is en_US". Per-resource intent
+        # wins; the separator must NOT apply.
+        stage._normalize_locale_numbers(ctx)
+
+    # No-op: context.tmp untouched, no normalized file written.
+    assert ctx.tmp == original_tmp, (
+        "Per-resource dpp_locale='en_US' should suppress the global "
+        "decimal_separator; expected context.tmp unchanged, got "
+        f"{ctx.tmp!r}."
+    )
+    assert not (tmp_path / "qsv_locale_normalized.csv").exists(), (
+        "Per-resource dot-decimal locale must short-circuit; no "
+        "normalized file should have been written."
+    )
+    # And the INFO log should mention how to disable the locale if
+    # the operator actually wants the separator to apply.
+    info_calls = [call.args[0] for call in ctx.logger.info.mock_calls]
+    assert any(
+        "unset" in msg and "dpp_locale" in msg for msg in info_calls
+    ), (
+        "Skip log should guide the operator on how to enable the "
+        f"separator fallback; saw: {info_calls!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # End-to-end with real qsv — pins the actual #112 behavior
 # ---------------------------------------------------------------------------

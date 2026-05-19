@@ -273,18 +273,27 @@ class AnalysisStage(BaseStage):
                 )
                 return
             if decimal_symbol == ".":
+                # Per-resource intent wins: if the operator explicitly
+                # declared this resource's locale (or set a global
+                # default) and it turns out to be dot-decimal, return
+                # unconditionally — do NOT fall through to the
+                # separator path. Falling through would silently apply
+                # a global ``decimal_separator`` to a resource the
+                # operator marked as en_US / de_CH / etc., which is
+                # surprising (caught by Copilot review on PR #320).
+                # Operators who want the separator escape hatch to
+                # apply should leave both locale settings unset.
                 context.logger.info(
                     f"Locale {locale_id!r} already uses '.' as decimal "
-                    "symbol; skipping locale-based number normalization "
-                    "(qsv stats will infer numbers natively). "
-                    "Note: de_CH falls into this bucket — use "
-                    "``decimal_separator = \"'\"`` if you need Swiss "
-                    "thousands-apostrophe stripping."
+                    "symbol; skipping number normalization for this "
+                    "resource (qsv stats will infer numbers natively). "
+                    "Note: de_CH falls into this bucket — Swiss "
+                    "thousands-apostrophe stripping isn't applied "
+                    "here. If you need ``decimal_separator`` to apply "
+                    "to this resource, unset ``dpp_locale`` (or, for "
+                    "global default, unset ``default_locale``)."
                 )
-                # Fall through to the separator path if one is configured.
-                locale_id = ""
-                if not separator:
-                    return
+                return
 
         # ---- Mode banner + per-path setup ----------------------------------
         # ``sep_re`` is left ``None`` on the locale path so the
@@ -375,6 +384,17 @@ class AnalysisStage(BaseStage):
         Pulled out as a staticmethod so per-row logic stays small and
         the two normalization paths (babel / regex) live in one place
         that's easy to unit-test.
+
+        **``strict=True`` is critical.** Under a comma-decimal locale
+        like de_DE, ``parse_decimal('12.06.1994', locale='de_DE',
+        strict=False)`` returns ``Decimal('12061994')`` — babel treats
+        the dots as thousands separators with permissive grouping and
+        silently corrupts the date. ``strict=True`` enforces canonical
+        grouping (3-digit thousands), so the same input correctly
+        raises ``NumberFormatError`` and the cell is left verbatim.
+        Valid forms (``57,957``, ``1.234,56``, ``1234,56``) still
+        parse cleanly under strict mode. See Copilot review on PR
+        #320 for the full repro.
         """
         if not cell:
             # Empty / whitespace-only cells are left verbatim — both
@@ -389,7 +409,7 @@ class AnalysisStage(BaseStage):
             # cleanly. On any parse failure, leave the cell verbatim.
             try:
                 value = babel.numbers.parse_decimal(
-                    cell, locale=locale_id, strict=False
+                    cell, locale=locale_id, strict=True
                 )
             except babel.numbers.NumberFormatError:
                 return None
