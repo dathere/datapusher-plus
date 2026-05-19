@@ -189,8 +189,12 @@ groups:
           concrete failure mode under the old single-knob design.
 
           Set to ``0`` to disable the floor entirely (legacy behavior;
-          required when ``auto_index_threshold = -1`` is used to mean
-          "index every column").
+          recommended pairing when ``auto_index_threshold = -1`` is used
+          to mean "index every column"). ``1`` works equivalently in
+          practice — column cardinality is always ``>= 1`` for any
+          column with at least one row — but ``0`` is the documented
+          sentinel because it reads as "no floor" rather than
+          "floor at the minimum possible cardinality".
 
           Added in resolution of issue #142.
 

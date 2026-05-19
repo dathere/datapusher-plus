@@ -345,6 +345,16 @@ def test_min_greater_than_max_logs_a_warning_and_indexes_nothing():
         indexing_mod.conf, "AUTO_INDEX_MIN_THRESHOLD", 5
     ), mock.patch.object(
         indexing_mod.conf, "PREVIEW_ROWS", 0
+    ), mock.patch.object(
+        # Stub _vacuum_analyze for consistency with the other tests
+        # in this file — without this, the test relies on MagicMock
+        # silently swallowing the real VACUUM ANALYZE codepath
+        # (`set_isolation_level`, `sql.SQL("VACUUM ANALYZE {}")`, etc.).
+        # A future refactor that adds real cursor validation to
+        # _vacuum_analyze would turn this test into a confusing
+        # failure unrelated to the warning being asserted (caught
+        # by roborev #2275 LOW).
+        IndexingStage, "_vacuum_analyze",
     ):
         # Drive ``process``, which is where the warning is emitted —
         # not ``_create_indexes`` directly.
@@ -362,4 +372,65 @@ def test_min_greater_than_max_logs_a_warning_and_indexes_nothing():
     ), (
         f"Expected a warning about empty min/max range; saw: "
         f"{warning_calls!r}"
+    )
+
+
+
+def test_threshold_minus_one_on_empty_dataset_does_not_warn():
+    """When an operator sets ``auto_index_threshold = -1`` ("index every
+    column") on a resource that happens to have ``record_count == 0``,
+    the local threshold is remapped to 0 — but the operator intentionally
+    requested "index everything", so the empty-range warning would be
+    operator-confusing. Caught by roborev #2275 LOW; the fix gates the
+    warning on the post-resolution threshold being ``> 0``.
+
+    Pinning the no-warn behavior here keeps a future "simplify the
+    warning condition" refactor from silently re-introducing the
+    confusing message.
+    """
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus.jobs.stages.indexing import IndexingStage
+    from ckanext.datapusher_plus.jobs.stages import indexing as indexing_mod
+
+    stage = IndexingStage()
+    context = _build_indexing_test_context(
+        cardinalities=[],
+        headers=[],
+        record_count=0,
+    )
+
+    fake_conn = mock.MagicMock()
+    fake_conn.cursor.return_value = mock.MagicMock()
+
+    with mock.patch.object(
+        indexing_mod.psycopg2, "connect", return_value=fake_conn
+    ), mock.patch.object(
+        indexing_mod.conf, "AUTO_INDEX_DATES", False
+    ), mock.patch.object(
+        indexing_mod.conf, "AUTO_UNIQUE_INDEX", False
+    ), mock.patch.object(
+        # The "index every column" sentinel.
+        indexing_mod.conf, "AUTO_INDEX_THRESHOLD", -1
+    ), mock.patch.object(
+        # Default floor — the case where a naive ``min > threshold``
+        # check would fire spuriously after the ``-1`` → 0 remap.
+        indexing_mod.conf, "AUTO_INDEX_MIN_THRESHOLD", 3
+    ), mock.patch.object(
+        indexing_mod.conf, "PREVIEW_ROWS", 0
+    ), mock.patch.object(
+        IndexingStage, "_vacuum_analyze",
+    ):
+        stage.process(context)
+
+    warning_calls = [
+        call.args[0] for call in context.logger.warning.mock_calls
+    ]
+    assert not any(
+        "Auto-index range is empty" in msg for msg in warning_calls
+    ), (
+        "The empty-range warning fired on the -1-on-empty-dataset case. "
+        "Operators who set auto_index_threshold=-1 on a 0-row resource "
+        "intentionally asked for 'index every column'; warning them about "
+        "an empty range is confusing. Gate the warning on the "
+        f"post-resolution threshold being > 0. Warnings seen: {warning_calls!r}"
     )

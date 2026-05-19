@@ -87,9 +87,19 @@ class IndexingStage(BaseStage):
         # Issue #142: a MIN > MAX range yields zero indexes — flag that
         # explicitly so operators don't have to puzzle out why nothing
         # got indexed when they expected indexes.
+        #
+        # Two cases we deliberately DON'T warn on:
+        # - ``conf.AUTO_INDEX_THRESHOLD == 0`` — the operator explicitly
+        #   disabled cardinality-based indexing; warning would be noise.
+        # - ``auto_index_threshold == 0`` *after* the ``-1`` →
+        #   ``record_count`` remap (i.e. ``-1`` on a zero-row dataset).
+        #   The operator asked for "index every column" on an empty
+        #   table; flagging that as misconfiguration would be
+        #   confusing (caught by roborev #2275 LOW).
         if (
             auto_index_min_threshold > auto_index_threshold
-            and conf.AUTO_INDEX_THRESHOLD  # the 0-disabled case isn't a misconfig
+            and conf.AUTO_INDEX_THRESHOLD
+            and auto_index_threshold > 0
         ):
             context.logger.warning(
                 f"Auto-index range is empty: "
