@@ -103,8 +103,30 @@ IGNORE_FILE_HASH = tk.asbool(
 # config — kept as a docstring rather than a constant on purpose.
 
 # Indexing settings
+# Issue #142: a column gets an auto-index when ``MIN_THRESHOLD <= cardinality
+# <= AUTO_INDEX_THRESHOLD``. The Postgres planner ignores very-low-cardinality
+# indexes (single-value text columns produce useless 10–40MB indexes the
+# planner never chooses), so the floor exists to skip those. The
+# DataTables-SearchBuilder-style filtering use case the upper threshold was
+# originally built for hits the [3, 10] sweet spot for typical enum-shaped
+# columns (Borough = 5 values, status = 3–10, etc.). Defaults bumped 3 → 10
+# at issue #142's resolution per @EricSoroos's analysis.
+#
+# Edge cases:
+# - ``AUTO_INDEX_THRESHOLD = -1`` keeps its legacy "no upper bound" meaning
+#   (mapped to record_count in indexing.py); the MIN floor still applies, so
+#   operators who want literally every column indexed (incl. cardinality < 3)
+#   must also set ``AUTO_INDEX_MIN_THRESHOLD = 0``.
+# - ``AUTO_INDEX_THRESHOLD = 0`` disables cardinality-based auto-indexing
+#   entirely (existing contract — ``bool(AUTO_INDEX_THRESHOLD)`` checks in
+#   ``analysis.py`` still gate the cardinality stats computation).
+# - ``AUTO_INDEX_MIN_THRESHOLD > AUTO_INDEX_THRESHOLD`` makes the range empty;
+#   the indexing stage logs a clear warning so operators see what happened.
 AUTO_INDEX_THRESHOLD = tk.asint(
-    tk.config.get("ckanext.datapusher_plus.auto_index_threshold", "3")
+    tk.config.get("ckanext.datapusher_plus.auto_index_threshold", "10")
+)
+AUTO_INDEX_MIN_THRESHOLD = tk.asint(
+    tk.config.get("ckanext.datapusher_plus.auto_index_min_threshold", "3")
 )
 AUTO_INDEX_DATES = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_index_dates", True)
