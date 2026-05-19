@@ -76,6 +76,72 @@ def _get_file_hasher():
     )
 
 
+def _get_download_always_whitelist():
+    """Return the parsed DOWNLOAD_ALWAYS_WHITELIST from live config.
+
+    Reads ``ckanext.datapusher_plus.download_always_whitelist`` from
+    ``tk.config`` live (declared ``editable: true`` in
+    ``config_declaration.yaml``) so admin-UI edits take effect without
+    a worker restart. Mirrors the ``_get_file_hasher`` pattern from
+    issue #221. Parses on each call; the cost is negligible since the
+    hash-skip check fires at most once per download.
+
+    Returns:
+        ``frozenset`` of lowercased hostnames. Empty set if the
+        config is unset, empty, or the value is malformed.
+    """
+    import ckan.plugins.toolkit as tk
+
+    raw = tk.config.get(
+        "ckanext.datapusher_plus.download_always_whitelist", ""
+    )
+    if isinstance(raw, str):
+        raw = raw.split()
+    try:
+        return frozenset(h.lower() for h in raw if h)
+    except (TypeError, AttributeError):
+        # Defensive: malformed config (e.g., a non-iterable) should
+        # degrade to "no host bypass" rather than crash the download.
+        return frozenset()
+
+
+def _host_in_always_whitelist(url):
+    """Return the matched hostname if ``url``'s host is whitelisted, else ``None``.
+
+    Used by the download stage to bypass the hash-skip optimization
+    in ``_should_skip_upload`` for trusted/peered hosts or hosts
+    that update content in place without changing the published
+    byte hash. See issue #61 for the operator-side rationale.
+
+    Returning the matched host (rather than a bare ``bool``) lets
+    the caller log the host without a second ``urlparse`` call.
+
+    Args:
+        url: The resource URL as stored in ``resource["url"]``.
+
+    Returns:
+        The lowercased hostname (with port stripped) when matched;
+        ``None`` when the whitelist is empty, the URL is missing or
+        unparseable, the URL has no hostname (relative URLs,
+        ``file://`` with empty host, etc.), or the host is not in
+        the whitelist. Matching is exact: ``data.gov`` in the
+        whitelist does NOT match ``subdomain.data.gov``.
+    """
+    whitelist = _get_download_always_whitelist()
+    if not whitelist:
+        return None
+    if not url:
+        return None
+    try:
+        host = urlparse(url).hostname
+    except (ValueError, AttributeError):
+        return None
+    if not host:
+        return None
+    host = host.lower()
+    return host if host in whitelist else None
+
+
 class DownloadStage(BaseStage):
     """
     Downloads the resource file, validates it, and handles ZIP extraction.
@@ -383,6 +449,24 @@ class DownloadStage(BaseStage):
         Returns:
             True if upload should be skipped, False otherwise
         """
+        # Issue #61: forced re-processing for operator-whitelisted hosts.
+        # Bypasses the hash-skip path entirely so resources from these
+        # hosts get re-downloaded + re-analyzed on every push. This is
+        # intended for hosts that update content in place without
+        # changing the byte hash (e.g., a daily report that overwrites
+        # the same URL with the same template but new underlying data),
+        # or for local/peered hosts where re-download is essentially
+        # free and operators want forced re-analysis.
+        url = context.resource.get("url", "") if context.resource else ""
+        matched_host = _host_in_always_whitelist(url)
+        if matched_host:
+            context.logger.info(
+                "Host %r is in DOWNLOAD_ALWAYS_WHITELIST; forcing "
+                "re-processing (bypassing hash-skip).",
+                matched_host,
+            )
+            return False
+
         # Check if resource metadata was updated
         resource_updated = False
         resource_last_modified = context.resource.get("last_modified")

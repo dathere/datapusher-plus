@@ -112,6 +112,14 @@ IGNORE_FILE_HASH = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False)
 )
 
+# Issue #61: ``ckanext.datapusher_plus.download_always_whitelist`` is
+# declared in ``config_declaration.yaml`` (``editable: true``) but is
+# intentionally NOT mirrored here as a module-level constant. The
+# download stage's ``_host_in_always_whitelist`` reads it from
+# ``tk.config`` live at each call so a runtime change via the admin UI
+# (adding/removing a host mid-incident, e.g.) takes effect without a
+# worker restart. Mirrors the ``file_hash_algorithm`` pattern below.
+
 # Issue #221: ``ckanext.datapusher_plus.file_hash_algorithm`` is declared in
 # ``config_declaration.yaml`` but intentionally NOT mirrored here as a
 # module-level constant. The setting is ``editable: true`` and the download
