@@ -67,23 +67,32 @@ class IndexingStage(BaseStage):
         # Get date-like columns (Postgres ``timestamp`` or ``date``).
         date_like_cols_list = self._get_date_like_columns(context)
 
-        context.logger.info(
-            f"AUTO-INDEXING. Auto-index threshold range: "
-            f"[{conf.AUTO_INDEX_MIN_THRESHOLD}, {conf.AUTO_INDEX_THRESHOLD}] "
-            f"unique value/s. Auto-unique index: {conf.AUTO_UNIQUE_INDEX} "
-            f"Auto-index dates: {conf.AUTO_INDEX_DATES} ..."
-        )
-
         # Get cardinality data
         headers_cardinality = context.dataset_stats.get("HEADERS_CARDINALITY", [])
         record_count = context.dataset_stats.get("RECORD_COUNT", 0)
 
-        # Adjust threshold if set to -1 (index all columns)
+        # Resolve the upper bound *before* logging so operators see the
+        # effective range that will actually be applied, not the raw
+        # sentinel. ``-1`` means "no upper bound" → ``record_count``.
         auto_index_threshold = conf.AUTO_INDEX_THRESHOLD
         if auto_index_threshold == -1:
             auto_index_threshold = record_count
 
         auto_index_min_threshold = conf.AUTO_INDEX_MIN_THRESHOLD
+
+        # Show the resolved range; include the raw value when it was a
+        # sentinel so the log explains where the resolved bound came from.
+        if conf.AUTO_INDEX_THRESHOLD == -1:
+            threshold_display = f"{auto_index_threshold} (-1 → record_count)"
+        else:
+            threshold_display = str(auto_index_threshold)
+        context.logger.info(
+            f"AUTO-INDEXING. Auto-index threshold range: "
+            f"[{auto_index_min_threshold}, {threshold_display}] "
+            f"unique value/s. Auto-unique index: {conf.AUTO_UNIQUE_INDEX} "
+            f"Auto-index dates: {conf.AUTO_INDEX_DATES} ..."
+        )
+
         # Issue #142: a MIN > MAX range yields zero indexes — flag that
         # explicitly so operators don't have to puzzle out why nothing
         # got indexed when they expected indexes.
@@ -104,7 +113,7 @@ class IndexingStage(BaseStage):
             context.logger.warning(
                 f"Auto-index range is empty: "
                 f"min_threshold ({auto_index_min_threshold}) > "
-                f"threshold ({conf.AUTO_INDEX_THRESHOLD}). "
+                f"threshold ({threshold_display}). "
                 "No cardinality-based indexes will be created. Date / "
                 "unique-index auto-creation is unaffected."
             )

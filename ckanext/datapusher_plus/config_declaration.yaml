@@ -163,9 +163,15 @@ groups:
           The intent is to accelerate filtering UIs (DataTables
           SearchBuilder, CKAN's facet-style views) and SQL aggregations
           over enum-shaped columns (Borough = 5 values, status = 3-10,
-          etc.). Indexing higher-cardinality columns rarely helps because
-          the Postgres planner won't pick the index over a sequential
-          scan for selective queries.
+          etc.). Auto-indexing is deliberately *not* applied to
+          higher-cardinality columns: a B-tree index there may well be
+          useful, but the right index depends on the actual query
+          patterns (which columns get filtered, sorted, joined). Blindly
+          indexing every high-cardinality column on ingest inflates
+          storage, slows COPY, and adds vacuum/bloat pressure for
+          indexes the workload may never use. Higher-cardinality
+          indexes are best added manually based on observed query
+          patterns.
 
           Set to ``-1`` to remove the upper bound entirely (interpreted
           as ``record_count``). Set to ``0`` to disable cardinality-based
