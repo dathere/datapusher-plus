@@ -11,3 +11,10 @@ prefect>=3.7,<3.8
 # only one that needs an external package. Pinned loose because the wheel
 # contract is stable and the Rust binding is fast across versions.
 blake3>=1.0.7
+# babel: used by AnalysisStage._normalize_locale_numbers for CLDR-backed
+# parsing of locale-specific number formats (issue #112 — German
+# comma-decimal, French space-thousands, etc.). babel is already a
+# transitive dependency via CKAN core's i18n stack; declared here
+# explicitly because DP+ imports ``babel.numbers`` directly now and
+# shouldn't rely on the upstream pin staying loose.
+babel>=2.9

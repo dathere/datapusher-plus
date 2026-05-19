@@ -143,6 +143,73 @@ groups:
         description: |
           Prefer DMY
 
+      - key: ckanext.datapusher_plus.default_locale
+        type: str
+        editable: true
+        default: ""
+        description: |
+          Default CLDR locale identifier used to parse numeric values
+          in CSVs whose locale isn't declared on the resource itself
+          (via ``dpp_locale``). Format: BCP 47 / POSIX-style identifier
+          like ``de_DE``, ``fr_FR``, ``en_US``. Empty string disables
+          locale-based normalization globally.
+
+          When a locale is resolved, ``AnalysisStage`` runs a Python
+          preprocessing pass using ``babel.numbers.parse_decimal``:
+          each cell that parses cleanly in that locale is rewritten to
+          dot-decimal fixed-point (no thousands separator, no
+          scientific notation). Cells that don't parse (strings,
+          empty, mixed-format) are left verbatim. qsv stats then
+          infers ``Float`` on the normalized cells.
+
+          Resolution order per resource (first non-empty wins):
+
+          1. ``context.resource.get('dpp_locale')`` (per-resource)
+          2. ``ckanext.datapusher_plus.default_locale`` (this setting)
+          3. ``ckanext.datapusher_plus.decimal_separator`` (separator-only fallback)
+          4. None of the above → no preprocessing
+
+          Known v1 limitations:
+
+          * ``de_CH`` (Swiss German) returns ``.`` as its decimal
+            symbol, so the locale path skips it. Swiss numbers use
+            ``'`` for thousands (``1'234.56``) — use
+            ``decimal_separator = "'"`` as a partial workaround if you
+            need apostrophe-thousands stripping.
+          * Mixed-locale columns (some rows use ``.``, some use
+            ``,``) fall back to ``String`` — babel rejects the
+            ``.`` rows and qsv stats sees mixed types.
+          * Accounting notation like ``(57,957)`` is not parsed
+            (babel raises ``NumberFormatError``); cells stay verbatim.
+          * Per-column locale override is not in v1. A
+            ``dpp_column_locales`` map could land later.
+
+          Added in resolution of issue #112.
+
+      - key: ckanext.datapusher_plus.decimal_separator
+        type: str
+        editable: true
+        default: ""
+        description: |
+          Last-resort decimal separator override. Single character.
+          Used only when no locale resolves from ``dpp_locale`` or
+          ``default_locale``. Treated as a regex literal so weirder
+          separators (``';`` etc.) don't blow up.
+
+          When set, ``AnalysisStage`` runs an anchored ``qsv replace``
+          over the working CSV that swaps the separator for ``.``
+          ONLY in cells matching ``^-?\d+<sep>\d+$``. Strings stay
+          untouched because they don't match the whole-cell pattern.
+
+          Prefer ``default_locale`` (or per-resource ``dpp_locale``)
+          when you have CLDR locale info — that path also handles
+          thousands separators and other locale-specific shapes.
+          ``decimal_separator`` exists for synthetic data, non-CLDR
+          formats, and the Swiss-thousands workaround documented under
+          ``default_locale``.
+
+          Added in resolution of issue #112.
+
       - key: ckanext.datapusher_plus.preview_rows
         type: int
         editable: true

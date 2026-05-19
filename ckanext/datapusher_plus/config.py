@@ -89,6 +89,25 @@ DEDUP = tk.asbool(tk.config.get("ckanext.datapusher_plus.dedup", True))
 UNSAFE_PREFIX = tk.config.get("ckanext.datapusher_plus.unsafe_prefix", "unsafe_")
 RESERVED_COLNAMES = tk.config.get("ckanext.datapusher_plus.reserved_colnames", "_id")
 PREFER_DMY = tk.asbool(tk.config.get("ckanext.datapusher_plus.prefer_dmy", False))
+
+# Issue #112: locale-aware number normalization. Resolution order
+# (per resource, per ingestion) is:
+#
+#   1. ``context.resource.get('dpp_locale')``  → babel CLDR parse
+#   2. ``DEFAULT_LOCALE``                      → babel CLDR parse
+#   3. ``DECIMAL_SEPARATOR`` (single char)     → anchored regex pass
+#   4. (none of the above)                     → no-op
+#
+# The locale paths route through ``babel.numbers.parse_decimal``, so
+# values like ``57,957``, ``1.234,56`` (de_DE) and ``57 957,12``
+# (fr_FR) all normalize to dot-decimal Floats that qsv stats then
+# infers correctly. ``DECIMAL_SEPARATOR`` is the escape hatch for
+# operators who know the separator but don't have or want CLDR locale
+# info — single character, anchored regex, no thousands handling.
+DEFAULT_LOCALE = tk.config.get("ckanext.datapusher_plus.default_locale", "")
+DECIMAL_SEPARATOR = tk.config.get(
+    "ckanext.datapusher_plus.decimal_separator", ""
+)
 IGNORE_FILE_HASH = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.ignore_file_hash", False)
 )

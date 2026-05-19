@@ -7,9 +7,14 @@ Handles type inference, statistics, frequency tables, and PII screening.
 
 import os
 import csv
+import re
 import time
 import json
+from decimal import Decimal
 from typing import List, Dict, Any
+
+import babel.numbers
+from babel.core import UnknownLocaleError
 
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.config as conf
@@ -55,6 +60,14 @@ class AnalysisStage(BaseStage):
         # Extract headers and sanitize
         original_header_dict = self._extract_headers(context)
         self._sanitize_headers(context)
+
+        # Issue #112: locale-aware number normalization. Resolves a
+        # locale (per-resource ``dpp_locale`` → global
+        # ``DEFAULT_LOCALE``) or a single-character ``DECIMAL_SEPARATOR``
+        # and rewrites comma-decimal / locale-specific numeric cells
+        # to dot-decimal before stats inference. No-op when nothing
+        # resolves — preserves pre-#112 behavior.
+        self._normalize_locale_numbers(context)
 
         # Create index for faster operations
         self._create_index(context)
@@ -190,6 +203,206 @@ class AnalysisStage(BaseStage):
             context.update_tmp(qsv_safenames_csv)
         else:
             context.logger.info("No unsafe header names found...")
+
+    def _normalize_locale_numbers(self, context: ProcessingContext) -> None:
+        """
+        Locale-aware number normalization (issue #112).
+
+        German CSVs (and other comma-decimal locales) carry numeric
+        values like ``57,957`` or ``1.234,56`` that qsv's number parser
+        — which only recognizes ``.`` as the decimal separator — infers
+        as ``String``. Without preprocessing, DP+ stores them as
+        Postgres Text. This helper rewrites those cells to dot-decimal
+        ahead of the stats / index pass.
+
+        Resolution order (first non-empty wins):
+
+        1. ``context.resource.get('dpp_locale')`` — per-resource override
+        2. ``conf.DEFAULT_LOCALE`` — global default
+        3. ``conf.DECIMAL_SEPARATOR`` — single-char escape hatch
+        4. None resolved → no-op (preserves pre-#112 behavior)
+
+        Locale paths route through ``babel.numbers.parse_decimal`` so
+        the full CLDR shape works: ``57,957`` (de_DE comma decimal),
+        ``1.234,56`` (de_DE thousands + decimal), ``57 957,12`` (fr_FR
+        space-thousands), etc. The separator-only path uses an anchored
+        regex (``^-?\\d+<sep>\\d+$``) for operators who know the
+        decimal character but don't have or want CLDR locale info.
+
+        Skip rules — log INFO and short-circuit:
+
+        * ``babel.numbers.get_decimal_symbol(locale_id) == '.'`` — the
+          locale already uses dot-decimal (en_US, en_GB, ja_JP, etc.).
+          NOTE: ``de_CH`` falls into this bucket; Swiss thousands
+          (``'``) aren't stripped in v1 (use ``decimal_separator``).
+        * ``babel.core.UnknownLocaleError`` — log WARNING, no-op. We
+          deliberately don't fall back to ``DEFAULT_LOCALE`` here:
+          operators need to see the misconfiguration, not get silently
+          masked.
+
+        Args:
+            context: Processing context
+
+        Raises:
+            utils.JobError: If the CSV rewrite fails for I/O reasons
+                (locale / parse failures never raise — they're logged
+                or just leave the cell verbatim).
+        """
+        # ---- Resolution ----------------------------------------------------
+        resource_locale = (context.resource or {}).get("dpp_locale", "") or ""
+        global_locale = conf.DEFAULT_LOCALE or ""
+        separator = conf.DECIMAL_SEPARATOR or ""
+
+        locale_id = resource_locale.strip() or global_locale.strip()
+        separator = separator.strip()
+
+        if not locale_id and not separator:
+            return  # Pre-#112 behavior — no preprocessing.
+
+        # ---- Skip rules for the locale path -------------------------------
+        if locale_id:
+            try:
+                decimal_symbol = babel.numbers.get_decimal_symbol(locale_id)
+            except UnknownLocaleError:
+                context.logger.warning(
+                    f"dpp_locale / default_locale = {locale_id!r} is not a "
+                    "recognized Babel locale; skipping locale-based number "
+                    "normalization for this resource. Fix the identifier "
+                    "(e.g. ``de_DE``, ``fr_FR``, ``en_US``) or unset to "
+                    "silence this warning."
+                )
+                return
+            if decimal_symbol == ".":
+                context.logger.info(
+                    f"Locale {locale_id!r} already uses '.' as decimal "
+                    "symbol; skipping locale-based number normalization "
+                    "(qsv stats will infer numbers natively). "
+                    "Note: de_CH falls into this bucket — use "
+                    "``decimal_separator = \"'\"`` if you need Swiss "
+                    "thousands-apostrophe stripping."
+                )
+                # Fall through to the separator path if one is configured.
+                locale_id = ""
+                if not separator:
+                    return
+
+        # ---- Mode banner + per-path setup ----------------------------------
+        # ``sep_re`` is left ``None`` on the locale path so the
+        # rewrite helper's branch check stays simple and Pyright
+        # doesn't fret about possibly-unbound names.
+        sep_re = None
+        if locale_id:
+            context.logger.info(
+                f"Locale-aware number normalization on — using Babel "
+                f"locale {locale_id!r}. Cells that parse cleanly in this "
+                "locale will be rewritten to dot-decimal fixed-point."
+            )
+        else:
+            context.logger.info(
+                f"Decimal-separator normalization on — separator "
+                f"{separator!r}. Whole-cell ``^-?\\d+<sep>\\d+$`` values "
+                "will be rewritten to dot-decimal."
+            )
+            # Pre-compile the anchored regex for the separator path.
+            # Escape the separator so a regex-special character (e.g.
+            # ``.``) doesn't blow up the match.
+            sep_re = re.compile(r"^(-?\d+)" + re.escape(separator) + r"(\d+)$")
+
+        # ---- I/O + per-cell rewrite ---------------------------------------
+        normalized_csv = os.path.join(
+            context.temp_dir, "qsv_locale_normalized.csv"
+        )
+        per_column_counts: Dict[int, int] = {}
+        try:
+            with open(context.tmp, "r", encoding="utf-8", newline="") as fh_in, \
+                    open(normalized_csv, "w", encoding="utf-8", newline="") as fh_out:
+                reader = csv.reader(fh_in)
+                writer = csv.writer(fh_out)
+
+                # First row is the (already-sanitized) header — pass through
+                # unchanged so column names don't get number-parsed.
+                try:
+                    header = next(reader)
+                except StopIteration:
+                    return  # empty file — analysis stage handles record_count == 0
+                writer.writerow(header)
+                column_names = list(header)
+
+                for row in reader:
+                    out_row = []
+                    for col_idx, cell in enumerate(row):
+                        rewritten = self._rewrite_cell(
+                            cell, locale_id, sep_re
+                        )
+                        if rewritten is not None:
+                            out_row.append(rewritten)
+                            per_column_counts[col_idx] = (
+                                per_column_counts.get(col_idx, 0) + 1
+                            )
+                        else:
+                            out_row.append(cell)
+                    writer.writerow(out_row)
+        except OSError as e:
+            raise utils.JobError(
+                f"Locale-aware number normalization I/O failed: {e}"
+            )
+
+        # ---- Per-column conversion summary --------------------------------
+        if per_column_counts:
+            summary_parts = [
+                f"{column_names[idx] if idx < len(column_names) else f'col{idx}'}: {count}"
+                for idx, count in sorted(per_column_counts.items())
+            ]
+            context.logger.info(
+                "Locale normalization conversions per column — "
+                + "; ".join(summary_parts)
+            )
+        else:
+            context.logger.info(
+                "Locale normalization completed with 0 cell conversions. "
+                "If you expected conversions here, double-check that "
+                "``dpp_locale`` / ``default_locale`` matches the actual "
+                "format of the numbers in this CSV."
+            )
+
+        context.update_tmp(normalized_csv)
+
+    @staticmethod
+    def _rewrite_cell(cell, locale_id, sep_re):
+        """Return the normalized cell, or ``None`` if the cell is left
+        verbatim.
+
+        Pulled out as a staticmethod so per-row logic stays small and
+        the two normalization paths (babel / regex) live in one place
+        that's easy to unit-test.
+        """
+        if not cell:
+            # Empty / whitespace-only cells are left verbatim — both
+            # ``parse_decimal('')`` and the regex would no-op anyway,
+            # but exiting early keeps the exception path off the hot
+            # loop.
+            return None
+
+        if locale_id:
+            # Babel CLDR path: try to parse. On success, format as
+            # fixed-point dot-decimal so qsv stats infers Float
+            # cleanly. On any parse failure, leave the cell verbatim.
+            try:
+                value = babel.numbers.parse_decimal(
+                    cell, locale=locale_id, strict=False
+                )
+            except babel.numbers.NumberFormatError:
+                return None
+            # ``str(Decimal('1E-7'))`` would emit scientific notation;
+            # qsv prefers fixed-point. ``format(d, 'f')`` forces it.
+            return format(value, "f") if isinstance(value, Decimal) else str(value)
+
+        # Separator-only path. Anchored regex — non-matches stay
+        # verbatim, no string parsing risk.
+        m = sep_re.match(cell)
+        if m is None:
+            return None
+        return f"{m.group(1)}.{m.group(2)}"
 
     def _create_index(self, context: ProcessingContext) -> None:
         """
