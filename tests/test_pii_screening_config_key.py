@@ -34,11 +34,48 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
+@pytest.fixture(autouse=True)
+def _reset_config_module():
+    """Reload ``ckanext.datapusher_plus.config`` after each test so a
+    ``_reload_config`` call here can't leak a monkeypatched config
+    snapshot into later tests via ``sys.modules``.
+
+    ``importlib.reload`` mutates the module in place; without this
+    teardown the last reload's constants would persist for the rest
+    of the session, making unrelated tests order-dependent.
+
+    As an autouse fixture this is set up before the test's
+    ``monkeypatch`` fixture, so its finalizer runs *after*
+    ``monkeypatch`` has restored ``tk.config`` — the reload therefore
+    recomputes the module constants from the pristine
+    test-environment config.
+    """
+    yield
+    try:
+        import importlib
+
+        import ckanext.datapusher_plus.config as conf
+
+        importlib.reload(conf)
+    except Exception:
+        # A reload failure during teardown must not mask the actual
+        # test result; the next test that needs a clean config does
+        # its own reload via ``_reload_config`` anyway.
+        pass
+
+
 def _reload_config(monkeypatch, key, value):
     """Set ``key`` on ``tk.config`` and reload ``config.py`` so its
-    import-time ``PII_SCREENING`` constant is recomputed. Mirrors the
-    reload pattern used by ``test_file_hash_algorithm`` / the #61
-    config tests."""
+    import-time ``PII_SCREENING`` constant is recomputed.
+
+    ``importlib.reload`` mutates the module object in place, so the
+    recomputed constants would otherwise persist past this test —
+    ``monkeypatch`` restores ``tk.config`` but does not re-run
+    ``config.py``. The ``_reset_config_module`` autouse fixture below
+    reloads the module once more on teardown (after ``tk.config`` is
+    restored) so the pristine state is back for later tests regardless
+    of suite order.
+    """
     import importlib
 
     pytest.importorskip("ckan")
