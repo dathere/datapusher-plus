@@ -78,7 +78,8 @@ jobs:
           CKAN_INI: /srv/app/src/ckan/test-core.ini
         run: |
           set -eu
-          # -o addopts= overrides setup.cfg's --pdbcls IPython addopt.
+          # -o addopts= overrides pyproject.toml's
+          # [tool.pytest.ini_options] --pdbcls IPython addopt.
           # tests/integration is excluded — it needs the full
           # docker-compose stack (Prefect, Postgres, Redis, Solr).
           python3 -m pytest tests/ --ignore=tests/integration \

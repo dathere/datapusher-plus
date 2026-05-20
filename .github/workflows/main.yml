@@ -265,7 +265,7 @@ jobs:
           ckanext.datapusher_plus.ssl_verify = false
           # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
           ckanext.datapusher_plus.upload_log_level = INFO
-          ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+          ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsb xlsm ods geojson shp qgis zip
           ckanext.datapusher_plus.pii_screening = false
           ckanext.datapusher_plus.pii_found_abort = false
           ckanext.datapusher_plus.pii_regex_resource_id_or_alias =

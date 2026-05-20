@@ -303,7 +303,7 @@ ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$
 
 7. Add the rest of the DP+ config to your CKAN config (e.g. `/etc/ckan/default/ckan.ini`):
 
-> **Note:** The block below lists DP+'s settings at their current defaults — copy it as a starting point and change only the keys you need. The authoritative defaults are declared in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml).
+> **Note:** The block below lists DP+'s settings at their current defaults, for reference. Set only the keys you actually want to change — pasting the whole block pins every value as an explicit override, so a later change to a DP+ default wouldn't reach you. Authoritative defaults live in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) and [`config.py`](ckanext/datapusher_plus/config.py).
 
 ```ini
 # datapusher-plus settings
@@ -411,7 +411,7 @@ scheming.dataset_schemas =  ckanext.datapusher_plus:dataset-druf.yaml
 
 Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) and [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) for details.
 
-> **Note:** The block below lists DP+'s settings at their current defaults — copy it as a starting point and change only the keys you need. The authoritative defaults are declared in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml).
+> **Note:** The block below lists DP+'s settings at their current defaults, for reference. Set only the keys you actually want to change — pasting the whole block pins every value as an explicit override, so a later change to a DP+ default wouldn't reach you. Authoritative defaults live in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) and [`config.py`](ckanext/datapusher_plus/config.py).
 
 >```ini
 > ckanext.datapusher_plus.download_proxy = 
