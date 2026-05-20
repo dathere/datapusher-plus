@@ -40,7 +40,7 @@ UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "IN
 # Supported formats
 FORMATS = tk.config.get(
     "ckanext.datapusher_plus.formats",
-    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "qgis", "zip"],
+    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "xlsm", "xlsb", "ods", "geojson", "shp", "qgis", "zip"],
 )
 if isinstance(FORMATS, str):
     FORMATS = FORMATS.split()
@@ -254,7 +254,7 @@ AUTO_SPATIAL_SIMPLIFICATION = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_spatial_simplification", True)
 )
 SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
-    "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE", "0.1"
+    "ckanext.datapusher_plus.spatial_simplification_relative_tolerance", "0.1"
 )
 
 # Latitude and longitude column names
