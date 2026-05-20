@@ -395,7 +395,7 @@ prefect worker start --pool datapusher-plus
 
 ## Testing
 
-DataPusher+ has three test layers — Python unit tests, Python integration tests, and JavaScript tests — all run automatically in CI on every push and pull request.
+DataPusher+ has three test layers — Python unit tests, Python integration tests, and JavaScript tests. The two Python suites run automatically in CI; the JavaScript suite is run locally.
 
 ### Python unit tests
 
@@ -471,8 +471,8 @@ See [`tests/js/README.md`](tests/js/README.md) for setup details.
 
 ### Continuous integration
 
-- [`.github/workflows/test.yml`](.github/workflows/test.yml) ("Unit Tests") runs the Python unit suite on every push and pull request to `main`.
-- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ("DataPusher+ Integration CI") runs the qsv contract-regression test and the full integration suite on every push and pull request, and nightly.
+- [`.github/workflows/test.yml`](.github/workflows/test.yml) ("Unit Tests") runs the Python unit suite on every push to `main`/`dev` and every pull request to `main`.
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ("DataPusher+ Integration CI") runs the qsv contract-regression test and the full integration suite on every push to `main`/`dev`, every pull request to `main`, and nightly.
 
 ## Configuring
 
