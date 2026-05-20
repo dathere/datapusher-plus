@@ -24,12 +24,20 @@ rebuilding.
   libproj-dev` + `build-essential` etc.
 - GDAL python 3.6.2, `requirements.txt` + `requirements-dev.txt`,
   `pip install -e .` (→ `datapusher-plus 3.0.0a0`, editable).
-- qsv 20.1.0 at `/usr/local/bin/qsvdp` (bumped from 20.0.0 — no
-  breaking changes per the qsv 20.1.0 release notes; pipelines built
+- qsv 20.1.0 at `/usr/local/bin/qsvdp` (bumped from 20.0.0 in PR #315 —
+  no breaking changes per qsv 20.1.0 release notes; pipelines built
   against 20.0.0 upgrade in place).
 - `b3sum` CLI at `/usr/local/bin/b3sum` (added by PR #309 for the
   configurable file-hash feature — required by tests that exercise the
   `blake3` algorithm via the external `b3sum` binary path).
+- `babel>=2.9` (declared explicitly in `requirements.txt` since PR #320
+  — DP+ now imports `babel.numbers` directly for locale-aware number
+  parsing in `AnalysisStage._normalize_locale_numbers`).
+- `importlib_metadata>=4.6` (declared explicitly in `requirements.txt`
+  since PR #323 — prefect 3.7.1's `workers/base.py` imports it
+  unconditionally but doesn't list it as a direct dep; it was satisfied
+  transitively by `opentelemetry-api` until 1.42.0 dropped that. See
+  "Integration stack" note below.)
 
 ## Run the unit suite
 ```bash
@@ -41,42 +49,49 @@ Required env, and why:
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` — ckan-dev's site-packages registers a
   pytest plugin that calls `make_app()` in `pytest_sessionstart`, needing a
   fully-configured CKAN. Disable autoload so plain pytest runs.
-- `QSV_BIN=/usr/local/bin/qsvdp` — for `test_qsv_v20_regression.py`
-  and `test_issue_173_date_format_inference.py`.
+- `QSV_BIN=/usr/local/bin/qsvdp` — for `test_qsv_v20_regression.py`,
+  `test_issue_173_date_format_inference.py`, and
+  `test_issue_112_decimal_comma.py::test_end_to_end_german_sample_inference_with_real_qsv`.
 - `CKAN_INI=/srv/app/src/ckan/test-core.ini` — the image's default
   `/srv/app/ckan.ini` is NOT populated when the entrypoint is bypassed;
   `test-core.ini` has a real `SECRET_KEY`.
 - `-o addopts=` — overrides `setup.cfg`'s `--pdbcls=IPython...` addopt.
 - `tests/integration/` excluded — needs the integration stack (see below).
 
-## Known result (as of 2026-05-18, `main` @ `9a8a6c7` + WIP)
-**222/222 Python unit tests pass** on `main` after the #299 → #314 merges
-plus the in-flight `tests/test_issue_173_date_format_inference.py`.
+> The full-suite tail prints noisy Prefect server-shutdown logging
+> (`ValueError: I/O operation on closed file` from
+> `prefect/logging/handlers.py`). Cosmetic — not a test failure. Grep
+> the summary line: `... 2>&1 | grep -E "^[0-9]+ passed|^[0-9]+ failed"`.
 
-Test count moved from 196 (prior handoff baseline) to 222 over this
-arc — a **net +26**. The breakdown isn't a simple "+47 added across
-the new files" because the #307–#314 refactors also removed or
-consolidated some pre-existing tests (e.g. earlier helpers superseded
-by `dictionary_stash`, hash-related tests folded into the
-algorithm-aware suite). The net is reproducible (`pytest tests/
---ignore=tests/integration --collect-only -q`); the per-file gross
-adds below are the new-file additions only — not the net delta.
+## Known result (as of 2026-05-20, `main` @ `5bac296`)
 
-New-file gross additions (collected via ``pytest --collect-only -q``):
+**277/277 Python unit tests pass** on `main` after the #323 → #324 arc.
+
+Test count history:
+- 218 → 251 over the 2026-05-17 → 2026-05-19 arc (#299 → #322, net **+33**).
+- 251 → 277 over the 2026-05-19 → 2026-05-20 arc (#323 → #324, net **+26**).
+
+The breakdown isn't a simple per-file sum because refactors also removed or
+consolidated pre-existing tests. Reproducible via
+`pytest tests/ --ignore=tests/integration --collect-only -q`.
+
+New-file gross additions, #299 → #322 arc:
 - `tests/test_dictionary_stash.py` — 21 tests (PR #307)
 - `tests/test_utcnow_naive.py` — 4 tests (PR #308)
 - `tests/test_file_hash_algorithm.py` — 10 tests (PR #309)
 - `tests/test_metadata_hash_persistence.py` — 3 tests (PR #312, regression for #310)
 - `tests/test_rehydrate_resource_identity.py` — 4 tests (PR #313, regression for #311)
 - `tests/test_date_without_timestamp.py` — 5 tests (PR #314, regression for #179)
-- `tests/test_issue_173_date_format_inference.py` — 4 tests (regression
-  for #173 — qsv date-format inference coverage + malformed-CSV
-  quarantine precondition; needs `QSV_BIN` env var to run, otherwise
-  skips cleanly)
-- Gross sum of the rows above: **51**. Net delta vs. prior handoff: **+26**.
-  The 25-test gap is the removed/consolidated subset across the same
-  PRs; if you need the exact accounting, walk `git log --diff-filter=D
-  --name-only -- tests/` across the #299..#314 range.
+- `tests/test_issue_173_date_format_inference.py` — 4 tests (PR #315, regression for #173)
+- `tests/test_issue_111_version_in_log.py` — 5 tests (PR #316, regression for #111)
+- `tests/test_issue_142_auto_index_threshold.py` — 8 tests (PR #317, regression for #142)
+- `tests/test_issue_112_decimal_comma.py` — 11 tests (PR #320, regression for #112)
+- `tests/test_issue_261_empty_date_range.py` — 6 tests (PR #322, regression for #261)
+
+New-file gross additions, #323 → #324 arc:
+- `tests/test_issue_61_download_always_whitelist.py` — 23 tests (PR #323, feature #61)
+- `tests/test_pii_screening_config_key.py` — 3 tests (PR #324, regression for the
+  `pii_screening` config-key typo found by the documentation audit)
 
 The JS unit suite (Vitest + jsdom, PR #304) is unchanged at **12 tests**
 for `scheming-ai-suggestions.js`. Runs on the host, not in `dpp-test`:
@@ -92,6 +107,10 @@ namespace, not the callable selector) and captures `originalAjax = $.ajax`
 at module scope so `beforeEach` can restore it between tests. The SUT
 itself is loaded fresh per test via the same `new Function` trick so
 module registration state doesn't bleed.
+
+The legacy `scheming-suggestions.js` (NOT the `-ai-` variant) still has
+no JS test coverage. PR #322 changes there are validated only by Python
+regression tests + manual screenshots in the issue thread.
 
 ## If the container is gone (Docker restart / removed)
 - Restart: `docker start dpp-test` (state persists across stops).
@@ -134,6 +153,119 @@ don't share ports (`dpp-test` doesn't publish any). Use `dpp-test` for
 quick unit-test iteration; use the integration stack only when you need
 a real end-to-end flow run.
 
+> **Prefect-worker `importlib_metadata` gotcha (fixed PR #323)**: on
+> 2026-05-19 the "DataPusher+ Integration CI" workflow started failing
+> at the "Start Prefect worker" step with `ModuleNotFoundError: No
+> module named 'importlib_metadata'`. Root cause: prefect 3.7.1's
+> `workers/base.py` imports `importlib_metadata` but doesn't declare
+> it; `opentelemetry-api` 1.42.0 (released that morning) dropped the
+> transitive that had been satisfying it. Fixed by pinning
+> `importlib_metadata>=4.6` directly in `requirements.txt`. If you
+> rebuild the worker image or `dpp-test`, the pin handles it.
+
+> **2026-05-19 stack state** (may be stale — re-check): the
+> `prefect-server`, `prefect-worker`, `postgres`, `redis`, `solr`
+> containers were healthy/Up, but the **CKAN service itself was
+> stopped or crashed**. Run `scripts/integration-up` to bring CKAN
+> back before any integration work.
+
+## Test patterns established (worth following)
+
+1. **AST-parse `config.py`, YAML-parse `config_declaration.yaml`** — a
+   recurring drift-guard pattern. `test_issue_142_auto_index_threshold.py`,
+   `test_issue_112_decimal_comma.py`, `test_issue_61_download_always_whitelist.py`,
+   and `test_pii_screening_config_key.py` all walk the source files to
+   confirm inline fallbacks and declaration defaults/keys agree. Catches
+   #179-style declaration-vs-code drift without the CKAN bootstrap.
+   When YAML-parsing the declaration, **iterate all `groups`/`options`**
+   to find the key by name (don't index `groups[0]` — brittle if the
+   declaration is restructured; Copilot caught this on PR #323). Guard
+   `import yaml` with `try/except ImportError → pytest.skip(...)` so
+   dep-light CI degrades cleanly.
+2. **Bypass `FormulaProcessor.__init__` via `__new__`** — its constructor
+   does heavy lat/lon/date inference + pulls CKAN config. For unit
+   tests of `process_formulae` (e.g. `test_issue_261_empty_date_range.py`),
+   build the object via `FormulaProcessor.__new__(FormulaProcessor)` and
+   set attributes directly. Same pattern as
+   `test_security.test_formula_processor_uses_sandboxed_environment`.
+3. **End-to-end with the real qsv binary** — locale-aware number
+   normalization (PR #320) and date-format inference (#173) both have
+   tests that shell out to qsv with the actual sample data and assert
+   on `qsv stats --typesonly`. `pytest.mark.skipif` on missing `QSV_BIN`
+   keeps the suite portable.
+4. **Pin asymmetry, not just behavior** — the #322 gating test feeds the
+   SAME `{{ none }}` template through `formula_type="formula"` and
+   `"suggestion_formula"` and asserts they differ. The #61 tests pin
+   subdomain non-matching in BOTH directions (parent doesn't match
+   sub, sub doesn't match parent) so a future "support wildcards"
+   change breaks a test rather than silently changing semantics.
+5. **Anchor test fixtures to actual schema strings** — Copilot caught
+   on PR #322 that `SUGGEST_FORMULA = "suggest_formula"` was a phantom
+   — the production key is `"suggestion_formula"`. Verify constants
+   against actual usage in `dataset-druf.yaml`, `docs/dataset_schema.yaml`,
+   `jobs/stages/formula.py`.
+6. **Live-config-read beats `importlib.reload` for `editable: true`
+   keys** — for config that should honor admin-UI runtime edits, read
+   `tk.config` live in a small helper (`_get_file_hasher` #221,
+   `_get_download_always_whitelist` #61) rather than snapshotting into
+   a module-level constant. Tests then just `monkeypatch.setitem(
+   tk.config, ...)` and call — no reload, no state leak.
+7. **Pair `importlib.reload(config)` with an autouse teardown reload**
+   — when a constant genuinely must be import-time (e.g. `PII_SCREENING`),
+   a test that reloads `config` to recompute it leaks the monkeypatched
+   snapshot into later tests (`reload` mutates the module in place;
+   `monkeypatch` restores `tk.config` but doesn't re-run `config.py`).
+   Fix: an `autouse=True` fixture that reloads `config` on teardown.
+   Because autouse fixtures set up before the test's `monkeypatch`,
+   their finalizer runs AFTER `monkeypatch` restores `tk.config` — so
+   the teardown reload recomputes from pristine config. See
+   `test_pii_screening_config_key.py::_reset_config_module`. (Copilot
+   caught the leak on PR #324.)
+
+## DOWNLOAD_ALWAYS_WHITELIST (PR #323, issue #61)
+
+`ckanext.datapusher_plus.download_always_whitelist` — a
+whitespace-separated list of hostnames whose resources always get
+re-downloaded + re-analyzed, bypassing the file-hash upload-skip
+optimization in `DownloadStage._should_skip_upload`. For hosts that
+update content in place without changing the byte hash, or local/peered
+hosts where re-download is cheap.
+
+- Issue #61 (2023) originally paired this with a never-built
+  `DOWNLOAD_PREVIEW_ONLY` partial-download mode; DP+'s architecture is
+  full-file download for comprehensive metadata inference, so that
+  parent is moot. The name was kept, semantics repurposed as a
+  re-processing trigger.
+- `_get_download_always_whitelist()` reads `tk.config` live (mirrors
+  `_get_file_hasher`), parses into a `frozenset` of lowercased hosts.
+- `_host_in_always_whitelist(url)` returns `Optional[str]` — the matched
+  lowercased host (port stripped) or `None`. Returning the host (not a
+  bool) lets `_should_skip_upload` log it without a second `urlparse`.
+- Matching is **exact-hostname**, case-insensitive — `data.gov` does NOT
+  match `subdomain.data.gov`.
+- 23 tests in `tests/test_issue_61_download_always_whitelist.py`.
+
+## pii_screening config-key typo (PR #324, documentation audit)
+
+A documentation audit (2026-05-19) found `config.py` read
+`PII_SCREENING` from `ckanext.datastore_plus.pii_screening` — a typo
+(`datastore_plus` ≠ `datapusher_plus`). The documented key never
+populated `PII_SCREENING`; PII screening couldn't be enabled as
+documented. Fixed in `config.py`; 3 regression tests in
+`tests/test_pii_screening_config_key.py` (documented key works, old
+typo'd key has no effect, AST drift-guard).
+
+PR #324 also carried doc-audit corrections: `preview_rows` `config.py`
+fallback aligned `"1000"` → `"0"` to match `config_declaration.yaml`
+(behavior-preserving — the declaration default already wins under CKAN
+2.10+ declarative config); stale `describeGPT_api_key` README line
+removed; `formats` README example typo (`xlsxb`/`xlsm`) dropped to
+match `config.py`'s FORMATS default; CONFIG.md DRUF template-override
+list completed (3 → 5); illustrative-values notes added above the
+README ckan.ini example blocks. Still-open for a maintainer pass: the
+README example blocks have other stale values (`auto_index_threshold = 3`
+should be 10 per #142, `chunk_size = 16384` should be 1048576).
+
 ## AI suggestions feature (PRs #301 → #304)
 
 End-to-end shape of the AI suggestions feature now on `main`:
@@ -155,190 +287,73 @@ End-to-end shape of the AI suggestions feature now on `main`:
    `dpp_suggestions.ai_suggestions.STATUS` is in
    `['DONE', 'ERROR', 'FAILED']`. Production bug caught by JS tests:
    the JS originally read STATUS from `dpp_suggestions.STATUS` (top
-   level) — the stage writes it nested inside `ai_suggestions`. Fix
-   pinned by `tests/js/scheming-ai-suggestions.test.js` test
-   `stops polling when dpp_suggestions.ai_suggestions.STATUS is in
-   terminalStatuses`.
+   level) — the stage writes it nested inside `ai_suggestions`.
 4. **Fixture** — `tests/fixtures/qsv_describegpt_sample.json` is a real
    captured response from a LM Studio gemma-4-e4b run; use it for
-   shape-of-envelope assertions in Python tests instead of hand-rolling
-   one.
+   shape-of-envelope assertions in Python tests.
+
+## Empty-suggestion handling (PR #322, issue #261)
+
+DRUF (the legacy `scheming-suggestions.js`, NOT the AI-suggestions
+variant) handles null/empty/whitespace suggestion values:
+
+1. **Python — `FormulaProcessor.process_formulae`** coerces stringified
+   `"None"` / `""` / whitespace-only renders back to Python `None`.
+   Coercion is **gated on `formula_type == "suggestion_formula"`** —
+   direct `formula` fields write straight into the package/resource
+   dict and must preserve verbatim output for CKAN's validators.
+2. **JS — `scheming-suggestions.js`** greys out the per-field button
+   for null/empty values + re-enables on re-render.
+3. **CSS — `suggestions.css`** has a `.suggestion-btn-disabled` rule.
+
+Cherry-picked from Minhajuddin's orphan commit `62c18ea`; 6 Python
+regression tests in `tests/test_issue_261_empty_date_range.py`.
+
+## Locale-aware number parsing (PR #320, issue #112)
+
+DP+ supports parsing comma-decimal / locale-specific number formats
+opt-in. Resolution order per resource: `dpp_locale` resource field →
+`conf.DEFAULT_LOCALE` → `conf.DECIMAL_SEPARATOR` → no-op. Babel path
+uses `babel.numbers.parse_decimal(value, locale=id, strict=True)` —
+`strict=True` is critical (without it German `12.06.1994` silently
+coerces to `Decimal('12061994')`). 11 regression tests in
+`tests/test_issue_112_decimal_comma.py`.
 
 ## Data Dictionary stash/restore (PR #307, issue #265)
 
-End-to-end shape of the Data Dictionary preservation across DP+ job
-failures now on `main`:
-
-1. **Module** — `ckanext/datapusher_plus/dictionary_stash.py` is a tiny
-   on-disk persistence layer (`save` / `load` / `clear` / `stash_path`).
-   Atomic writes via `os.replace` with `.tmp` cleanup on failure. Stash
-   dir is configurable via `ckanext.datapusher_plus.dictionary_stash_dir`
-   (defaults to `<tempdir>/dpp_dict_stash`). Path-traversal guard on
-   `resource_id`. `load`/`clear` deliberately do NOT bootstrap the
-   directory — only `save` does.
-2. **Stash** — `AnalysisStage._parse_stats` writes `existing_info` to
-   the stash BEFORE deleting the existing datastore resource. Best-effort:
-   a stash failure logs a warning but does not block ingestion.
-3. **Restore — in-transaction failure** — `_rollback_database`
-   (`@database_task.on_rollback`) drops the half-written table and, if a
-   stash exists, re-creates the datastore resource with the stashed
-   `info` dicts and zero rows. Each field's Postgres `type` is derived
-   from `info["type_override"]` (mapped through `conf.TYPE_MAPPING.values()`,
-   falling back to `text`) — otherwise CKAN's `datastore_create` defaults
-   columns to `text` and `numeric`/`timestamp` annotations get silently
-   downgraded.
-4. **Restore — failure outside the transaction** — `analyze_task`,
-   `ai_suggestions_task`, and `_maybe_suspend_for_pii_review` run BEFORE
-   the `with transaction():` block, so failures there don't fire any
-   rollback hook. On retry, `AnalysisStage._parse_stats` checks for a
-   stash when no live datastore exists and loads it as `existing_info`
-   — the merge logic then propagates it onto the rebuilt headers, and
-   the success-finally clears the stash.
-5. **Cleanup** — `datapusher_plus_flow`'s `finally` clears the stash on
-   any successful exit (including `_StageAbort` complete-with-skip).
-   Error paths leave the stash for the rollback hook or a subsequent
-   retry. Stash mtime is surfaced in restore logs so operators can
-   distinguish genuine retry-after-failure from stale-restore caused by
-   an orphaned stash being applied to an unrelated upload.
-
-Test coverage: `tests/test_dictionary_stash.py` has 21 tests pinning
-the module, the `_parse_stats` retry-restore branch, and the
-`_rollback_database` type-mapping behavior.
+`dictionary_stash.py` is the on-disk persistence layer; `_parse_stats`
+stashes existing column `info` before delete, rollback/retry paths
+restore from the stash, finally clears. 21 tests in
+`test_dictionary_stash.py`.
 
 ## UTC timestamps (PR #308, issue #145)
 
-DP+ now uses a single helper `ckanext.datapusher_plus.utils.utcnow_naive()`
-for every persisted timestamp. It returns
-`datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)` —
-naive (so it fits the `TIMESTAMP WITHOUT TIME ZONE` columns) AND UTC
-(so a worker running in a non-UTC tz doesn't silently record local
-time). All seven call sites that previously used
-`datetime.datetime.now()` (local — wrong) or `datetime.datetime.utcnow()`
-(deprecated in Python 3.12+) have been migrated:
-
-- `helpers.py:345,364` — `mark_job_as_completed` / `mark_job_as_errored`
-  `finished_timestamp`. **The actual bug** — these were on local time.
-- `cli.py:452` — `migrate_from_rq` `ts.last_updated`.
-- `logic/action.py:101,132,230,264` — `task_status.last_updated` reads
-  and writes through the submit / hook actions. Reads switched from
-  `strptime("%Y-%m-%dT%H:%M:%S.%f")` to `fromisoformat(...)`; writes
-  switched from `str(dt)` to `dt.isoformat()` — symmetric, microsecond-
-  safe, no T-vs-space mismatch.
-
-The resource-data UI template now surfaces "UTC" suffix in timestamp
-tooltips. Test coverage: `tests/test_utcnow_naive.py` (4 tests, including
-a real `TZ=Pacific/Auckland` + `time.tzset()` flip that proves the
-helper returns UTC even when the process tz is not UTC).
+`utils.utcnow_naive()` is the single helper for every persisted
+timestamp; 4 regression tests in `test_utcnow_naive.py`.
 
 ## Configurable file-hash algorithm (PR #309, issue #221)
 
-DP+ now supports three file-hash algorithms for resource integrity
-checks, selectable via `ckanext.datapusher_plus.file_hash_algorithm`:
+`blake3` (default), `sha256`, `md5` selectable via
+`ckanext.datapusher_plus.file_hash_algorithm`. Read live from
+`tk.config` by `_get_file_hasher` (the canonical live-read pattern).
+`blake3` uses the external `b3sum` CLI (installed in worker + CI +
+`dpp-test`).
 
-- `blake3` (default) — ~10x faster than sha256, computed via the
-  `b3sum` CLI installed in worker / CI / `dpp-test`.
-- `sha256` — for DCAT3 / Croissant interoperability (those specs
-  require sha256).
-- `md5` — legacy compatibility only.
+## qsv-related arc (PRs #314 / #315, issues #173 / #179)
 
-Implementation lives in `ckanext/datapusher_plus/file_hash.py` with a
-single `compute_file_hash(path, algorithm)` dispatcher. `blake3` shells
-out to `b3sum --no-names`; `sha256`/`md5` use Python `hashlib` with
-chunked reads. Tests in `tests/test_file_hash_algorithm.py` pin all
-three algorithms against known fixtures.
+PR #314 fixed the `Date → date` mapping (was wrongly stored as
+`timestamp`); PR #315 bumped qsv pin to 20.1.0 with regression
+coverage. Some qsv 20.1.0 inference gaps documented (DD-MM-YYYY →
+String, Unix epoch → Integer).
 
-## file_hash preservation across metadata-stage re-fetch (PR #312, issue #310)
+## Auto-index threshold (PRs #317 / #318, issue #142)
 
-Caught during #309 smoke testing: `MetadataStage` re-fetches the resource
-dict (to get the latest CKAN state before applying suggestions) and that
-re-fetched dict OVERWRITES `ctx.resource`, discarding the `file_hash`
-that the download stage had just computed. Fix is a single line in
-`jobs/stages/metadata.py` that restores `file_hash` from `context.file_hash`
-after the re-fetch:
+`AUTO_INDEX_THRESHOLD` is a CLOSED range `[AUTO_INDEX_MIN_THRESHOLD,
+AUTO_INDEX_THRESHOLD]`, defaults `[3, 10]`. Single-value columns no
+longer get useless 10-40 MB indexes. 8 regression tests in
+`tests/test_issue_142_auto_index_threshold.py`.
 
-```python
-ctx.resource = refreshed
-if ctx.file_hash:
-    ctx.resource["file_hash"] = ctx.file_hash
-```
+## Version banner in flow log (PR #316, issue #111)
 
-`context.file_hash` is the authoritative value (set by `DownloadStage`),
-so the re-fetched resource dict's stale/missing `file_hash` should never
-win. Regression test: `tests/test_metadata_hash_persistence.py`.
-
-## DownloadResult rehydrate cross-resource cache leak (PR #313, issue #311)
-
-Also caught during #309 smoke testing. The `_apply_result` codepath for
-the cached `DownloadResult` was wholesale-replacing `ctx.resource` with
-the CACHED resource dict — which had a different `resource_id` than the
-job currently being processed. Downstream `TRUNCATE` then targeted the
-wrong table (or failed with "relation does not exist" if the cached
-resource had been deleted). Fix:
-
-- `_apply_result` for `DownloadResult` no longer overwrites `ctx.resource`
-  on a cache hit. Only the truly download-derived fields
-  (`file_path`, `file_hash`, `mime_type`, `file_size`) are applied.
-- `ctx.resource` keeps the live resource dict that the orchestrator
-  populated at job start.
-
-Regression test: `tests/test_rehydrate_resource_identity.py` asserts that
-two consecutive runs with different `resource_id`s but identical content
-hash don't cross-pollinate.
-
-## qsv date-format inference gaps (issue #173 baseline)
-
-Captured against qsv 20.1.0 (pinned in `Dockerfile.worker` and CI as
-of the qsv 20.0.0 → 20.1.0 bump). The matrix is pinned in
-`tests/test_issue_173_date_format_inference.py`; the test's
-`test_quoted_csv_inference_matrix` skips on qsv ≥ 20.2.0 with an
-actionable message so the next maintainer who bumps the pin past
-20.1.x is forced to update the matrix + this memory together.
-
-Known qsv 20.1.0 gaps on the reporter's 9-format CSV:
-- `DD-MM-YYYY` (dash-separated, day-first, e.g. `11-10-2024`) →
-  **String**. qsv has no heuristic for this format regardless of
-  `--prefer-dmy`.
-- `Unix Timestamp` (bare epoch integers) → **Integer**. qsv has no
-  heuristic to flag a 10-digit integer column as epoch seconds.
-
-Closed in qsv 20.1.0 vs. 20.0.0:
-- `ISO 8601 (YYYY-MM-DDTHH:MM:SS)` values like `2024-10-11T14:30:00`
-  (no tz, T-separator) — qsv 20.0.0 inferred this as String because
-  qsv-dateparser 0.14 didn't handle the T-separated-no-tz form. qsv
-  20.1.0 bumped qsv-dateparser to 0.15 which adds that format (see
-  qsv 20.1.0 release notes "Changed" section). Now inferred as
-  **DateTime** correctly.
-
-What works on qsv 20.1.0:
-- ISO 8601 (`2024-10-11T14:30:00`) → DateTime ✓ (new in 20.1.0)
-- RFC 2822 (`Fri, 11 Oct 2024 14:30:00 +0000`) → DateTime ✓
-- MM/DD/YYYY → Date ✓
-- YYYY/MM/DD → Date ✓
-- DD/MM/YYYY HH:MM → DateTime (interpreted as MDY by default — set
-  `ckanext.datapusher_plus.prefer_dmy = True` to flip)
-- YYYY-MM-DD HH:MM:SS → DateTime ✓
-
-The reporter's actual CSV in #173 is malformed (unquoted comma inside
-RFC 2822 values → header has 10 fields, every data row has 11).
-v3.0's `ValidationStage` catches this cleanly via the quarantine pass
-(see #265 stash / quarantine sections + `tests/test_validation_quarantine.py`).
-The original "wrong format" symptom in v1.0.3 was column shifting
-masquerading as a date-format issue.
-
-## qsv Date → Postgres date (PR #314, issue #179)
-
-`config_declaration.yaml`'s default for `qsv_dp_type_to_pg_type` had
-`"Date": "timestamp"` while `config.py`'s inline fallback (which always
-loses against the declaration) had `"Date": "date"`. Result: every
-column qsv inferred as `Date` got stored as Postgres `timestamp` with
-midnight time-of-day, defeating the point of having a separate `Date`
-type. Fix is a one-line change to `config_declaration.yaml`:
-`"Date": "date"`.
-
-Knock-on change: `_get_date_like_columns` in `jobs/stages/indexing.py`
-previously only matched `timestamp` columns when picking candidates for
-`AUTO_INDEX_DATES`. It now matches both `date` and `timestamp`, so the
-indexer still creates dates indexes after the type-mapping fix.
-
-Regression test: `tests/test_date_without_timestamp.py` asserts the
-declaration default and the indexer's column-type filter agree.
+The "JOB DONE!" capstone log line surfaces the DP+ version from
+`pyproject.toml`. 5 regression tests in `tests/test_issue_111_version_in_log.py`.
