@@ -46,7 +46,9 @@ if isinstance(FORMATS, str):
     FORMATS = FORMATS.split()
 
 # PII screening settings
-PII_SCREENING = tk.asbool(tk.config.get("ckanext.datastore_plus.pii_screening", False))
+PII_SCREENING = tk.asbool(
+    tk.config.get("ckanext.datapusher_plus.pii_screening", False)
+)
 PII_FOUND_ABORT = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.pii_found_abort", False)
 )
