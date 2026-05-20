@@ -148,7 +148,7 @@ Formula types:
 - **Logging** — Custom TRACE level (5) via `logging_utils.py`; f-string log messages; pipeline stages use `ProcessingContext.logger`
 - **Error handling** — Custom exception hierarchy in `job_exceptions.py`
 - **Linting** — Flake8 with E501 disabled (long lines allowed): `# flake8: noqa: E501`
-- **CI** — `.github/workflows/` (`main.yml`, `ci.yml`) runs unit + integration tests
+- **CI** — `.github/workflows/ci.yml` ("DataPusher+ Integration CI") runs the qsv contract regression test (`test_qsv_v20_regression.py`) + the integration suite on push/PR; `main.yml` is a manual (`workflow_dispatch`) end-to-end run. No workflow runs the full unit suite — run it locally (`pytest tests/ --ignore=tests/integration`)
 
 ## External Dependencies
 
