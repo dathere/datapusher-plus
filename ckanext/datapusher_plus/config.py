@@ -74,7 +74,11 @@ QSV_BIN = Path(
 )
 
 # Data processing settings
-PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "1000"))
+# Fallback aligned to the config_declaration.yaml default (0 = load all
+# rows). Under CKAN 2.10+ declarative config the declared default wins,
+# so 0 is already the effective runtime default; this just removes a
+# stale, never-reached "1000" fallback that contradicted the declaration.
+PREVIEW_ROWS = tk.asint(tk.config.get("ckanext.datapusher_plus.preview_rows", "0"))
 TIMEOUT = tk.asint(tk.config.get("ckanext.datapusher_plus.download_timeout", "300"))
 QSV_COMMAND_TIMEOUT = tk.asint(
     tk.config.get("ckanext.datapusher_plus.qsv_command_timeout", "1800")

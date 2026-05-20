@@ -49,7 +49,9 @@ ckanext.datapusher_plus.enable_druf = true
 When DRUF is enabled, the following templates are overridden:
 - `snippets/add_dataset.html`: Changes "Add Dataset" to redirect to resource upload
 - `package/snippets/package_form.html`: Modifies form stages to show "Add data" first
+- `package/snippets/resource_form.html`: Modifies resource form stages for the resource-first flow
 - `scheming/package/snippets/package_form.html`: Modifies scheming form stages
+- `scheming/package/snippets/resource_form.html`: Modifies scheming resource form stages
 
 **Requirements:**
 - No special CKAN version requirements
