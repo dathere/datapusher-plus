@@ -371,7 +371,6 @@ jobs:
           scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
           scheming.presets = ckanext.scheming:presets.json
           scheming.dataset_fallback = false
-          ckanext.datapusher_plus.use_proxy = false
           ckanext.datapusher_plus.download_proxy =
           ckanext.datapusher_plus.ssl_verify = false
           ckanext.datapusher_plus.upload_log_level = INFO

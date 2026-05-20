@@ -18,6 +18,7 @@ import ckanext.datapusher_plus.helpers as dph
 import ckanext.datapusher_plus.logic.action as action
 import ckanext.datapusher_plus.logic.auth as auth
 import ckanext.datapusher_plus.cli as cli
+import ckanext.datapusher_plus.config as conf
 
 tk = p.toolkit
 
@@ -139,22 +140,13 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         )
         if not supported_formats:
             log.debug(
-                "No supported formats configured,\
-                    using DataPusher Plus internals"
+                "No supported formats configured; "
+                "using the DataPusher+ FORMATS default."
             )
-            supported_formats = [
-                "csv",
-                "xls",
-                "xlsx",
-                "tsv",
-                "ssv",
-                "tab",
-                "ods",
-                "geojson",
-                "shp",
-                "qgis",
-                "zip",
-            ]
+            # Reuse the single canonical default from config.py rather
+            # than a second hardcoded list that would silently drift
+            # (e.g. miss xlsm/xlsb the way this list once did).
+            supported_formats = conf.FORMATS
 
         submit = (
             resource_format
