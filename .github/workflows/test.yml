@@ -1,27 +1,85 @@
-name: Tests
-on: [push, pull_request]
+name: Unit Tests
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: dp-unit-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  QSV_VER: "20.1.0"
+
 jobs:
-  test:
-    strategy:
-      matrix:
-        python-version: [2.7, 3.6, 3.7, 3.8, 3.9]
-      fail-fast: false
-    name: Python ${{ matrix.python-version }} 
+  unit-tests:
+    name: Unit suite (Python 3.10, CKAN 2.11)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The unit suite imports ckan.plugins.toolkit and reads test-core.ini,
+    # so it needs a full CKAN install. The ckan/ckan-dev:2.11 image ships
+    # that (Python 3.10). A 3.11-3.13 matrix would mean building CKAN from
+    # source per version — tracked as a separate follow-up; pyproject
+    # already classifies 3.10-3.13 support.
+    container:
+      image: ckan/ckan-dev:2.11
+      options: --user root
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-python@v2
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install requirements (Python 2)
-        if: ${{ matrix.python-version == '2.7' }}
-        run: pip install -r requirements-dev-py2.txt
-      - name: Install requirements (Python 3)
-        if: ${{ matrix.python-version != '2.7' }}
-        run: pip install -r requirements-dev.txt
-      - name: Run tests
-        run: pytest --cov=datapusher --cov-append --cov-report=xml --disable-warnings tests
-      - name: Upload coverage report to codecov
-        uses: codecov/codecov-action@v1
-        with:
-          file: ./coverage.xml
+      - name: Install system dependencies
+        run: |
+          apt-get update -y
+          apt-get install -y \
+            build-essential git wget unzip \
+            gdal-bin libgdal-dev libspatialindex-dev libgeos-dev libproj-dev \
+            libxslt1-dev libxml2-dev libffi-dev libpq-dev zlib1g-dev
+
+      - name: Checkout datapusher-plus
+        uses: actions/checkout@v4
+
+      - name: Install Python dependencies and datapusher-plus
+        run: |
+          set -eu
+          pip install --upgrade pip
+          # GDAL python binding must match the system libgdal version.
+          pip install "GDAL==$(gdal-config --version)"
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -e .
+
+      - name: Install qsv
+        run: |
+          set -eu
+          cd /tmp
+          QSV_ZIP="qsv-${QSV_VER}-x86_64-unknown-linux-musl.zip"
+          wget -q "https://github.com/dathere/qsv/releases/download/${QSV_VER}/${QSV_ZIP}" -O qsv.zip
+          unzip -qo qsv.zip
+          # Install as /usr/local/bin/qsvdp so QSV_BIN is stable regardless
+          # of whether the archive ships `qsvdp` or `qsv`.
+          if [ -f qsvdp ]; then SRC_BIN=qsvdp
+          elif [ -f qsv ]; then SRC_BIN=qsv
+          else echo "ERROR: no qsv binary in archive"; ls -la; exit 1; fi
+          chmod +x "$SRC_BIN"
+          mv -f "$SRC_BIN" /usr/local/bin/qsvdp
+          /usr/local/bin/qsvdp --version
+
+      - name: Run unit test suite
+        env:
+          # The ckan-dev image's site-packages registers a pytest plugin
+          # (ckan.tests.pytest_ckan) that calls make_app() in
+          # pytest_sessionstart — needs a fully-configured CKAN. Disable
+          # plugin autoload so plain pytest runs.
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          QSV_BIN: /usr/local/bin/qsvdp
+          CKAN_INI: /srv/app/src/ckan/test-core.ini
+        run: |
+          set -eu
+          # -o addopts= overrides setup.cfg's --pdbcls IPython addopt.
+          # tests/integration is excluded — it needs the full
+          # docker-compose stack (Prefect, Postgres, Redis, Solr).
+          python3 -m pytest tests/ --ignore=tests/integration \
+            -o addopts= -p no:cacheprovider -q
