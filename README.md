@@ -303,6 +303,8 @@ ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$
 
 7. Add the rest of the DP+ config to your CKAN config (e.g. `/etc/ckan/default/ckan.ini`):
 
+> **Note:** The block below is an illustrative example, not a list of defaults. Several values (e.g. `preview_rows`, `chunk_size`, `dedup`, `auto_index_threshold`, `ignore_file_hash`) differ from DP+'s actual defaults. The authoritative defaults live in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml). Only set the keys you actually want to override.
+
 ```ini
 # datapusher-plus settings
 ckanext.datapusher_plus.use_proxy = false
@@ -310,7 +312,7 @@ ckanext.datapusher_plus.download_proxy =
 ckanext.datapusher_plus.ssl_verify = false
 # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
 ckanext.datapusher_plus.upload_log_level = INFO
-ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx ods geojson shp qgis zip
 ckanext.datapusher_plus.pii_screening = false
 ckanext.datapusher_plus.pii_found_abort = false
 ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
@@ -408,7 +410,9 @@ Use a DP+ extended scheming schema:
 scheming.dataset_schemas =  ckanext.datapusher_plus:dataset-druf.yaml
 ```
 
-Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) for details.
+Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) and [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) for details.
+
+> **Note:** The block below is an illustrative example, not a list of defaults. Several values differ from DP+'s actual defaults — see [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) for the authoritative defaults. Only set the keys you actually want to override.
 
 >```ini
 > ckanext.datapusher_plus.use_proxy = false
@@ -416,7 +420,7 @@ Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.
 > ckanext.datapusher_plus.ssl_verify = false
 > # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
 > ckanext.datapusher_plus.upload_log_level = INFO
-> ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+> ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx ods geojson shp qgis zip
 > ckanext.datapusher_plus.pii_screening = false
 > ckanext.datapusher_plus.pii_found_abort = false
 > ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
@@ -454,7 +458,6 @@ Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.
 > ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
 > ckanext.datapusher_plus.auto_unzip_one_file = true
 > ckanext.datapusher_plus.api_token = <CKAN service account token for CKAN user with sysadmin privileges>
->ckanext.datapusher_plus.describeGPT_api_key = <Token for OpenAI API compatible service>
 >```
 >
 >and add this entry to your CKAN's `resource_formats.json` file.
