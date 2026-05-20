@@ -303,23 +303,22 @@ ckan config-tool /etc/ckan/default/ckan.ini "ckanext.datapusher_plus.api_token=$
 
 7. Add the rest of the DP+ config to your CKAN config (e.g. `/etc/ckan/default/ckan.ini`):
 
-> **Note:** The block below is an illustrative example, not a list of defaults. Several values (e.g. `preview_rows`, `chunk_size`, `dedup`, `auto_index_threshold`, `ignore_file_hash`) differ from DP+'s actual defaults. The authoritative defaults live in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml). Only set the keys you actually want to override.
+> **Note:** The block below lists DP+'s settings at their current defaults, for reference. Set only the keys you actually want to change — pasting the whole block pins every value as an explicit override, so a later change to a DP+ default wouldn't reach you. Authoritative defaults live in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) and [`config.py`](ckanext/datapusher_plus/config.py).
 
 ```ini
 # datapusher-plus settings
-ckanext.datapusher_plus.use_proxy = false
 ckanext.datapusher_plus.download_proxy = 
-ckanext.datapusher_plus.ssl_verify = false
+ckanext.datapusher_plus.ssl_verify = true
 # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
 ckanext.datapusher_plus.upload_log_level = INFO
-ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx ods geojson shp qgis zip
+ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsm xlsb ods geojson shp qgis zip
 ckanext.datapusher_plus.pii_screening = false
 ckanext.datapusher_plus.pii_found_abort = false
 ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
 ckanext.datapusher_plus.pii_show_candidates = false
 ckanext.datapusher_plus.pii_quick_screen = false
 ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
-ckanext.datapusher_plus.preview_rows = 100
+ckanext.datapusher_plus.preview_rows = 0
 ckanext.datapusher_plus.download_timeout = 300
 ckanext.datapusher_plus.max_content_length = 1256000000000
 ckanext.datapusher_plus.chunk_size = 16384
@@ -330,7 +329,7 @@ ckanext.datapusher_plus.unsafe_prefix = unsafe_
 ckanext.datapusher_plus.reserved_colnames = _id
 ckanext.datapusher_plus.prefer_dmy = false
 ckanext.datapusher_plus.ignore_file_hash = true
-ckanext.datapusher_plus.auto_index_threshold = 3
+ckanext.datapusher_plus.auto_index_threshold = 10
 ckanext.datapusher_plus.auto_index_dates = true
 ckanext.datapusher_plus.auto_unique_index = true
 ckanext.datapusher_plus.summary_stats_options =
@@ -343,11 +342,11 @@ ckanext.datapusher_plus.auto_alias = true
 ckanext.datapusher_plus.auto_alias_unique = false
 ckanext.datapusher_plus.copy_readbuffer_size = 1048576
 ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
-ckanext.datapusher_plus.auto_spatial_simplication = true
-ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+ckanext.datapusher_plus.auto_spatial_simplification = true
+ckanext.datapusher_plus.spatial_simplification_relative_tolerance = 0.1
 ckanext.datapusher_plus.latitude_fields = latitude,lat
-ckanext.datapusher_plus.longitude_fields = longitude,long,lon
-ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+ckanext.datapusher_plus.longitude_fields = longitude,lon
+ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_bytecode_cache
 ckanext.datapusher_plus.auto_unzip_one_file = true
 ```
 
@@ -412,22 +411,21 @@ scheming.dataset_schemas =  ckanext.datapusher_plus:dataset-druf.yaml
 
 Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.py) and [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) for details.
 
-> **Note:** The block below is an illustrative example, not a list of defaults. Several values differ from DP+'s actual defaults — see [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) for the authoritative defaults. Only set the keys you actually want to override.
+> **Note:** The block below lists DP+'s settings at their current defaults, for reference. Set only the keys you actually want to change — pasting the whole block pins every value as an explicit override, so a later change to a DP+ default wouldn't reach you. Authoritative defaults live in [`config_declaration.yaml`](ckanext/datapusher_plus/config_declaration.yaml) and [`config.py`](ckanext/datapusher_plus/config.py).
 
 >```ini
-> ckanext.datapusher_plus.use_proxy = false
 > ckanext.datapusher_plus.download_proxy = 
-> ckanext.datapusher_plus.ssl_verify = false
+> ckanext.datapusher_plus.ssl_verify = true
 > # supports INFO, DEBUG, TRACE - use DEBUG or TRACE when debugging scheming Formulas
 > ckanext.datapusher_plus.upload_log_level = INFO
-> ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx ods geojson shp qgis zip
+> ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsm xlsb ods geojson shp qgis zip
 > ckanext.datapusher_plus.pii_screening = false
 > ckanext.datapusher_plus.pii_found_abort = false
 > ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
 > ckanext.datapusher_plus.pii_show_candidates = false
 > ckanext.datapusher_plus.pii_quick_screen = false
 > ckanext.datapusher_plus.qsv_bin = /usr/local/bin/qsvdp
-> ckanext.datapusher_plus.preview_rows = 100
+> ckanext.datapusher_plus.preview_rows = 0
 > ckanext.datapusher_plus.download_timeout = 300
 > ckanext.datapusher_plus.max_content_length = 1256000000000
 > ckanext.datapusher_plus.chunk_size = 16384
@@ -438,7 +436,7 @@ Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.
 > ckanext.datapusher_plus.reserved_colnames = _id
 > ckanext.datapusher_plus.prefer_dmy = false
 > ckanext.datapusher_plus.ignore_file_hash = true
-> ckanext.datapusher_plus.auto_index_threshold = 3
+> ckanext.datapusher_plus.auto_index_threshold = 10
 > ckanext.datapusher_plus.auto_index_dates = true
 > ckanext.datapusher_plus.auto_unique_index = true
 > ckanext.datapusher_plus.summary_stats_options =
@@ -451,11 +449,11 @@ Configure DP+ numerous settings. See [config.py](ckanext/datapusher_plus/config.
 > ckanext.datapusher_plus.auto_alias_unique = false
 > ckanext.datapusher_plus.copy_readbuffer_size = 1048576
 > ckanext.datapusher_plus.type_mapping = {"String": "text", "Integer": "numeric","Float": "numeric","DateTime": "timestamp","Date": "date","NULL": "text"}
-> ckanext.datapusher_plus.auto_spatial_simplication = true
-> ckanext.datapusher_plus.spatial_simplication_relative_tolerance = 0.1
+> ckanext.datapusher_plus.auto_spatial_simplification = true
+> ckanext.datapusher_plus.spatial_simplification_relative_tolerance = 0.1
 > ckanext.datapusher_plus.latitude_fields = latitude,lat
-> ckanext.datapusher_plus.longitude_fields = longitude,long,lon
-> ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_butecode_cache
+> ckanext.datapusher_plus.longitude_fields = longitude,lon
+> ckanext.datapusher_plus.jinja2_bytecode_cache_dir = /tmp/jinja2_bytecode_cache
 > ckanext.datapusher_plus.auto_unzip_one_file = true
 > ckanext.datapusher_plus.api_token = <CKAN service account token for CKAN user with sysadmin privileges>
 >```

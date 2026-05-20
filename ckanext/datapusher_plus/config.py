@@ -40,7 +40,7 @@ UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "IN
 # Supported formats
 FORMATS = tk.config.get(
     "ckanext.datapusher_plus.formats",
-    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "ods", "geojson", "shp", "qgis", "zip"],
+    ["csv", "tsv", "tab", "ssv", "xls", "xlsx", "xlsm", "xlsb", "ods", "geojson", "shp", "qgis", "zip"],
 )
 if isinstance(FORMATS, str):
     FORMATS = FORMATS.split()
@@ -253,8 +253,16 @@ DATASTORE_WRITE_URL = tk.config.get("ckan.datastore.write_url")
 AUTO_SPATIAL_SIMPLIFICATION = tk.asbool(
     tk.config.get("ckanext.datapusher_plus.auto_spatial_simplification", True)
 )
+# Lowercase key is canonical. The legacy UPPERCASE key
+# (``...SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE``) is still honoured
+# as a fallback so deployments that set it don't silently lose the
+# setting — same backward-compat shape as ``SSL_VERIFY`` above.
 SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE = tk.config.get(
-    "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE", "0.1"
+    "ckanext.datapusher_plus.spatial_simplification_relative_tolerance",
+    tk.config.get(
+        "ckanext.datapusher_plus.SPATIAL_SIMPLIFICATION_RELATIVE_TOLERANCE",
+        "0.1",
+    ),
 )
 
 # Latitude and longitude column names

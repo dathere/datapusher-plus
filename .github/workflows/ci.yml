@@ -371,16 +371,15 @@ jobs:
           scheming.dataset_schemas = ckanext.datapusher_plus:dataset-druf.yaml
           scheming.presets = ckanext.scheming:presets.json
           scheming.dataset_fallback = false
-          ckanext.datapusher_plus.use_proxy = false
           ckanext.datapusher_plus.download_proxy =
           ckanext.datapusher_plus.ssl_verify = false
           ckanext.datapusher_plus.upload_log_level = INFO
-          ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+          ckanext.datapusher_plus.formats = csv tsv tab ssv xls xlsx xlsb xlsm ods geojson shp qgis zip
           # CKAN's bundled test-core.ini sets the legacy `ckan.datapusher.formats` key, which DPP's
           # _submit_to_datapusher checks FIRST (`tk.config.get("ckan.datapusher.formats") or ...`).
           # Without overriding it here, the legacy list (csv/xls/xlsx/tsv only) wins and DPP silently
           # refuses to auto-submit ssv/tab/ods/geojson/shp/qgis/zip resources.
-          ckan.datapusher.formats = csv tsv tab ssv xls xlsx xlsxb xlsm ods geojson shp qgis zip
+          ckan.datapusher.formats = csv tsv tab ssv xls xlsx xlsb xlsm ods geojson shp qgis zip
           ckanext.datapusher_plus.pii_screening = false
           ckanext.datapusher_plus.pii_found_abort = false
           ckanext.datapusher_plus.pii_regex_resource_id_or_alias =
@@ -717,7 +716,7 @@ jobs:
               ssv)     echo "$name|$file_url|SSV|text/csv|SSV: $filename" >> /tmp/test_files.txt ;;
               xls)     echo "$name|$file_url|XLS|application/vnd.ms-excel|XLS: $filename" >> /tmp/test_files.txt ;;
               xlsx)    echo "$name|$file_url|XLSX|application/vnd.openxmlformats-officedocument.spreadsheetml.sheet|XLSX: $filename" >> /tmp/test_files.txt ;;
-              xlsxb)   echo "$name|$file_url|XLSXB|application/vnd.ms-excel.sheet.binary.macroEnabled.12|XLSXB: $filename" >> /tmp/test_files.txt ;;
+              xlsb)    echo "$name|$file_url|XLSB|application/vnd.ms-excel.sheet.binary.macroEnabled.12|XLSB: $filename" >> /tmp/test_files.txt ;;
               xlsm)    echo "$name|$file_url|XLSM|application/vnd.ms-excel.sheet.macroEnabled.12|XLSM: $filename" >> /tmp/test_files.txt ;;
               ods)     echo "$name|$file_url|ODS|application/vnd.oasis.opendocument.spreadsheet|ODS: $filename" >> /tmp/test_files.txt ;;
               geojson) echo "$name|$file_url|GEOJSON|application/geo+json|GeoJSON: $filename" >> /tmp/test_files.txt ;;
