@@ -1,3 +1,4 @@
 [run]
-omit = datapusher/main.py
-source = datapusher
+source = ckanext/datapusher_plus
+omit =
+    ckanext/datapusher_plus/migration/*

@@ -393,6 +393,87 @@ CKAN_INI=/etc/ckan/default/ckan.ini \
 prefect worker start --pool datapusher-plus
 ```
 
+## Testing
+
+DataPusher+ has three test layers — Python unit tests, Python integration tests, and JavaScript tests — all run automatically in CI on every push and pull request.
+
+### Python unit tests
+
+The unit suite (~280 tests) is fast and needs no live services, but the tests import `ckan.plugins.toolkit`, so a CKAN install and the `qsv` binary must be available on the machine running them.
+
+Install the test dependencies (`httpretty`, `pytest`, `pytest-cov`):
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Run the suite:
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+QSV_BIN=/usr/local/bin/qsvdp \
+CKAN_INI=/usr/lib/ckan/default/src/ckan/test-core.ini \
+pytest tests/ --ignore=tests/integration
+```
+
+The three environment variables:
+
+- `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` — CKAN ships a pytest plugin that calls `make_app()` at session start, which needs a fully-configured CKAN app. Disabling plugin autoload lets plain `pytest` run.
+- `QSV_BIN` — path to the `qsv` binary; the qsv-dependent tests (type inference, date-format and decimal-comma regression tests) shell out to it.
+- `CKAN_INI` — a CKAN test config with a real `SECRET_KEY`. Adjust the path to your CKAN source tree (CKAN's `test-core.ini`).
+
+Run with coverage. `-p pytest_cov` is required here because `PYTEST_DISABLE_PLUGIN_AUTOLOAD` turns off plugin autodiscovery — it explicitly loads the `pytest-cov` plugin:
+
+```bash
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
+QSV_BIN=/usr/local/bin/qsvdp \
+CKAN_INI=/usr/lib/ckan/default/src/ckan/test-core.ini \
+pytest -p pytest_cov --cov=ckanext/datapusher_plus tests/ --ignore=tests/integration
+```
+
+### Python integration tests
+
+The integration suite exercises DataPusher+ end-to-end against a real CKAN + Prefect + PostgreSQL + Solr + Redis stack, managed with Docker Compose.
+
+Bring the stack up (this also writes a sysadmin token to `.integration-token`):
+
+```bash
+scripts/integration-up
+```
+
+Run the integration tests:
+
+```bash
+INTEGRATION=1 CKAN_URL=http://localhost:5050 pytest tests/integration/ -v
+```
+
+Tear the stack down — `scripts/integration-down` keeps the PostgreSQL volume for a fast warm restart, `scripts/integration-down --wipe` removes everything:
+
+```bash
+scripts/integration-down
+```
+
+A plain `pytest tests/` run skips `tests/integration/` automatically unless `INTEGRATION=1` is set, so the unit and integration suites don't collide.
+
+See [`tests/integration/README.md`](tests/integration/README.md) for the full stack layout, configurable ports, and token handling.
+
+### JavaScript tests
+
+The JavaScript suite uses [Vitest](https://vitest.dev/) with jsdom and covers the `scheming-ai-suggestions.js` CKAN module.
+
+```bash
+npm install        # first time only
+npm test           # one-shot run
+npm run test:watch # watch mode
+```
+
+See [`tests/js/README.md`](tests/js/README.md) for setup details.
+
+### Continuous integration
+
+- [`.github/workflows/test.yml`](.github/workflows/test.yml) ("Unit Tests") runs the Python unit suite on every push and pull request to `main`.
+- [`.github/workflows/ci.yml`](.github/workflows/ci.yml) ("DataPusher+ Integration CI") runs the qsv contract-regression test and the full integration suite on every push and pull request, and nightly.
+
 ## Configuring
 
 ### CKAN Configuration
