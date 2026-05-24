@@ -19,19 +19,20 @@ rebuilding.
   `git checkout` on the host changes what the container sees).
 - CKAN 2.11.5, Python 3.10.20.
 
-## What's installed (took ~5 min, mirrors `.github/workflows/ci.yml`)
+## What's installed (took ~5 min, mirrors `.github/workflows/test.yml`)
 - Geo system libs: `gdal-bin libgdal-dev libspatialindex-dev libgeos-dev
   libproj-dev` + `build-essential` etc.
-- GDAL python 3.6.2, `requirements.txt` + `requirements-dev.txt`,
-  `pip install -e .` (→ `datapusher-plus 3.0.0a0`, editable).
+- GDAL python pinned to `gdal-config --version`, `requirements.txt` +
+  `requirements-dev.txt`, `pip install -e .` (→ `datapusher-plus 3.0.0a0`,
+  editable).
 - qsv 20.1.0 at `/usr/local/bin/qsvdp` (bumped from 20.0.0 in PR #315 —
   no breaking changes per qsv 20.1.0 release notes; pipelines built
   against 20.0.0 upgrade in place).
 - `b3sum` CLI at `/usr/local/bin/b3sum` (added by PR #309 for the
   configurable file-hash feature — required by tests that exercise the
   `blake3` algorithm via the external `b3sum` binary path).
-- `babel>=2.9` (declared explicitly in `requirements.txt` since PR #320
-  — DP+ now imports `babel.numbers` directly for locale-aware number
+- `babel>=2.9` (declared explicitly in `requirements.txt` since PR #320 —
+  DP+ now imports `babel.numbers` directly for locale-aware number
   parsing in `AnalysisStage._normalize_locale_numbers`).
 - `importlib_metadata>=4.6` (declared explicitly in `requirements.txt`
   since PR #323 — prefect 3.7.1's `workers/base.py` imports it
@@ -55,50 +56,63 @@ Required env, and why:
 - `CKAN_INI=/srv/app/src/ckan/test-core.ini` — the image's default
   `/srv/app/ckan.ini` is NOT populated when the entrypoint is bypassed;
   `test-core.ini` has a real `SECRET_KEY`.
-- `-o addopts=` — overrides `setup.cfg`'s `--pdbcls=IPython...` addopt.
+- `-o addopts=` — overrides `pyproject.toml`'s `[tool.pytest.ini_options]`
+  `--pdbcls=IPython...` addopt (pytest config moved from `setup.cfg` to
+  `pyproject.toml`).
 - `tests/integration/` excluded — needs the integration stack (see below).
+
+For coverage, add `-p pytest_cov --cov=ckanext/datapusher_plus` —
+`PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` disables `--cov` autodiscovery, so
+`-p pytest_cov` must be explicit. `.coveragerc` was fixed on the
+`docs-readme-testing-section` branch (was stale `source = datapusher`
+from the pre-extension era; now correctly `source = ckanext/datapusher_plus`).
 
 > The full-suite tail prints noisy Prefect server-shutdown logging
 > (`ValueError: I/O operation on closed file` from
 > `prefect/logging/handlers.py`). Cosmetic — not a test failure. Grep
 > the summary line: `... 2>&1 | grep -E "^[0-9]+ passed|^[0-9]+ failed"`.
 
-## Known result (as of 2026-05-20, `main` @ `5bac296`)
+## Known result (as of 2026-05-20, `main` @ `eca276d`, PR #326 merged)
 
-**277/277 Python unit tests pass** on `main` after the #323 → #324 arc.
+~280 Python unit tests pass on `main` (the `grep -c "^    def test_\|^def test_"`
+file-by-file count totals 259 functions across 28 files, but pytest
+collection expands parametrized tests further — the actual collected
+count is the ~280 reported by the PR descriptions).
 
 Test count history:
 - 218 → 251 over the 2026-05-17 → 2026-05-19 arc (#299 → #322, net **+33**).
 - 251 → 277 over the 2026-05-19 → 2026-05-20 arc (#323 → #324, net **+26**).
+- 277 → ~280 over the 2026-05-20 arc (#326 added `test_formats_config.py`
+  with 3 tests).
 
-The breakdown isn't a simple per-file sum because refactors also removed or
-consolidated pre-existing tests. Reproducible via
+The breakdown isn't a simple per-file sum because refactors also removed
+or consolidated pre-existing tests (the v3 refactor retired
+`test_unit.py`, `test_mocked.py`, `test_acceptance.py`, `test_web.py`).
+Reproducible via
 `pytest tests/ --ignore=tests/integration --collect-only -q`.
 
-New-file gross additions, #299 → #322 arc:
-- `tests/test_dictionary_stash.py` — 21 tests (PR #307)
-- `tests/test_utcnow_naive.py` — 4 tests (PR #308)
-- `tests/test_file_hash_algorithm.py` — 10 tests (PR #309)
-- `tests/test_metadata_hash_persistence.py` — 3 tests (PR #312, regression for #310)
-- `tests/test_rehydrate_resource_identity.py` — 4 tests (PR #313, regression for #311)
-- `tests/test_date_without_timestamp.py` — 5 tests (PR #314, regression for #179)
-- `tests/test_issue_173_date_format_inference.py` — 4 tests (PR #315, regression for #173)
-- `tests/test_issue_111_version_in_log.py` — 5 tests (PR #316, regression for #111)
-- `tests/test_issue_142_auto_index_threshold.py` — 8 tests (PR #317, regression for #142)
-- `tests/test_issue_112_decimal_comma.py` — 11 tests (PR #320, regression for #112)
-- `tests/test_issue_261_empty_date_range.py` — 6 tests (PR #322, regression for #261)
-
-New-file gross additions, #323 → #324 arc:
-- `tests/test_issue_61_download_always_whitelist.py` — 23 tests (PR #323, feature #61)
-- `tests/test_pii_screening_config_key.py` — 3 tests (PR #324, regression for the
-  `pii_screening` config-key typo found by the documentation audit)
+Most recent regression test files:
+- `tests/test_formats_config.py` — 3 tests (PR #326: xlsm/xlsb in FORMATS,
+  AST drift guard that every `FormatConverterStage.SPREADSHEET_EXTENSIONS`
+  entry is gated in by FORMATS, lowercase-key regression guard for the
+  spatial-tolerance setting).
+- `tests/test_pii_screening_config_key.py` — 3 tests (PR #324: regression
+  for the `datastore_plus` → `datapusher_plus` typo).
+- `tests/test_issue_61_download_always_whitelist.py` — 23 tests (PR #323,
+  feature #61).
+- `tests/test_issue_261_empty_date_range.py` — 6 tests (PR #322,
+  regression for #261).
+- `tests/test_issue_112_decimal_comma.py` — 11 tests (PR #320,
+  regression for #112).
+- `tests/test_issue_142_auto_index_threshold.py` — 8 tests (PR #317,
+  regression for #142).
 
 The JS unit suite (Vitest + jsdom, PR #304) is unchanged at **12 tests**
 for `scheming-ai-suggestions.js`. Runs on the host, not in `dpp-test`:
 ```bash
 npm install                     # first time only
-npx vitest run                  # one-shot
-npx vitest                      # watch mode
+npm test                        # one-shot (alias for npx vitest run)
+npm run test:watch              # watch mode
 ```
 `vitest.config.js` is scoped to `tests/js/**/*.test.js`. Setup at
 `tests/js/setup.js` loads jQuery into the jsdom realm via `fs + new
@@ -116,7 +130,7 @@ regression tests + manual screenshots in the issue thread.
 - Restart: `docker start dpp-test` (state persists across stops).
 - Recreate: `docker run -d --name dpp-test --platform linux/amd64 --user root
   -v <repo>:/repo -w /repo ckan/ckan-dev:2.11 sleep infinity`, then re-run
-  the `ci.yml`-style install (apt geo libs → `pip install GDAL==$(gdal-config
+  the `test.yml`-style install (apt geo libs → `pip install GDAL==$(gdal-config
   --version)` → `pip install -r requirements.txt -r requirements-dev.txt -e .`
   → download qsv 20.1.0 musl zip → `qsvdp` to `/usr/local/bin/` → download
   `b3sum` musl binary to `/usr/local/bin/` and `chmod +x`).
@@ -163,20 +177,31 @@ a real end-to-end flow run.
 > `importlib_metadata>=4.6` directly in `requirements.txt`. If you
 > rebuild the worker image or `dpp-test`, the pin handles it.
 
-> **2026-05-19 stack state** (may be stale — re-check): the
-> `prefect-server`, `prefect-worker`, `postgres`, `redis`, `solr`
-> containers were healthy/Up, but the **CKAN service itself was
-> stopped or crashed**. Run `scripts/integration-up` to bring CKAN
-> back before any integration work.
+## CI workflows (post-PR #326)
+
+- **`test.yml` — "Unit Tests"** (NEW in PR #326, replaces the dead
+  Python-2.7-era cruft of the same name). Runs the full unit suite
+  (`pytest tests/ --ignore=tests/integration`) inside
+  `ckan/ckan-dev:2.11` on push to `main`/`dev` and PR to `main`. Python
+  3.10 only — a 3.11-3.13 matrix would require building CKAN from
+  source per version, left as a follow-up.
+- **`ci.yml` — "DataPusher+ Integration CI"**. Runs the qsv contract
+  regression (`test_qsv_v20_regression.py`) + the integration suite on
+  push to `main`/`dev` and PR to `main`. Does NOT run the full unit
+  suite. PR #326 also fixed `xlsxb` → `xlsb` typos in the
+  `ckanext.datapusher_plus.formats` / `ckan.datapusher.formats` lines
+  and the test-file `case` branch.
+- **`main.yml`** — `workflow_dispatch`-only end-to-end run.
 
 ## Test patterns established (worth following)
 
 1. **AST-parse `config.py`, YAML-parse `config_declaration.yaml`** — a
    recurring drift-guard pattern. `test_issue_142_auto_index_threshold.py`,
    `test_issue_112_decimal_comma.py`, `test_issue_61_download_always_whitelist.py`,
-   and `test_pii_screening_config_key.py` all walk the source files to
-   confirm inline fallbacks and declaration defaults/keys agree. Catches
-   #179-style declaration-vs-code drift without the CKAN bootstrap.
+   `test_pii_screening_config_key.py`, and `test_formats_config.py` all
+   walk the source files to confirm inline fallbacks and declaration
+   defaults/keys agree. Catches #179-style declaration-vs-code drift
+   without the CKAN bootstrap.
    When YAML-parsing the declaration, **iterate all `groups`/`options`**
    to find the key by name (don't index `groups[0]` — brittle if the
    declaration is restructured; Copilot caught this on PR #323). Guard
@@ -222,138 +247,35 @@ a real end-to-end flow run.
    `test_pii_screening_config_key.py::_reset_config_module`. (Copilot
    caught the leak on PR #324.)
 
-## DOWNLOAD_ALWAYS_WHITELIST (PR #323, issue #61)
+## Recent feature/regression highlights (cross-reference)
 
-`ckanext.datapusher_plus.download_always_whitelist` — a
-whitespace-separated list of hostnames whose resources always get
-re-downloaded + re-analyzed, bypassing the file-hash upload-skip
-optimization in `DownloadStage._should_skip_upload`. For hosts that
-update content in place without changing the byte hash, or local/peered
-hosts where re-download is cheap.
+For the prior detailed write-ups of these arcs, see the git log
+commit messages — they were inlined in earlier versions of this
+memory but moved out to avoid duplication with CHANGELOG.md / PR
+descriptions. Quick index:
 
-- Issue #61 (2023) originally paired this with a never-built
-  `DOWNLOAD_PREVIEW_ONLY` partial-download mode; DP+'s architecture is
-  full-file download for comprehensive metadata inference, so that
-  parent is moot. The name was kept, semantics repurposed as a
-  re-processing trigger.
-- `_get_download_always_whitelist()` reads `tk.config` live (mirrors
-  `_get_file_hasher`), parses into a `frozenset` of lowercased hosts.
-- `_host_in_always_whitelist(url)` returns `Optional[str]` — the matched
-  lowercased host (port stripped) or `None`. Returning the host (not a
-  bool) lets `_should_skip_upload` log it without a second `urlparse`.
-- Matching is **exact-hostname**, case-insensitive — `data.gov` does NOT
-  match `subdomain.data.gov`.
-- 23 tests in `tests/test_issue_61_download_always_whitelist.py`.
-
-## pii_screening config-key typo (PR #324, documentation audit)
-
-A documentation audit (2026-05-19) found `config.py` read
-`PII_SCREENING` from `ckanext.datastore_plus.pii_screening` — a typo
-(`datastore_plus` ≠ `datapusher_plus`). The documented key never
-populated `PII_SCREENING`; PII screening couldn't be enabled as
-documented. Fixed in `config.py`; 3 regression tests in
-`tests/test_pii_screening_config_key.py` (documented key works, old
-typo'd key has no effect, AST drift-guard).
-
-PR #324 also carried doc-audit corrections: `preview_rows` `config.py`
-fallback aligned `"1000"` → `"0"` to match `config_declaration.yaml`
-(behavior-preserving — the declaration default already wins under CKAN
-2.10+ declarative config); stale `describeGPT_api_key` README line
-removed; `formats` README example typo (`xlsxb`/`xlsm`) dropped to
-match `config.py`'s FORMATS default; CONFIG.md DRUF template-override
-list completed (3 → 5); illustrative-values notes added above the
-README ckan.ini example blocks. Still-open for a maintainer pass: the
-README example blocks have other stale values (`auto_index_threshold = 3`
-should be 10 per #142, `chunk_size = 16384` should be 1048576).
-
-## AI suggestions feature (PRs #301 → #304)
-
-End-to-end shape of the AI suggestions feature now on `main`:
-
-1. **Backend** — `jobs/stages/ai_suggestions.py` calls
-   `QSVCommand.describegpt()` (`qsv_utils.py`) which shells out to
-   `qsv describegpt --format JSON --api-key NONE --base-url <url>
-   --model <model>`. `--format JSON` (not `--json`) and `--api-key NONE`
-   for non-localhost endpoints are both real `qsv` requirements caught
-   by E2E with LM Studio (`host.docker.internal:1234/v1`).
-2. **Envelope** — qsv emits a PascalCase wrapped envelope
-   `{Dictionary, Description, Tags}` (each wrapped in `response` /
-   `reasoning` / `token_usage`). `_reshape_for_ui` walks it and writes
-   per-field `ai_suggestions[fieldName] = {value, source}` plus
-   `STATUS=DONE` for polling termination. `_RESERVED_AI_KEYS` blocks
-   column names that would collide with the envelope keys.
-3. **Polling JS** — `assets/js/scheming-ai-suggestions.js` reads
-   `package_show` and polls until
-   `dpp_suggestions.ai_suggestions.STATUS` is in
-   `['DONE', 'ERROR', 'FAILED']`. Production bug caught by JS tests:
-   the JS originally read STATUS from `dpp_suggestions.STATUS` (top
-   level) — the stage writes it nested inside `ai_suggestions`.
-4. **Fixture** — `tests/fixtures/qsv_describegpt_sample.json` is a real
-   captured response from a LM Studio gemma-4-e4b run; use it for
-   shape-of-envelope assertions in Python tests.
-
-## Empty-suggestion handling (PR #322, issue #261)
-
-DRUF (the legacy `scheming-suggestions.js`, NOT the AI-suggestions
-variant) handles null/empty/whitespace suggestion values:
-
-1. **Python — `FormulaProcessor.process_formulae`** coerces stringified
-   `"None"` / `""` / whitespace-only renders back to Python `None`.
-   Coercion is **gated on `formula_type == "suggestion_formula"`** —
-   direct `formula` fields write straight into the package/resource
-   dict and must preserve verbatim output for CKAN's validators.
-2. **JS — `scheming-suggestions.js`** greys out the per-field button
-   for null/empty values + re-enables on re-render.
-3. **CSS — `suggestions.css`** has a `.suggestion-btn-disabled` rule.
-
-Cherry-picked from Minhajuddin's orphan commit `62c18ea`; 6 Python
-regression tests in `tests/test_issue_261_empty_date_range.py`.
-
-## Locale-aware number parsing (PR #320, issue #112)
-
-DP+ supports parsing comma-decimal / locale-specific number formats
-opt-in. Resolution order per resource: `dpp_locale` resource field →
-`conf.DEFAULT_LOCALE` → `conf.DECIMAL_SEPARATOR` → no-op. Babel path
-uses `babel.numbers.parse_decimal(value, locale=id, strict=True)` —
-`strict=True` is critical (without it German `12.06.1994` silently
-coerces to `Decimal('12061994')`). 11 regression tests in
-`tests/test_issue_112_decimal_comma.py`.
-
-## Data Dictionary stash/restore (PR #307, issue #265)
-
-`dictionary_stash.py` is the on-disk persistence layer; `_parse_stats`
-stashes existing column `info` before delete, rollback/retry paths
-restore from the stash, finally clears. 21 tests in
-`test_dictionary_stash.py`.
-
-## UTC timestamps (PR #308, issue #145)
-
-`utils.utcnow_naive()` is the single helper for every persisted
-timestamp; 4 regression tests in `test_utcnow_naive.py`.
-
-## Configurable file-hash algorithm (PR #309, issue #221)
-
-`blake3` (default), `sha256`, `md5` selectable via
-`ckanext.datapusher_plus.file_hash_algorithm`. Read live from
-`tk.config` by `_get_file_hasher` (the canonical live-read pattern).
-`blake3` uses the external `b3sum` CLI (installed in worker + CI +
-`dpp-test`).
-
-## qsv-related arc (PRs #314 / #315, issues #173 / #179)
-
-PR #314 fixed the `Date → date` mapping (was wrongly stored as
-`timestamp`); PR #315 bumped qsv pin to 20.1.0 with regression
-coverage. Some qsv 20.1.0 inference gaps documented (DD-MM-YYYY →
-String, Unix epoch → Integer).
-
-## Auto-index threshold (PRs #317 / #318, issue #142)
-
-`AUTO_INDEX_THRESHOLD` is a CLOSED range `[AUTO_INDEX_MIN_THRESHOLD,
-AUTO_INDEX_THRESHOLD]`, defaults `[3, 10]`. Single-value columns no
-longer get useless 10-40 MB indexes. 8 regression tests in
-`tests/test_issue_142_auto_index_threshold.py`.
-
-## Version banner in flow log (PR #316, issue #111)
-
-The "JOB DONE!" capstone log line surfaces the DP+ version from
-`pyproject.toml`. 5 regression tests in `tests/test_issue_111_version_in_log.py`.
+- **PR #326** — unit-test CI revived; xlsm/xlsb in FORMATS;
+  spatial-tolerance config key lowercased; README ckan.ini examples
+  reconciled to actual defaults.
+- **PR #325** — CLAUDE.md refreshed for v3.0 (Prefect, not v2 pipeline).
+- **PR #324** — `pii_screening` config-key typo; preview_rows fallback
+  aligned to declaration; doc-audit corrections to README/CONFIG.md.
+- **PR #323** — `DOWNLOAD_ALWAYS_WHITELIST` (operator-controlled
+  re-processing for hosts that update in place).
+- **PR #322** — empty-date-range suggestion handling (Python coercion
+  + JS grey-out + CSS).
+- **PR #320** — locale-aware number normalization (Babel).
+- **PR #317/#318** — `AUTO_INDEX_MIN_THRESHOLD` floor + bump 3 → 10.
+- **PR #316** — DP+ version in flow log banner.
+- **PR #315** — qsv pin 20.0.0 → 20.1.0.
+- **PR #314** — qsv `Date` → Postgres `date` (not `timestamp`).
+- **PR #313** — don't apply DownloadResult.resource on rehydrate.
+- **PR #312** — preserve file_hash on metadata stage's resource re-fetch.
+- **PR #309** — configurable file-hash algorithm (blake3 default).
+- **PR #308** — naive-UTC timestamps everywhere.
+- **PR #307** — Data Dictionary stash/restore on rollback.
+- **PR #304** — Vitest + jsdom JS unit tests for AI suggestions.
+- **PRs #301-#303** — `qsv describegpt` AI-suggestions stage end-to-end.
+- **PR #300** — `Dockerfile.worker` rebased onto `ckan/ckan-dev:2.11`;
+  `scripts/integration-up`/`-down`.
+- **PR #299** — `resubmit` CLI robustness.
