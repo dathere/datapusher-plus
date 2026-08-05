@@ -21,6 +21,14 @@ log = logging.getLogger(__name__)
 
 def _safe_emit(event: str, resource_id: str, payload: Dict[str, Any]) -> None:
     """Best-effort emit; never let a failed event fail the flow."""
+    # There is nothing to emit to when Prefect is turned off, and the
+    # import below is exactly what that mode exists to avoid (Prefect's
+    # settings bootstrap writes to ``$PREFECT_HOME``). The local runner
+    # reaches this via ``quarantine.apply_quarantine``.
+    import ckanext.datapusher_plus.config as conf
+
+    if not conf.prefect_enabled():
+        return
     try:
         from prefect.events import emit_event
 

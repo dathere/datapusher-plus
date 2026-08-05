@@ -95,7 +95,7 @@ def patched_dependencies():
             return_value=mock.MagicMock(side_effect=lambda ctx: ctx),
         ),
         mock.patch(
-            "ckanext.datapusher_plus.jobs.prefect_flow.dsu.get_resource",
+            "ckanext.datapusher_plus.jobs.pipeline_core.dsu.get_resource",
             return_value={"url_type": "upload", "format": "CSV", "url": "x.csv"},
         ),
         mock.patch(
@@ -117,11 +117,14 @@ def patched_dependencies():
             "ckanext.datapusher_plus.jobs.prefect_flow.utils.StoringHandler",
             return_value=logging.NullHandler(),
         ),
+        # ``build_runtime_context`` (and so the QSVCommand construction
+        # and the QSV_BIN existence check) lives in ``pipeline_core``,
+        # shared with the local runner — patch it there.
         mock.patch(
-            "ckanext.datapusher_plus.jobs.prefect_flow.QSVCommand"
+            "ckanext.datapusher_plus.jobs.pipeline_core.QSVCommand"
         ),
         mock.patch(
-            "ckanext.datapusher_plus.jobs.prefect_flow.Path.is_file",
+            "ckanext.datapusher_plus.jobs.pipeline_core.Path.is_file",
             return_value=True,
         ),
         mock.patch(
@@ -205,7 +208,7 @@ def test_rollback_drops_datastore_when_indexing_fails(job_input, patched_depende
     from unittest import mock
 
     from ckanext.datapusher_plus import utils
-    from ckanext.datapusher_plus.jobs import prefect_flow
+    from ckanext.datapusher_plus.jobs import pipeline_core, prefect_flow
 
     # Make indexing raise *after* database has committed within the
     # transaction.
@@ -222,7 +225,7 @@ def test_rollback_drops_datastore_when_indexing_fails(job_input, patched_depende
     )
 
     with mock.patch.object(
-        prefect_flow.dsu, "delete_datastore_resource"
+        pipeline_core.dsu, "delete_datastore_resource"
     ) as delete_ds:
         with pytest.raises(utils.JobError):
             prefect_flow.datapusher_plus_flow(job_input_real)
@@ -246,7 +249,7 @@ def test_pii_review_rejection_raises_before_database_writes(
     from unittest import mock
 
     from ckanext.datapusher_plus import utils
-    from ckanext.datapusher_plus.jobs import prefect_flow
+    from ckanext.datapusher_plus.jobs import pipeline_core, prefect_flow
 
     # Configure the AnalysisStage mock to report two PII candidate
     # matches on the ProcessingContext that the task wrapper reads.
@@ -277,7 +280,7 @@ def test_pii_review_rejection_raises_before_database_writes(
     ), mock.patch(
         "prefect.flow_runs.suspend_flow_run", return_value=rejection
     ), mock.patch.object(
-        prefect_flow.dsu, "delete_datastore_resource"
+        pipeline_core.dsu, "delete_datastore_resource"
     ) as delete_ds:
         with pytest.raises(utils.JobError, match="PII review rejected"):
             prefect_flow.datapusher_plus_flow(job_input_real)
@@ -382,12 +385,12 @@ def test_flow_short_circuits_for_datastore_dumps(job_input):
     """``url_type == 'datastore'`` resources are completed without running stages."""
     from contextlib import ExitStack
 
-    from ckanext.datapusher_plus.jobs import prefect_flow
+    from ckanext.datapusher_plus.jobs import pipeline_core, prefect_flow
 
     with ExitStack() as stack:
         stack.enter_context(
             mock.patch.object(
-                prefect_flow.dsu,
+                pipeline_core.dsu,
                 "get_resource",
                 return_value={"url_type": "datastore"},
             )
@@ -405,10 +408,10 @@ def test_flow_short_circuits_for_datastore_dumps(job_input):
             )
         )
         stack.enter_context(
-            mock.patch.object(prefect_flow.QSVCommand, "__init__", return_value=None)
+            mock.patch.object(pipeline_core.QSVCommand, "__init__", return_value=None)
         )
         stack.enter_context(
-            mock.patch.object(prefect_flow.Path, "is_file", return_value=True)
+            mock.patch.object(pipeline_core.Path, "is_file", return_value=True)
         )
         stack.enter_context(
             mock.patch.object(

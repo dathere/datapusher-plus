@@ -274,6 +274,17 @@ def prefect_deploy(work_pool: str | None):
     ``datapusher_plus_flow`` otherwise. This is how operators register
     custom ingestion flows without modifying DP+.
     """
+    import ckanext.datapusher_plus.config as conf
+
+    if not conf.prefect_enabled():
+        error_shout(
+            "ckanext.datapusher_plus.prefect_enabled is false — this "
+            "deployment runs ingestions in-process on CKAN's RQ worker, "
+            "so there is no Prefect deployment to register. Run "
+            "`ckan jobs worker` instead, or set prefect_enabled = true."
+        )
+        raise click.Abort()
+
     try:
         from prefect import flow as _flow_decorator  # noqa: F401
         from prefect.deployments.runner import RunnerDeployment  # noqa: F401
@@ -457,15 +468,26 @@ def migrate_from_rq(resubmit: bool, yes: bool):
     session.commit()
     click.echo(f"Reset {reset_count} stale ``pending`` task_status rows.")
 
-    # Sanity-check Prefect server reachability.
-    try:
-        import ckanext.datapusher_plus.prefect_client as prefect_client
+    # Sanity-check Prefect server reachability — unless the operator
+    # migrated off RQ *without* adopting Prefect, in which case there is
+    # no server to reach and jobs run on CKAN's own worker.
+    import ckanext.datapusher_plus.config as conf
 
-        prefect_client.get_running_resource_ids()
-        click.echo("Prefect server is reachable.")
-    except Exception as e:
-        error_shout(f"Cannot reach Prefect server: {e}")
-        raise click.Abort()
+    if not conf.prefect_enabled():
+        click.echo(
+            "ckanext.datapusher_plus.prefect_enabled is false — skipping "
+            "the Prefect reachability check; jobs will run in-process on "
+            "CKAN's RQ worker (`ckan jobs worker`)."
+        )
+    else:
+        try:
+            import ckanext.datapusher_plus.prefect_client as prefect_client
+
+            prefect_client.get_running_resource_ids()
+            click.echo("Prefect server is reachable.")
+        except Exception as e:
+            error_shout(f"Cannot reach Prefect server: {e}")
+            raise click.Abort()
 
     # Optional: resubmit each drained resource through the new path.
     if resubmit:

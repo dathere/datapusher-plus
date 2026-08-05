@@ -37,6 +37,37 @@ MINIMUM_QSV_VERSION = "20.1.0"
 # TRACE, DEBUG, INFO, WARNING, ERROR, CRITICAL
 UPLOAD_LOG_LEVEL = tk.config.get("ckanext.datapusher_plus.upload_log_level", "INFO")
 
+
+# Orchestration backend.
+#
+# ``True`` (default) submits every ingestion to Prefect. ``False`` turns
+# Prefect off completely: jobs are enqueued on CKAN's own RQ background
+# queue and executed in-process by ``jobs/local_runner.py``, and nothing
+# in the request or job path imports ``prefect``. That matters for
+# deployments where importing Prefect itself fails — e.g. a CKAN process
+# running with ``HOME=/root`` but no write access there, where Prefect's
+# settings bootstrap raises ``PermissionError: '/root/.prefect/profiles.toml'``.
+#
+# Deliberately a function rather than a module-level constant: the flag
+# gates a code path in the web request (``datapusher_submit``) and in the
+# CLI, so operators flipping it in ``ckan.ini`` should not need a
+# restart-order-of-operations lesson. Reading it live also keeps
+# ``config_declaration.yaml``'s declared default authoritative under
+# CKAN 2.10+.
+def prefect_enabled() -> bool:
+    """Return whether ingestion jobs are orchestrated by Prefect.
+
+    Falls back to ``True`` in contexts where CKAN config is not loaded
+    (bare tooling imports), matching the shipped default.
+    """
+    try:
+        value = tk.config.get("ckanext.datapusher_plus.prefect_enabled")
+    except Exception:
+        return True
+    if value is None or value == "":
+        return True
+    return tk.asbool(value)
+
 # Supported formats
 FORMATS = tk.config.get(
     "ckanext.datapusher_plus.formats",

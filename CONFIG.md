@@ -58,6 +58,27 @@ When DRUF is enabled, the following templates are overridden:
 - Works with standard CKAN installations
 - Compatible with ckanext-scheming
 
+### Turning Prefect off
+
+By default (v3.0+) ingestion jobs are orchestrated by a Prefect server + worker. Setting `prefect_enabled = false` runs them in-process on CKAN's own background-job worker instead, over the same ingestion stages, with nothing in the path importing `prefect`.
+
+**Configuration:**
+```ini
+# Orchestrate jobs with Prefect (default: true)
+ckanext.datapusher_plus.prefect_enabled = false
+```
+
+**What it does:**
+- `datapusher_submit` enqueues the job on CKAN's RQ queue instead of creating a Prefect flow run
+- `ckanext/datapusher_plus/jobs/local_runner.py` executes the nine stages sequentially in the worker process
+- The `Jobs`/`Logs` tables, the job-status page, and the `datapusher_hook` callbacks behave identically
+
+**Requirements:**
+- A running CKAN worker: `ckan -c /etc/ckan/default/ckan.ini jobs worker`
+- No Prefect server, worker, or work pool (`datapusher_plus prefect-deploy` refuses to run in this mode)
+
+**What you give up:** per-stage retries, result caching / re-run-from-failed-stage, the Prefect run graph, artifacts and `datapusher.*` events, and human-in-the-loop PII review (a job crossing `pii_review_threshold` aborts before any datastore write instead of waiting for approval). See [Running without Prefect](README.md#running-without-prefect) for the full comparison — including the common trigger for wanting it, a `PermissionError` on `$PREFECT_HOME/profiles.toml` when CKAN cannot write `$HOME/.prefect`.
+
 ## Example Configuration
 
 Add these lines to your CKAN configuration file (e.g., `/etc/ckan/default/ckan.ini`):
@@ -68,6 +89,10 @@ ckanext.datapusher_plus.enable_druf = true
 
 # Enable IFormRedirect for better form redirects (recommended with DRUF)
 ckanext.datapusher_plus.enable_form_redirect = true
+
+# Run ingestions in-process on CKAN's job worker instead of Prefect
+# (default: true — leave unset to keep Prefect orchestration)
+ckanext.datapusher_plus.prefect_enabled = false
 ```
 
 **Recommended combinations:**

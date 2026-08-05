@@ -8,10 +8,16 @@ functions per ingestion stage and the entry-point ``@flow`` — live in
 ``prefect_flow``. Custom flows registered via
 ``ckanext.datapusher_plus.prefect_flow`` should import from there.
 
+Operators who cannot (or would rather not) run Prefect set
+``ckanext.datapusher_plus.prefect_enabled = false``; ingestions then run
+through ``local_runner.run_job`` on CKAN's own RQ worker, over the same
+stage classes, with Prefect out of the picture entirely. The pieces both
+runners share live in ``pipeline_core``.
+
 This module exposes a small public surface (``datapusher_plus_flow``,
 ``push_to_datastore``, ``datapusher_plus_to_datastore``,
-``callback_datapusher_hook``) but does NOT import Prefect at module
-load. Eager imports here would pull in the Prefect runtime every time
+``callback_datapusher_hook``, ``run_job``) but does NOT import Prefect at
+module load. Eager imports here would pull in the Prefect runtime every time
 CKAN loads the DP+ plugin (during ``ckan db init``, ``ckan plugins
 info``, etc.) — and Prefect spins up an ephemeral server when no
 ``PREFECT_API_URL`` is configured, polluting stdout with log lines and
@@ -28,13 +34,16 @@ def push_to_datastore(
 ) -> Optional[str]:
     """Backward-compat shim for the v2 ``push_to_datastore`` callable.
 
-    Constructs a ``JobInput`` from the legacy arg shape and invokes the
-    Prefect flow. Useful for tests that drive the flow as a plain Python
-    function without going through a Prefect worker.
+    Constructs a ``JobInput`` from the legacy arg shape and runs the
+    ingestion in-process: through the Prefect flow by default, or
+    through ``local_runner.run_job`` when
+    ``ckanext.datapusher_plus.prefect_enabled`` is false (in which case
+    nothing here imports Prefect). Useful for tests and scripts that
+    drive a job as a plain Python function.
     """
     # Lazy: avoid pulling Prefect into CKAN admin commands that import
     # this module but never run a job.
-    from ckanext.datapusher_plus.jobs.prefect_flow import datapusher_plus_flow
+    import ckanext.datapusher_plus.config as conf
     from ckanext.datapusher_plus.jobs.runtime_context import JobInput
 
     metadata = input.get("metadata", {})
@@ -45,6 +54,14 @@ def push_to_datastore(
         input=input,
         dry_run=dry_run,
     )
+
+    if not conf.prefect_enabled():
+        from ckanext.datapusher_plus.jobs.local_runner import run_job
+
+        return run_job(job_input)
+
+    from ckanext.datapusher_plus.jobs.prefect_flow import datapusher_plus_flow
+
     return datapusher_plus_flow(job_input)
 
 
@@ -60,9 +77,18 @@ def __getattr__(name: str):
 
         return datapusher_plus_flow
     if name == "callback_datapusher_hook":
-        from ckanext.datapusher_plus.jobs.prefect_flow import callback_datapusher_hook
+        # Sourced from the Prefect-free core: the callback is identical
+        # on both runners, and resolving it must not drag Prefect in on
+        # the ``prefect_enabled = false`` path.
+        from ckanext.datapusher_plus.jobs.pipeline_core import (
+            callback_datapusher_hook,
+        )
 
         return callback_datapusher_hook
+    if name == "run_job":
+        from ckanext.datapusher_plus.jobs.local_runner import run_job
+
+        return run_job
     raise AttributeError(
         f"module 'ckanext.datapusher_plus.jobs' has no attribute {name!r}"
     )
@@ -84,4 +110,5 @@ __all__ = [
     "datapusher_plus_to_datastore",
     "push_to_datastore",
     "callback_datapusher_hook",
+    "run_job",
 ]

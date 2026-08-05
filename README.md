@@ -570,7 +570,7 @@ ckan -c /etc/ckan/default/ckan.ini datapusher_plus submit {dataset_id}
 
 ## Prefect orchestration (v3.0+)
 
-DataPusher+ v3.0 replaces the v2 RQ-based background worker with a [Prefect 3](https://docs.prefect.io/v3/) flow. RQ is no longer used by DP+ itself (CKAN continues to ship RQ for unrelated extensions).
+DataPusher+ v3.0 replaces the v2 RQ-based background worker with a [Prefect 3](https://docs.prefect.io/v3/) flow. RQ is no longer used by DP+ itself (CKAN continues to ship RQ for unrelated extensions) — unless you set `ckanext.datapusher_plus.prefect_enabled = false`, which runs ingestions on CKAN's RQ worker instead of Prefect; see [Running without Prefect](#running-without-prefect).
 
 ### Why Prefect
 
@@ -733,6 +733,7 @@ The **default** DP+ flow does NOT call these subflows — it inlines the underly
 
 | Key | Default | Purpose |
 |---|---|---|
+| `ckanext.datapusher_plus.prefect_enabled` | `true` | Orchestrate ingestions with Prefect. `false` runs them in-process on CKAN's own job worker with no Prefect import at all — see [Running without Prefect](#running-without-prefect). |
 | `ckanext.datapusher_plus.prefect_deployment_name` | `datapusher-plus/datapusher-plus` | Fully-qualified Prefect deployment name (`<flow>/<deployment>`). |
 | `ckanext.datapusher_plus.prefect_work_pool` | `datapusher-plus` | Work-pool name workers subscribe to. |
 | `ckanext.datapusher_plus.prefect_flow` | _(unset)_ | `module.path:flow_name` entrypoint of a custom flow. |
@@ -765,11 +766,61 @@ takes effect on the next flow run without a worker restart.
 
 Resolution order: Prefect Variable -> env var -> `ckan.ini` -> built-in default. Variable lookup failures (Prefect server unreachable, name absent, value not int-parseable) silently fall through to the next priority — operators with no Prefect Variables set see no behaviour change.
 
+## Running without Prefect
+
+Prefect can be turned off entirely:
+
+```ini
+ckanext.datapusher_plus.prefect_enabled = false
+```
+
+Submissions are then enqueued on **CKAN's own background-job queue** and executed in-process by `ckanext/datapusher_plus/jobs/local_runner.py`, which runs the same nine ingestion stages in the same order. Nothing in the submit or job path imports `prefect`.
+
+Instead of a Prefect server + worker, you run CKAN's built-in worker:
+
+```bash
+ckan -c /etc/ckan/default/ckan.ini jobs worker
+```
+
+That is the only operational change — `ckan datapusher_plus submit` / `resubmit`, the DRUF workflow, the job-status page, the `Jobs`/`Logs` tables, and the `datapusher_hook` callbacks all behave as before. `ckan datapusher_plus prefect-deploy` refuses to run in this mode (there is no deployment to register).
+
+### When you'd want this
+
+* **Prefect can't be run at all** — including the case where merely *importing* it fails. A CKAN process running with `HOME=/root` but no write access there fails submission with:
+
+  ```
+  ERROR [ckanext.datapusher_plus.logic.action] Error submitting job to DataPusher: [Errno 13] Permission denied: '/root/.prefect/profiles.toml'
+  ```
+
+  Prefect writes its profile store to `$PREFECT_HOME` (default `$HOME/.prefect`) the first time it is imported. If you'd rather keep Prefect, the alternative fix is to point `PREFECT_HOME` at a directory the CKAN user can write and restart CKAN and the worker:
+
+  ```bash
+  PREFECT_HOME=/var/lib/ckan/prefect
+  ```
+
+* **Small or single-node deployments** where a second orchestration service isn't worth the operational surface.
+* **Air-gapped or locked-down hosts** where the Prefect server isn't permitted.
+
+### What you give up
+
+| Capability | With Prefect | With `prefect_enabled = false` |
+|---|---|---|
+| Per-stage retries / backoff | Yes | No — the job fails and is resubmitted |
+| Result caching, re-run from failed stage | Yes | No |
+| Run graph, artifacts, `datapusher.*` events | Yes | No (events are no-ops) |
+| Human-in-the-loop PII review (`pii_review_threshold`) | Suspends for approval | Aborts the job before any datastore write |
+| Datastore cleanup after a failed write group | Transactional rollback | Same cleanup, minus the database stage's own failure (see below) |
+| Horizontal scaling | Add Prefect workers | Add `ckan jobs worker` processes |
+
+Rollback difference in detail: when a stage *after* the database load fails, the local runner drops the half-built datastore table and restores a stashed Data Dictionary, exactly as the Prefect `on_rollback` hook does. When the **database stage itself** raises, it leaves the datastore alone — that stage can fail before touching anything (e.g. "could not connect to the Datastore"), and dropping there would destroy data the run never wrote.
+
 ### Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `datapusher_submit` returns `False` with a Prefect connection error in the CKAN log | The Prefect server is unreachable from CKAN | Check `PREFECT_API_URL` and that the Prefect server is healthy at `<API>/health`. |
+| `Error submitting job to DataPusher: [Errno 13] Permission denied: '/root/.prefect/profiles.toml'` | CKAN's process can't write `$PREFECT_HOME`, so `import prefect` fails | Set `PREFECT_HOME` to a writable directory, or turn Prefect off with `ckanext.datapusher_plus.prefect_enabled = false` (see [Running without Prefect](#running-without-prefect)). |
+| With `prefect_enabled = false`, jobs stay `pending` forever | No CKAN background worker is running | Start `ckan -c /etc/ckan/default/ckan.ini jobs worker`. |
 | Flow run sits in `Scheduled` forever | No worker is polling the configured work pool | Start `prefect worker start -p datapusher-plus` on a host with the `datapusher-plus` package installed. |
 | Flow run goes straight to `Failed` with "QSV binary not found" | The worker process can't see the qsv binary | Set `ckanext.datapusher_plus.qsv_bin` in the CKAN config the worker reads, or install qsv in the worker's PATH. |
 | Re-run from a failed task re-downloads the file | Result storage block isn't registered, so persisted results aren't being read | Re-run `ckan datapusher_plus prefect-deploy` — it calls `ensure_result_storage_block`. |

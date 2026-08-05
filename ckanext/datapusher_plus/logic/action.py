@@ -16,6 +16,7 @@ import ckan.lib.navl.dictization_functions
 import ckan.logic as logic
 import ckan.plugins as p
 from ckan.common import config
+import ckanext.datapusher_plus.config as dpp_config
 import ckanext.datapusher_plus.logic.schema as dpschema
 import ckanext.datapusher_plus.interfaces as interfaces
 import ckanext.datapusher_plus.prefect_client as prefect_client
@@ -35,6 +36,46 @@ side_effect_free = logic.side_effect_free
 if tk.check_ckan_version("2.10"):
     from ckan.types import Context
     from typing import Any, cast
+
+
+def _orchestrator():
+    """Return the module that runs ingestion jobs for this deployment.
+
+    ``prefect_client`` by default; ``jobs.local_runner`` when
+    ``ckanext.datapusher_plus.prefect_enabled`` is false. Both expose
+    ``get_running_resource_ids()``, and both have a submit entry point
+    (``submit_flow_run`` / ``enqueue_job``) — see ``_submit_job`` for the
+    one place the two signatures differ.
+
+    ``local_runner`` is imported lazily (it pulls in every stage class),
+    and ``prefect_client`` never imports ``prefect`` at module level —
+    so a CKAN process with Prefect turned off gets through this without
+    touching Prefect at all. That matters on a host where
+    ``$PREFECT_HOME`` is not writable: there, the import itself raises.
+    """
+    if dpp_config.prefect_enabled():
+        return prefect_client
+
+    import ckanext.datapusher_plus.jobs.local_runner as local_runner
+
+    return local_runner
+
+
+def _submit_job(job_input: JobInput, timeout: int) -> tuple[str, bool]:
+    """Hand a job to the active orchestrator.
+
+    Returns ``(run_id, via_prefect)`` — the caller records the id on the
+    CKAN ``task_status`` row under the key that matches the backend, so
+    ``datapusher_status`` only ever builds a Prefect UI deep-link for a
+    run that really is a Prefect flow run.
+    """
+    orchestrator = _orchestrator()
+    if orchestrator is not prefect_client:
+        return orchestrator.enqueue_job(job_input, timeout=timeout), False
+    return (
+        orchestrator.submit_flow_run(asdict(job_input), timeout=timeout),
+        True,
+    )
 
 
 def datapusher_submit(context, data_dict: dict[str, Any]):
@@ -124,9 +165,11 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
             seconds=tk.asint(config.get("ckan.datapusher.assume_task_stillborn_after", 5))
         )
         if existing_task.get("state") == "pending":
-            # Query Prefect for resource_ids currently in non-terminal flow
-            # runs. Replaces the v2 RQ-queue regex scan.
-            queued_res_ids = prefect_client.get_running_resource_ids()
+            # Ask the active orchestrator which resource_ids are still
+            # in flight: Prefect's non-terminal flow runs, or — with
+            # Prefect disabled — CKAN's RQ queue. Replaces the v2
+            # RQ-queue regex scan.
+            queued_res_ids = _orchestrator().get_running_resource_ids()
             # Symmetric with the write sites that serialize via
             # ``utcnow_naive().isoformat()`` — ``fromisoformat`` round-trips
             # the same value cleanly and handles the missing-microseconds
@@ -223,17 +266,19 @@ def datapusher_submit(context, data_dict: dict[str, Any]):
         dry_run=False,
     )
     try:
-        flow_run_id = prefect_client.submit_flow_run(
-            asdict(job_input), timeout=dp_timeout
-        )
+        run_id, via_prefect = _submit_job(job_input, dp_timeout)
     except Exception as e:
         log.error("Error submitting job to DataPusher: %s", e)
         return False
 
     # Public contract: ``job_id`` keeps working for v2 consumers (CKAN UI's
     # status page reads it). ``flow_run_id`` is the new field for clients
-    # that want to deep-link into the Prefect UI.
-    value = json.dumps({"job_id": job_id, "flow_run_id": flow_run_id})
+    # that want to deep-link into the Prefect UI — recorded only when the
+    # run really is a Prefect flow run. With Prefect disabled the RQ job
+    # id goes in ``rq_job_id`` instead, so nothing tries to build a
+    # Prefect URL out of it.
+    run_id_key = "flow_run_id" if via_prefect else "rq_job_id"
+    value = json.dumps({"job_id": job_id, run_id_key: run_id})
     task["value"] = value
     task["state"] = "pending"
     task["last_updated"] = utcnow_naive().isoformat()

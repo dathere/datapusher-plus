@@ -66,7 +66,17 @@ prefect_flow.py    → Orchestration. Per-stage @task functions (each delegates 
 __init__.py        → Public surface via PEP 562 lazy __getattr__ (defers the Prefect
                      import so CKAN admin commands don't spin up a Prefect server).
                      Exposes `datapusher_plus_flow`, `push_to_datastore` (v2 shim),
-                     `datapusher_plus_to_datastore` (alias), `callback_datapusher_hook`.
+                     `datapusher_plus_to_datastore` (alias), `callback_datapusher_hook`,
+                     `run_job`.
+pipeline_core.py   → Prefect-free core shared by both runners: callback_datapusher_hook,
+                     validate_input, build_runtime_context, run_stage + StageAbort,
+                     resource_is_datastore_dump, rollback_datastore_writes, resolve_int.
+                     **Nothing here may import prefect.**
+local_runner.py    → The `prefect_enabled = false` path. `enqueue_job` puts the job on
+                     CKAN's RQ queue (`ckan jobs worker` runs it); `run_job` executes the
+                     nine stages sequentially over one live RuntimeContext, owning the
+                     same Jobs-row state machine and callbacks as the flow. No retries,
+                     caching, artifacts, events, or PII suspend-for-review.
 context.py         → ProcessingContext — per-run mutable state shared across stages.
 runtime_context.py → JobInput (frozen, JSON-serializable flow input), the per-stage
                      `*Result` dataclasses (DownloadResult, AnalyzeResult, …), the
@@ -95,6 +105,8 @@ stages/
 ```
 
 Operators can register a custom flow via `ckanext.datapusher_plus.prefect_flow`; the per-stage `@task` functions in `prefect_flow.py` are the public composable primitives.
+
+Prefect can also be turned off entirely with `ckanext.datapusher_plus.prefect_enabled = false`, which routes submissions to `jobs/local_runner.py` on CKAN's RQ worker. When touching the pipeline, keep shared logic in `jobs/pipeline_core.py` so both runners stay in sync — and keep that module free of any `prefect` import, since the disabled mode exists for hosts where importing Prefect itself fails.
 
 ### Key Modules
 
@@ -168,3 +180,4 @@ Key settings in `ckan.ini` (see config.py and config_declaration.yaml for the fu
 - `ckanext.datapusher_plus.prefer_dmy` — Date format preference (DMY vs MDY)
 - `ckanext.datapusher_plus.enable_druf` — Enable DRUF workflow
 - `ckanext.datapusher_plus.enable_form_redirect` — Enable IFormRedirect interface
+- `ckanext.datapusher_plus.prefect_enabled` — Orchestrate with Prefect (default: true); `false` runs jobs in-process on `ckan jobs worker`
