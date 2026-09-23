@@ -456,6 +456,30 @@ groups:
       # ---------------------------------------------------------------
       # Prefect orchestration (v3.0+)
       # ---------------------------------------------------------------
+      - key: ckanext.datapusher_plus.prefect_enabled
+        type: bool
+        editable: true
+        default: true
+        description: |
+          Whether ingestion jobs are orchestrated by Prefect (the
+          default). Set to ``false`` to turn Prefect off entirely: jobs
+          are then enqueued on CKAN's own background-job queue and run
+          in-process by ``jobs/local_runner.py`` over the same ingestion
+          stages, and nothing in the submit or job path imports
+          ``prefect``. Requires a running ``ckan jobs worker`` instead
+          of a Prefect server + worker.
+
+          Use it when you cannot run Prefect — including the case where
+          importing it fails, e.g. a CKAN process whose ``$PREFECT_HOME``
+          (``$HOME/.prefect``) is not writable and raises
+          ``PermissionError: '/root/.prefect/profiles.toml'`` on submit.
+
+          What you give up with Prefect off: per-stage retries, task
+          result caching / re-run-from-failed-stage, the run graph,
+          artifacts and ``datapusher.*`` events, and human-in-the-loop
+          PII review (``pii_review_threshold`` then aborts a flagged job
+          before any datastore write instead of waiting for approval).
+
       - key: ckanext.datapusher_plus.prefect_deployment_name
         editable: true
         default: datapusher-plus/datapusher-plus

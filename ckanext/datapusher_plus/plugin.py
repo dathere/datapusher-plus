@@ -77,6 +77,19 @@ class DatapusherPlusPlugin(p.SingletonPlugin):
         if self.enable_druf:
             log.info("DRUF functionality enabled for DataPusher Plus")
 
+        # Which orchestrator will run ingestions. Logged at INFO when
+        # Prefect is off so operators can confirm the mode (and the
+        # worker they need) from the CKAN startup log rather than by
+        # reading ckan.ini.
+        import ckanext.datapusher_plus.config as conf
+
+        if not conf.prefect_enabled():
+            log.info(
+                "Prefect orchestration disabled for DataPusher Plus — jobs "
+                "will run in-process on CKAN's background worker "
+                "(`ckan jobs worker`)"
+            )
+
     def update_config(self, config: CKANConfig):
         # Always add base templates
         tk.add_template_directory(config, "templates")

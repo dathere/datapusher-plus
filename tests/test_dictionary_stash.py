@@ -439,7 +439,7 @@ def test_rollback_restore_derives_field_type_from_type_override(
     from types import SimpleNamespace
     from unittest import mock
 
-    from ckanext.datapusher_plus.jobs import prefect_flow
+    from ckanext.datapusher_plus.jobs import pipeline_core, prefect_flow
 
     resource_id = "res-rollback-types"
     stashed = {
@@ -456,13 +456,13 @@ def test_rollback_restore_derives_field_type_from_type_override(
     runtime = SimpleNamespace(resource_id=resource_id, logger=mock.Mock())
     monkeypatch.setattr(prefect_flow, "_runtime_or_none", lambda: runtime)
     monkeypatch.setattr(
-        prefect_flow.dsu, "delete_datastore_resource", lambda rid: None
+        pipeline_core.dsu, "delete_datastore_resource", lambda rid: None
     )
     captured = {}
     def _capture(**kwargs):
         captured.update(kwargs)
         return {}
-    monkeypatch.setattr(prefect_flow.dsu, "send_resource_to_datastore", _capture)
+    monkeypatch.setattr(pipeline_core.dsu, "send_resource_to_datastore", _capture)
 
     prefect_flow._rollback_database(txn=None)
 
@@ -488,7 +488,7 @@ def test_rollback_restore_ignores_unknown_type_override(
     from types import SimpleNamespace
     from unittest import mock
 
-    from ckanext.datapusher_plus.jobs import prefect_flow
+    from ckanext.datapusher_plus.jobs import pipeline_core, prefect_flow
 
     resource_id = "res-rollback-unknown-type"
     stash_module.save(
@@ -499,11 +499,11 @@ def test_rollback_restore_ignores_unknown_type_override(
     runtime = SimpleNamespace(resource_id=resource_id, logger=mock.Mock())
     monkeypatch.setattr(prefect_flow, "_runtime_or_none", lambda: runtime)
     monkeypatch.setattr(
-        prefect_flow.dsu, "delete_datastore_resource", lambda rid: None
+        pipeline_core.dsu, "delete_datastore_resource", lambda rid: None
     )
     captured = {}
     monkeypatch.setattr(
-        prefect_flow.dsu,
+        pipeline_core.dsu,
         "send_resource_to_datastore",
         lambda **kwargs: captured.update(kwargs) or {},
     )
