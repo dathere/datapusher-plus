@@ -104,7 +104,7 @@ def screen_for_pii(
                 check=False,
             )
         except utils.JobError as e:
-            raise utils.JobError("Cannot quickly search CSV for PII: %s", e)
+            raise utils.JobError(f"Cannot quickly search CSV for PII: {e}")
         # Exit 0: a match, with its row number on stderr. Exit 1 with no
         # error message: no match, so no PII. (``--not-one`` can't be used:
         # with it, qsv prints the row count to stderr even when nothing
@@ -134,7 +134,7 @@ def screen_for_pii(
                 output_file=qsv_searchset_csv,
             )
         except utils.JobError as e:
-            raise utils.JobError("Cannot search CSV for PII: %s", e)
+            raise utils.JobError(f"Cannot search CSV for PII: {e}")
         pii_json = json.loads(str(qsv_searchset.stderr))
         pii_total_matches = int(pii_json["total_matches"])
         pii_rows_with_matches = int(pii_json["rows_with_matches"])
@@ -146,14 +146,12 @@ def screen_for_pii(
         logger.error("PII Candidate/s Found!")
         if conf.PII_QUICK_SCREEN:
             raise utils.JobError(
-                "PII CANDIDATE FOUND on row %s! Job aborted.",
-                pii_candidate_row.rstrip(),
+                f"PII CANDIDATE FOUND on row {pii_candidate_row.rstrip()}! Job aborted."
             )
         else:
             raise utils.JobError(
-                "PII CANDIDATE/S FOUND! Job aborted. Found %d PII candidate/s in %d row/s.",
-                pii_total_matches,
-                pii_rows_with_matches,
+                f"PII CANDIDATE/S FOUND! Job aborted. Found {pii_total_matches} PII "
+                f"candidate/s in {pii_rows_with_matches} row/s."
             )
     elif pii_found and conf.PII_SHOW_CANDIDATES and not conf.PII_QUICK_SCREEN:
         # TODO: Create PII Candidates resource and set package to private if its not private
@@ -203,7 +201,7 @@ def screen_for_pii(
                         output_file=None,
                     )
                 except utils.JobError as e:
-                    raise utils.JobError("Cannot run stats on PII preview CSV: %s", e)
+                    raise utils.JobError(f"Cannot run stats on PII preview CSV: {e}")
 
                 pii_stats = str(qsv_pii_stats.stdout).strip()
                 pii_stats_dict = [
@@ -254,13 +252,13 @@ def screen_for_pii(
                     try:
                         cur_pii.copy_expert(copy_sql, f)
                     except psycopg2.Error as e:
-                        raise utils.JobError("Postgres COPY failed: %s", e)
+                        raise utils.JobError(f"Postgres COPY failed: {e}")
                     else:
                         pii_copied_count = cur_pii.rowcount
 
                 raw_connection_pii.commit()
         except psycopg2.Error as e:
-            raise utils.JobError("Could not connect to the Datastore: %s", e)
+            raise utils.JobError(f"Could not connect to the Datastore: {e}")
 
         pii_resource["id"] = new_pii_resource_id
         pii_resource["pii_preview"] = True
