@@ -15,6 +15,25 @@ import ckanext.datapusher_plus.datastore_utils as dsu
 from ckanext.datapusher_plus.qsv_utils import QSVCommand
 
 
+def _is_searchset_no_match(result) -> bool:
+    """True if a ``qsv searchset`` run failed only because nothing matched.
+
+    qsv exits 1 for "no match" and prints nothing, or, when asked for
+    structured errors (``QSV_ERROR_FORMAT=json``), a single JSON error line
+    of kind ``no_match``. Any other failure prints an error message.
+    """
+    if result.returncode != 1:
+        return False
+    stderr = (result.stderr or "").strip()
+    if not stderr:
+        return True
+    try:
+        err = json.loads(stderr.splitlines()[-1]).get("error", {})
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(err, dict) and err.get("kind") == "no_match"
+
+
 def screen_for_pii(
     tmp: str,
     resource: dict,
@@ -82,14 +101,24 @@ def screen_for_pii(
                 tmp,
                 ignore_case=True,
                 quick=True,
+                check=False,
             )
         except utils.JobError as e:
             raise utils.JobError("Cannot quickly search CSV for PII: %s", e)
-        pii_candidate_row = str(qsv_searchset.stderr)
-        if pii_candidate_row:
+        # Exit 0: a match, with its row number on stderr. Exit 1 with no
+        # error message: no match, so no PII. (``--not-one`` can't be used:
+        # with it, qsv prints the row count to stderr even when nothing
+        # matched, which reads as a match.)
+        pii_candidate_row = ""
+        if qsv_searchset.returncode == 0:
+            pii_candidate_row = str(qsv_searchset.stderr)
             pii_found = True
             # Quick screen only detects presence, not a count.
             pii_candidate_count = 1
+        elif not _is_searchset_no_match(qsv_searchset):
+            raise utils.JobError(
+                f"Cannot quickly search CSV for PII: {qsv_searchset.stderr}"
+            )
 
     else:
         logger.info("Scanning for PII using %s...", pii_regex_file)
