@@ -70,6 +70,8 @@ def screen_for_pii(
     # Count of PII candidate matches, surfaced to the caller so the
     # v3.0 PII-review suspend gate has a real number to threshold on.
     pii_candidate_count = 0
+    # Both modes search the same file. It must be an absolute path: the
+    # worker's current directory is not the package directory.
     pii_regex_fname = p.absolute()
 
     if conf.PII_QUICK_SCREEN:
@@ -94,7 +96,7 @@ def screen_for_pii(
         qsv_searchset_csv = os.path.join(temp_dir, "qsv_searchset.csv")
         try:
             qsv_searchset = qsv.searchset(
-                pii_regex_file,
+                pii_regex_fname,
                 tmp,
                 ignore_case=True,
                 flag="PII_info",
