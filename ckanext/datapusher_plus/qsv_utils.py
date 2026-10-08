@@ -860,6 +860,7 @@ class QSVCommand:
         flag_matches_only: bool = False,
         json_output: bool = False,
         output_file: Optional[str] = None,
+        check: bool = True,
     ) -> subprocess.CompletedProcess:
         """
         Search a CSV file for patterns defined in a regex file.
@@ -873,6 +874,9 @@ class QSVCommand:
             flag_matches_only: Whether to only output matching rows
             json_output: Whether to output JSON
             output_file: Path to the output file
+            check: Raise on a non-zero exit. qsv exits 1 when nothing
+                matches (outside JSON mode), so callers that treat "no
+                match" as a result pass False and read ``returncode``.
 
         Returns:
             The result of the command
@@ -900,4 +904,4 @@ class QSVCommand:
         if output_file:
             args.extend(["--output", output_file])
 
-        return self._run_command(args)
+        return self._run_command(args, check=check)

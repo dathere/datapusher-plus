@@ -19,7 +19,6 @@
 ├── setup.py / setup.cfg / MANIFEST.in
 ├── requirements.txt / requirements-dev.txt
 ├── dot-env.template                 # Sample env vars
-├── default-pii-regexes.txt          # Default PII regex patterns
 ├── test_config.py                   # Tests configuration helper
 ├── wsgi.py                          # WSGI entry shim
 ├── .coveragerc                      # source = ckanext/datapusher_plus (fixed in PR/branch
