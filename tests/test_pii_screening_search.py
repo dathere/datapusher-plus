@@ -133,3 +133,17 @@ def test_is_searchset_no_match(returncode, stderr, expected):
 
     result = subprocess.CompletedProcess(args=[], returncode=returncode, stdout="", stderr=stderr)
     assert _is_searchset_no_match(result) is expected
+
+
+def test_a_missing_custom_regex_resource_is_a_clear_job_error(tmp_path):
+    """A configured regex resource that isn't in the DataStore used to leave
+    the regex path unbound and crash with NameError."""
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus import pii_screening, utils
+
+    with mock.patch.object(pii_screening.conf, "PII_REGEX_RESOURCE_ID", "no-such-resource"), \
+         mock.patch.object(pii_screening.dsu, "datastore_resource_exists", return_value=None), \
+         pytest.raises(utils.JobError, match="PII regex resource 'no-such-resource' not found"):
+        pii_screening.screen_for_pii(
+            str(tmp_path / "data.csv"), {"id": "res"}, mock.Mock(), str(tmp_path), mock.Mock()
+        )

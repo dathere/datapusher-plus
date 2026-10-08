@@ -68,6 +68,12 @@ def screen_for_pii(
         pii_regex_resource_exist = dsu.datastore_resource_exists(
             conf.PII_REGEX_RESOURCE_ID
         )
+        if not pii_regex_resource_exist:
+            raise utils.JobError(
+                f"PII regex resource {conf.PII_REGEX_RESOURCE_ID!r} not found in the "
+                "DataStore. Check ckanext.datapusher_plus.pii_regex_resource_id_or_alias, "
+                "or unset it to use the default PII regexes."
+            )
         if pii_regex_resource_exist:
             pii_resource = dsu.get_resource(conf.PII_REGEX_RESOURCE_ID)
             pii_regex_url = pii_resource["url"]
