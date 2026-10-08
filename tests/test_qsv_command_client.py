@@ -103,12 +103,14 @@ def test_success_returns_a_completed_process(qsv, fake_qsv):
     assert result.args == [str(fake_qsv), "ok"]
 
 
-def test_failure_raises_job_error_with_the_structured_error(qsv):
+def test_failure_raises_job_error_with_the_structured_error(qsv, fake_qsv):
     with pytest.raises(_job_error()) as exc:
-        qsv._run_command(["fail-json"])
+        qsv._run_command(["fail-json", "/data/in.csv", "--flag"])
     msg = str(exc.value)
     assert msg.startswith("qsv command failed: ")
     assert "csv" in msg and "ragged row 3" in msg and "exit 1" in msg
+    # operators reading the job log need to see what ran
+    assert f"[command: {fake_qsv} fail-json /data/in.csv --flag]" in msg
 
 
 def test_failure_raises_job_error_with_text_stderr(qsv):

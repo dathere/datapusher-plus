@@ -129,7 +129,7 @@ class QSVCommand:
         err = error_from_run(
             exit_code=res.exit_code, stderr=res.stderr, args=res.args, command=command
         )
-        error_msg = f"qsv command failed: {err}"
+        error_msg = f"qsv command failed: {err} [command: {cmdline}]"
         if not err.structured and res.stderr.strip():
             error_msg += f" - {res.stderr}"
         self.logger.error(error_msg)
