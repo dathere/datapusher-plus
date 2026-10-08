@@ -151,13 +151,17 @@ groups:
         editable: true
         default: false
         description: |
-          PII show candidates
+          PII show candidates. Full screening only: quick screening stops at the
+          first match, so it has no candidate rows to show, and
+          ``pii_found_abort`` then aborts regardless of this setting.
 
       - key: ckanext.datapusher_plus.pii_regex_resource_id_or_alias
         editable: true
         default: ""
         description: |
-          PII regex resource id or alias
+          PII regex resource id or alias: a CKAN resource whose file holds one
+          regex per line, used instead of the default PII regexes. Its file is
+          downloaded for each job, so it need not be in the DataStore.
     
       - key: ckanext.datapusher_plus.qsv_bin
         default: /usr/local/bin/qsvdp

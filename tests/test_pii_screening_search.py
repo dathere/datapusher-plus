@@ -51,18 +51,19 @@ def screen(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
 
-    def run(csv_text, quick):
+    def run(csv_text, quick, abort=True, show_candidates=False, regex_resource=None,
+            logger=None):
         csv_path = tmp_path / "data.csv"
         csv_path.write_text(csv_text)
         conf = pii_screening.conf
         with mock.patch.object(qsv_utils.conf, "QSV_BIN", Path(QSV_BIN)), \
-             mock.patch.object(conf, "PII_REGEX_RESOURCE_ID", None), \
+             mock.patch.object(conf, "PII_REGEX_RESOURCE_ID", regex_resource), \
              mock.patch.object(conf, "PII_QUICK_SCREEN", quick), \
-             mock.patch.object(conf, "PII_FOUND_ABORT", True), \
-             mock.patch.object(conf, "PII_SHOW_CANDIDATES", False):
+             mock.patch.object(conf, "PII_FOUND_ABORT", abort), \
+             mock.patch.object(conf, "PII_SHOW_CANDIDATES", show_candidates):
             qsv = qsv_utils.QSVCommand(logger=mock.Mock())
             return pii_screening.screen_for_pii(
-                str(csv_path), {"id": "res"}, qsv, str(tmp_path), mock.Mock()
+                str(csv_path), {"id": "res"}, qsv, str(tmp_path), logger or mock.Mock()
             )
 
     return run
@@ -136,14 +137,62 @@ def test_is_searchset_no_match(returncode, stderr, expected):
 
 
 def test_a_missing_custom_regex_resource_is_a_clear_job_error(tmp_path):
-    """A configured regex resource that isn't in the DataStore used to leave
-    the regex path unbound and crash with NameError."""
+    """A configured regex resource that doesn't exist used to leave the regex
+    path unbound and crash with NameError."""
     pytest.importorskip("ckan")
+    import ckan.plugins.toolkit as tk
+
     from ckanext.datapusher_plus import pii_screening, utils
 
     with mock.patch.object(pii_screening.conf, "PII_REGEX_RESOURCE_ID", "no-such-resource"), \
-         mock.patch.object(pii_screening.dsu, "datastore_resource_exists", return_value=None), \
+         mock.patch.object(pii_screening.dsu, "get_resource", side_effect=tk.ObjectNotFound), \
          pytest.raises(utils.JobError, match="PII regex resource 'no-such-resource' not found"):
         pii_screening.screen_for_pii(
             str(tmp_path / "data.csv"), {"id": "res"}, mock.Mock(), str(tmp_path), mock.Mock()
         )
+
+
+@requires_qsv
+@pytest.mark.parametrize("quick", [True, False], ids=["quick", "full"])
+def test_a_custom_regex_resource_need_not_be_in_the_datastore(screen, quick, tmp_path):
+    """A plain uploaded regex file works: it is fetched with resource_show and
+    downloaded into the job's own temp dir, not into the shared package dir."""
+    from ckanext.datapusher_plus import pii_screening, utils
+
+    response = mock.Mock(content=b"^Bob$\n")
+    package_copy = Path(pii_screening.__file__).with_name("user-pii-regexes.txt")
+    with mock.patch.object(
+        pii_screening.dsu, "get_resource",
+        return_value={"url": "https://ckan.example/download/regexes.txt"},
+    ) as get_resource, \
+         mock.patch.object(pii_screening.dsu, "datastore_resource_exists") as in_datastore, \
+         mock.patch.object(pii_screening.requests, "get", return_value=response), \
+         pytest.raises(utils.JobError, match="PII CANDIDATE"):
+        screen(CLEAN, quick, regex_resource="custom-regexes")
+
+    get_resource.assert_called_once_with("custom-regexes")
+    in_datastore.assert_not_called()
+    assert (tmp_path / "user-pii-regexes.txt").read_bytes() == b"^Bob$\n"
+    assert not package_copy.exists()
+
+
+@requires_qsv
+def test_quick_screen_aborts_even_when_candidates_would_be_shown(screen):
+    """Quick screening has no candidate rows to preview, so
+    pii_show_candidates must not stop pii_found_abort from aborting."""
+    from ckanext.datapusher_plus import utils
+
+    with pytest.raises(utils.JobError, match=r"PII CANDIDATE FOUND on row \d+! Job aborted\."):
+        screen(WITH_SSN, quick=True, abort=True, show_candidates=True)
+
+
+@requires_qsv
+@pytest.mark.parametrize("show_candidates", [True, False])
+def test_quick_screen_without_abort_warns_and_proceeds(screen, show_candidates):
+    logger = mock.Mock()
+    assert screen(
+        WITH_SSN, quick=True, abort=False, show_candidates=show_candidates, logger=logger
+    ) == (True, 1)
+    assert any(
+        "PII CANDIDATE FOUND on row" in str(c.args[0]) for c in logger.warning.call_args_list
+    )

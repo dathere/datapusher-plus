@@ -9,6 +9,8 @@ import requests
 import psycopg2
 from psycopg2 import sql
 
+import ckan.plugins.toolkit as tk
+
 import ckanext.datapusher_plus.utils as utils
 import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.datastore_utils as dsu
@@ -65,28 +67,29 @@ def screen_for_pii(
     # a text file, with each line having a regex pattern, and an optional
     # label comment prefixed with "#" (e.g. #SSN, #Email, #Visa, etc.)
     if conf.PII_REGEX_RESOURCE_ID:
-        pii_regex_resource_exist = dsu.datastore_resource_exists(
-            conf.PII_REGEX_RESOURCE_ID
-        )
-        if not pii_regex_resource_exist:
-            raise utils.JobError(
-                f"PII regex resource {conf.PII_REGEX_RESOURCE_ID!r} not found in the "
-                "DataStore. Check ckanext.datapusher_plus.pii_regex_resource_id_or_alias, "
-                "or unset it to use the default PII regexes."
-            )
-        if pii_regex_resource_exist:
+        # Any CKAN resource will do (typically an uploaded text file): its
+        # file is downloaded, so it need not be in the DataStore.
+        try:
             pii_resource = dsu.get_resource(conf.PII_REGEX_RESOURCE_ID)
-            pii_regex_url = pii_resource["url"]
+        except tk.ObjectNotFound:
+            raise utils.JobError(
+                f"PII regex resource {conf.PII_REGEX_RESOURCE_ID!r} not found. Check "
+                "ckanext.datapusher_plus.pii_regex_resource_id_or_alias, or unset it "
+                "to use the default PII regexes."
+            )
+        pii_regex_url = pii_resource["url"]
 
-            try:
-                r = requests.get(pii_regex_url)
-                r.raise_for_status()
-                pii_regex_file = pii_regex_url.split("/")[-1]
-                p = Path(__file__).with_name("user-pii-regexes.txt")
-                with p.open("wb") as f:
-                    f.write(r.content)
-            except requests.RequestException as e:
-                raise utils.JobError(f"Failed to fetch PII regex resource: {e}")
+        try:
+            r = requests.get(pii_regex_url)
+            r.raise_for_status()
+            pii_regex_file = pii_regex_url.split("/")[-1]
+            # Per job: concurrent jobs must not share (and overwrite) one copy,
+            # and the package directory may not be writable.
+            p = Path(temp_dir) / "user-pii-regexes.txt"
+            with p.open("wb") as f:
+                f.write(r.content)
+        except requests.RequestException as e:
+            raise utils.JobError(f"Failed to fetch PII regex resource: {e}")
     else:
         pii_regex_file = "default-pii-regexes.txt"
         p = Path(__file__).with_name(pii_regex_file)
@@ -148,7 +151,12 @@ def screen_for_pii(
             pii_found = True
             pii_candidate_count = pii_total_matches
 
-    if pii_found and pii_found_abort and not conf.PII_SHOW_CANDIDATES:
+    # Quick screening finds only the first match, so there are no candidate
+    # rows to preview: pii_show_candidates can't apply, and must not stop
+    # pii_found_abort from aborting.
+    if pii_found and pii_found_abort and (
+        conf.PII_QUICK_SCREEN or not conf.PII_SHOW_CANDIDATES
+    ):
         logger.error("PII Candidate/s Found!")
         if conf.PII_QUICK_SCREEN:
             raise utils.JobError(
@@ -286,6 +294,12 @@ def screen_for_pii(
             logger.warning(
                 "PII CANDIDATE/S FOUND but proceeding with job per Datapusher+ configuration."
             )
+    elif pii_found and conf.PII_QUICK_SCREEN:
+        logger.warning(
+            "PII CANDIDATE FOUND on row %s, but proceeding with job per Datapusher+ "
+            "configuration.",
+            pii_candidate_row.rstrip(),
+        )
     elif not pii_found:
         logger.info("PII Scan complete. No PII candidate/s found.")
 
