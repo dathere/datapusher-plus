@@ -14,6 +14,9 @@ import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.utils as utils
 from typing import Optional, Dict, Any, List, Union
 
+from qsv_client import Qsv, QsvError, QsvNotFound, QsvTimeout
+from qsv_client.errors import error_from_run
+
 from ckanext.datapusher_plus.logging_utils import TRACE
 
 logger = logging.getLogger(__name__)
@@ -40,6 +43,10 @@ class QSVCommand:
         # Verify qsv binary exists
         if not Path(self.qsv_bin).is_file():
             raise utils.JobError(f"{self.qsv_bin} not found.")
+        try:
+            self._qsv = Qsv(binary=self.qsv_bin, timeout=conf.QSV_COMMAND_TIMEOUT)
+        except QsvNotFound as e:
+            raise utils.JobError(f"{self.qsv_bin} not found.") from e
 
         # Check qsv version
         try:
@@ -58,97 +65,96 @@ class QSVCommand:
         timeout: Optional[float] = None,
     ) -> Union[subprocess.CompletedProcess, Dict[str, Any], str]:
         """
-        Run a qsv command with the given arguments.
+        Run a qsv command with the given arguments, via ``qsv-client``.
+
+        ``qsv-client`` runs qsv in its own process group, so a timeout kills
+        qsv *and* any children it started, and it asks qsv for structured
+        errors (``QSV_ERROR_FORMAT=json``), whose kind and message go into
+        the ``JobError``. Any non-zero exit code is a failure, as with
+        ``subprocess.run(check=True)``.
 
         Args:
             args: List of arguments for the qsv command
             check: Whether to raise an exception if the command fails
-            capture_output: Whether to capture stdout and stderr
+            capture_output: Ignored: stdout and stderr are always captured.
             text: Whether to return output as text
-            env: Optional environment variables
+            env: Optional environment variables, added to the worker's own
+                environment (not replacing it).
+            uses_stdio: On failure with ``check``, return
+                ``{"stdout": ..., "stderr": ...}`` instead of raising.
             timeout: Per-call override (seconds). Defaults to
                 ``conf.QSV_COMMAND_TIMEOUT`` so a hung qsv invocation never
                 pins an RQ worker indefinitely.
 
         Returns:
-            The result of subprocess.run
+            A ``subprocess.CompletedProcess``.
 
         Raises:
             utils.JobError: If the command fails and check is True, or if the
                 command times out.
         """
-
-        args = [self.qsv_bin] + args
-
-        # Convert all args to str to avoid TypeError with Path objects
         str_args = [str(arg) for arg in args]
-
+        command, rest = (str_args[0], str_args[1:]) if str_args else ("", [])
+        cmdline = " ".join([str(self.qsv_bin)] + str_args)
         effective_timeout = timeout if timeout is not None else conf.QSV_COMMAND_TIMEOUT
 
+        self.logger.trace(f"Running qsv command: {cmdline}")
         try:
-            self.logger.trace(f"Running qsv command: {' '.join(str_args)}")
-            result = subprocess.run(
-                str_args,
-                check=check,
-                capture_output=capture_output,
-                text=text,
+            res = self._qsv.run(
+                command,
+                *rest,
                 env=env,
                 timeout=effective_timeout,
+                check=False,
+                text=text,
             )
-            return result
-        except subprocess.TimeoutExpired as e:
-            error_msg = (
-                f"qsv command timed out after {effective_timeout}s: "
-                f"{' '.join(str_args)}"
-            )
+        except QsvTimeout as e:
+            error_msg = f"qsv command timed out after {effective_timeout}s: {cmdline}"
             self.logger.error(error_msg)
             raise utils.JobError(error_msg) from e
-        except subprocess.CalledProcessError as e:
-            if uses_stdio:
-                # Callers that opt into stdio capture handle their own failure
-                # logic and just want the raw stdout/stderr back.
-                return {"stdout": e.stdout, "stderr": e.stderr}
 
-            # Always log AND always raise when check=True — previously the
-            # raise was nested inside `if e.stderr:`, so failures with empty
-            # stderr silently returned None/"" and slipped past callers that
-            # had asked for check=True. Build the message with stderr when we
-            # have it, fall back to the exception's str otherwise.
-            error_msg = f"qsv command failed: {e}"
-            if getattr(e, "stderr", None):
-                error_msg += f" - {e.stderr}"
-            self.logger.error(error_msg)
-            if check:
-                raise utils.JobError(error_msg) from e
-            return e.stderr
+        stdout = res.stdout if text else res.stdout_bytes
+        stderr: Union[str, bytes] = res.stderr if text else res.stderr.encode("utf-8")
+        result = subprocess.CompletedProcess(
+            args=list(res.args), returncode=res.exit_code, stdout=stdout, stderr=stderr
+        )
+        if res.exit_code == 0 or not check:
+            return result
+        if uses_stdio:
+            # Callers that opt into stdio capture handle their own failure
+            # logic and just want the raw stdout/stderr back.
+            return {"stdout": stdout, "stderr": stderr}
+
+        # Always log AND always raise when check=True, even with empty stderr.
+        err = error_from_run(
+            exit_code=res.exit_code, stderr=res.stderr, args=res.args, command=command
+        )
+        error_msg = f"qsv command failed: {err} [command: {cmdline}]"
+        if not err.structured and res.stderr.strip():
+            error_msg += f" - {res.stderr}"
+        self.logger.error(error_msg)
+        raise utils.JobError(error_msg) from err
 
     def version(self) -> str:
         """
         Get the qsv version.
 
+        Read from ``qsv --capabilities`` on qsv versions that have it, and
+        from ``qsv --version`` otherwise.
+
         Returns:
-            The qsv version string
+            The qsv version string, e.g. ``"24.0.0"``
 
         Raises:
             utils.JobError: If the version command fails
+            ValueError: If the version output cannot be parsed
         """
-        result = self._run_command(["--version"])
-        version_info = result.stdout.strip()
-
-        if not version_info:
+        try:
+            return self._qsv.version
+        except QsvError as e:
             raise utils.JobError(
-                f"We expect qsv version info to be returned. Command: {self.qsv_bin} --version. Response: {version_info}"
-            )
-
-        # Extract version number
-        version_start = version_info.find(" ")
-        version_end = version_info.find("-")
-        if version_start > 0 and version_end > version_start:
-            version = version_info[version_start:version_end].lstrip()
-        else:
-            version = version_info
-
-        return version
+                f"Cannot get qsv version info. Command: {self.qsv_bin} --version. {e}"
+            ) from e
 
     def check_version(self) -> bool:
         """
@@ -712,7 +718,11 @@ class QSVCommand:
             env: Optional environment overrides for the subprocess
                 (e.g. ``{"OPENAI_API_KEY": "..."}`` if the caller has a
                 key it wants to inject out-of-band).
-            api_key: Optional value for ``--api-key``. Required when
+            api_key: Optional API key, passed to qsv as ``QSV_LLM_APIKEY``
+                rather than ``--api-key``: describegpt copies its command
+                line into the attribution of what it generates, and argv is
+                visible in ``ps``. Only the ``"NONE"`` sentinel, which qsv
+                honors on the flag alone, goes on the command line. Required when
                 the LLM endpoint isn't on ``localhost`` (qsv treats
                 non-localhost base URLs as "not a local LLM" and
                 refuses to start without an API key). For unauthenticated
@@ -759,7 +769,10 @@ class QSVCommand:
         # is nonsensical for these flags, but matching the documented
         # contract keeps the wrapper predictable.
         if api_key is not None:
-            args.extend(["--api-key", api_key])
+            if api_key.upper() == "NONE":
+                args.extend(["--api-key", api_key])
+            else:
+                env = {**(env or {}), "QSV_LLM_APIKEY": api_key}
         if base_url is not None:
             args.extend(["--base-url", base_url])
 
