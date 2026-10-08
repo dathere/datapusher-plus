@@ -9,6 +9,6 @@
   "devDependencies": {
     "jquery": "^3.7.1",
     "jsdom": "^25.0.0",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.11"
   }
 }
