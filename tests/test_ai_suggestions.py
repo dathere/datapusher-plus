@@ -9,7 +9,7 @@ malformed JSON, package-patch failure) must drop a warning and let the
 flow continue. These tests exercise:
 
 * ``QSVCommand.describegpt`` argument assembly (no real qsv binary
-  required — subprocess.run is mocked).
+  required — qsv-client's process layer is mocked).
 * ``AISuggestionsStage.should_skip`` honors the config flag.
 * ``AISuggestionsStage.process`` happy / failure paths.
 * ``helpers.scheming_get_ai_suggestion`` lookup logic across the
@@ -53,6 +53,20 @@ def _completed(stdout: str = "", returncode: int = 0) -> subprocess.CompletedPro
     )
 
 
+# ``QSVCommand`` runs qsv through qsv-client, whose process layer is the
+# subprocess seam: its first positional argument is the argv, and it takes
+# ``env=`` and ``timeout=`` keywords, just like ``subprocess.run``.
+RUN_SYNC = "qsv_client._process.run_sync"
+
+
+def _raw(stdout: str = "", exit_code: int = 0):
+    from qsv_client._process import RawResult
+
+    return RawResult(
+        exit_code=exit_code, stdout=stdout.encode(), stderr=b"", timed_out=False
+    )
+
+
 def test_describegpt_default_flags(qsv_command):
     """Default invocation emits --description --dictionary --tags --format JSON.
 
@@ -61,7 +75,7 @@ def test_describegpt_default_flags(qsv_command):
     invocations to fail with ``Unknown flag: '--json'``). Output
     format is controlled by ``--format <Markdown|TSV|JSON|TOON>``.
     """
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(input_file="/tmp/sample.csv")
 
     args = run.call_args[0][0]
@@ -79,7 +93,7 @@ def test_describegpt_default_flags(qsv_command):
 
 def test_describegpt_prompt_file_threaded_through(qsv_command):
     """``prompt_file`` is passed as ``--prompt-file <path>``."""
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(
             input_file="/tmp/sample.csv",
             prompt_file="/etc/qsv/describegpt.toml",
@@ -93,7 +107,7 @@ def test_describegpt_prompt_file_threaded_through(qsv_command):
 
 def test_describegpt_output_file_threaded_through(qsv_command):
     """``output_file`` is passed as ``--output <path>``."""
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(
             input_file="/tmp/sample.csv", output_file="/tmp/out.json"
         )
@@ -106,7 +120,7 @@ def test_describegpt_output_file_threaded_through(qsv_command):
 
 def test_describegpt_skips_disabled_flags(qsv_command):
     """Falsy flags omit their CLI counterpart entirely."""
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(
             input_file="/tmp/sample.csv",
             description=False,
@@ -129,7 +143,7 @@ def test_describegpt_default_timeout_from_config(qsv_command):
     from ckanext.datapusher_plus import config as conf
 
     with mock.patch.object(conf, "DESCRIBEGPT_TIMEOUT_SECONDS", 42), \
-         mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+         mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(input_file="/tmp/sample.csv")
 
     assert run.call_args.kwargs["timeout"] == 42
@@ -140,7 +154,7 @@ def test_describegpt_explicit_timeout_overrides_config(qsv_command):
     from ckanext.datapusher_plus import config as conf
 
     with mock.patch.object(conf, "DESCRIBEGPT_TIMEOUT_SECONDS", 42), \
-         mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+         mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(input_file="/tmp/sample.csv", timeout=7)
 
     assert run.call_args.kwargs["timeout"] == 7
@@ -156,7 +170,7 @@ def test_describegpt_api_key_threaded_through(qsv_command):
     container-host hostnames (``host.docker.internal`` etc.) the
     documented incantation is ``--api-key NONE``.
     """
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(input_file="/tmp/sample.csv", api_key="NONE")
 
     args = run.call_args[0][0]
@@ -166,7 +180,7 @@ def test_describegpt_api_key_threaded_through(qsv_command):
 
 def test_describegpt_base_url_threaded_through(qsv_command):
     """``--base-url`` overrides the endpoint without rewriting the prompt-file."""
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(
             input_file="/tmp/sample.csv",
             base_url="http://host.docker.internal:1234/v1",
@@ -182,7 +196,7 @@ def test_describegpt_base_url_threaded_through(qsv_command):
 
 def test_describegpt_optional_flags_omitted_by_default(qsv_command):
     """``api_key`` / ``base_url`` are None by default — let qsv discover."""
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(input_file="/tmp/sample.csv")
 
     args = run.call_args[0][0]
@@ -503,12 +517,31 @@ def test_describegpt_empty_api_key_passes_through(qsv_command):
     """``api_key=""`` is unusual but the docstring contract is
     ``None`` ⇒ omit, anything else ⇒ pass through. ``""`` should
     not be silently dropped."""
-    with mock.patch("subprocess.run", return_value=_completed("{}")) as run:
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
         qsv_command.describegpt(input_file="/tmp/sample.csv", api_key="")
 
-    args = run.call_args[0][0]
-    assert "--api-key" in args
-    assert args[args.index("--api-key") + 1] == ""
+    assert run.call_args.kwargs["env"]["QSV_LLM_APIKEY"] == ""
+    assert "--api-key" not in run.call_args[0][0]
+
+
+def test_describegpt_api_key_goes_in_the_environment_not_argv(qsv_command):
+    """describegpt copies its command line into the attribution of the
+    dictionary/description/tags it generates, and argv shows up in ``ps``,
+    so a real key must travel in ``QSV_LLM_APIKEY``. The worker's own
+    environment is kept, and caller ``env`` entries are merged in."""
+    key = "sk-or-v1-0123456789abcdef"
+    with mock.patch(RUN_SYNC, return_value=_raw("{}")) as run:
+        qsv_command.describegpt(
+            input_file="/tmp/sample.csv", api_key=key, env={"EXTRA": "1"}
+        )
+
+    argv = run.call_args[0][0]
+    env = run.call_args.kwargs["env"]
+    assert "--api-key" not in argv
+    assert not any(key in a for a in argv)
+    assert env["QSV_LLM_APIKEY"] == key
+    assert env["EXTRA"] == "1"
+    assert "PATH" in env
 
 
 def test_process_reshape_skips_unknown_envelope_keys(stage_cls, context_factory):

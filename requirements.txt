@@ -29,3 +29,7 @@ blake3>=1.0.7
 # explicitly because DP+ imports ``babel.numbers`` directly now and
 # shouldn't rely on the upstream pin staying loose.
 babel>=2.9
+# qsv-client: runs qsv for QSVCommand. Kills the whole process group on
+# timeout (qsv and anything it started) and reads qsv's structured errors
+# (QSV_ERROR_FORMAT=json) where the binary supports them. No dependencies.
+qsv-client>=0.1.0
