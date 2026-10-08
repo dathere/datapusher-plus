@@ -47,7 +47,7 @@ jobs:
           --health-retries 10
           --health-start-period 10s
       redis:
-        image: redis:3
+        image: redis:7
         ports: ["6379:6379"]
     # Job-specific environment (these will be available inside the container)
     env:

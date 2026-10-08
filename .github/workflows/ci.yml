@@ -73,7 +73,7 @@ jobs:
           --health-retries 10
           --health-start-period 10s
       redis:
-        image: redis:3
+        image: redis:7
         ports: ["6379:6379"]
     env:
       CKAN_SQLALCHEMY_URL: postgresql://ckan_default:pass@postgres/ckan_test
