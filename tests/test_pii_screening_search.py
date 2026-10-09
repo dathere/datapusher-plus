@@ -106,9 +106,12 @@ def test_full_screen_aborts_on_pii_with_the_counts(screen):
 def test_a_failed_search_raises_job_error(screen, quick, message, tmp_path):
     from ckanext.datapusher_plus import pii_screening, utils
 
-    # a regex file qsv cannot read makes searchset itself fail
-    missing = tmp_path / "missing-regexes.txt"
-    with mock.patch.object(pii_screening.Path, "absolute", return_value=missing), \
+    # a regex file qsv cannot read makes searchset itself fail. Moving the module's
+    # __file__ points the default regex path (Path(__file__).with_name(...)) at a
+    # missing file; patching pathlib.Path itself would also hijack qsv-client,
+    # which resolves the qsv binary with Path.absolute().
+    assert not (tmp_path / "default-pii-regexes.txt").exists()
+    with mock.patch.object(pii_screening, "__file__", str(tmp_path / "pii_screening.py")), \
          pytest.raises(utils.JobError, match=message):
         screen(CLEAN, quick)
 

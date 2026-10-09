@@ -32,4 +32,4 @@ babel>=2.9
 # qsv-client: runs qsv for QSVCommand. Kills the whole process group on
 # timeout (qsv and anything it started) and reads qsv's structured errors
 # (QSV_ERROR_FORMAT=json) where the binary supports them. No dependencies.
-qsv-client>=0.1.0
+qsv-client>=0.2.0
