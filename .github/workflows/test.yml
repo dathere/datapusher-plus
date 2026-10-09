@@ -84,3 +84,26 @@ jobs:
           # docker-compose stack (Prefect, Postgres, Redis, Solr).
           python3 -m pytest tests/ --ignore=tests/integration \
             -o addopts= -p no:cacheprovider -q
+
+  js-tests:
+    name: JS suite (Vitest, Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout datapusher-plus
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      # Pins the polling contract between scheming-ai-suggestions.js and the
+      # Python pipeline (tests/js/). Running it here also exercises
+      # Dependabot's npm bumps (vitest, jsdom, jquery) before they merge.
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Run JS test suite
+        run: npm test
