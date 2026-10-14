@@ -217,7 +217,8 @@ def _qsv_stats_types(csv_path: Path) -> Dict[str, str]:
 # silently change user-facing behavior. The "gap" rows are NOT bugs in
 # DP+ — they're qsv inference limitations, called out so the next
 # maintainer who looks at #173 doesn't have to rediscover them.
-# Baseline captured against qsv 20.1.0 — the version pinned in
+# Baseline captured against qsv 20.1.0 and re-verified unchanged against
+# qsv 25.0.0 — the version now pinned in
 # ``Dockerfile.worker`` (production worker), CI workflows, and the
 # ``dpp-test`` container.
 #
@@ -227,9 +228,9 @@ def _qsv_stats_types(csv_path: Path) -> Dict[str, str]:
 # added that format (see qsv 20.1.0 release notes), so this column is
 # now correctly inferred as DateTime.
 #
-# When the production qsv pin moves past 20.1.x, update this matrix
+# When the production qsv pin moves past 25.0.x, update this matrix
 # (capture the new baseline via ``qsv stats <fixture> --infer-dates
-# --dates-whitelist all``) AND bump the ``>= (20, 2, 0)`` skip
+# --dates-whitelist all``) AND bump the ``>= (25, 1, 0)`` skip
 # threshold inside ``test_quoted_csv_inference_matrix`` so the test
 # stays correct.
 EXPECTED_INFERENCE = {
@@ -262,17 +263,17 @@ def test_quoted_csv_inference_matrix():
     Either way the test gives the next maintainer a clean diff against
     a known baseline.
     """
-    # The matrix is pinned to qsv 20.1.x specifically. Skip rather
+    # The matrix is pinned to qsv 25.0.x specifically. Skip rather
     # than false-fail when the host's qsv is newer than the
-    # production-pinned 20.1.x in Dockerfile.worker / CI / dpp-test.
-    # When the production pin moves past 20.1.x, bump this guard AND
+    # production-pinned 25.0.x in Dockerfile.worker / CI / dpp-test.
+    # When the production pin moves past 25.0.x, bump this guard AND
     # update EXPECTED_INFERENCE in lockstep.
-    if QSV_VERSION is not None and QSV_VERSION >= (20, 2, 0):
+    if QSV_VERSION is not None and QSV_VERSION >= (25, 1, 0):
         pytest.skip(
-            f"EXPECTED_INFERENCE is pinned to qsv 20.1.x baseline; "
+            f"EXPECTED_INFERENCE is pinned to qsv 25.0.x baseline; "
             f"detected qsv {'.'.join(map(str, QSV_VERSION))}. Update the "
             "matrix and the comment on issue #173 when the production "
-            "Dockerfile.worker QSV_VERSION pin moves past 20.1.x."
+            "Dockerfile.worker QSV_VERSION pin moves past 25.0.x."
         )
 
     types = _qsv_stats_types(QUOTED_FIXTURE)
