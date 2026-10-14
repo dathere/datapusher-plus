@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 env:
-  QSV_VER: "20.1.0"
+  QSV_VER: "25.0.0"
 
 jobs:
   unit-tests:

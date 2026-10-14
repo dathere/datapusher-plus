@@ -165,7 +165,7 @@ Formula types:
 ## External Dependencies
 
 - **Python 3.10, 3.11, 3.12, 3.13**
-- **qsv v20.1.0+** — Must be installed at path specified by `ckanext.datapusher_plus.qsv_bin` (`MINIMUM_QSV_VERSION` is enforced at startup)
+- **qsv v25.0.0+** — Must be installed at path specified by `ckanext.datapusher_plus.qsv_bin` (`MINIMUM_QSV_VERSION` is enforced at startup)
 - **CKAN 2.10+** with ckanext-scheming
 - **PostgreSQL** datastore
 - **Prefect 3.7+** — Orchestrates the v3.0 ingestion flow (replaces the v2 RQ-based job runner; `migrate-from-rq` handles the upgrade)
