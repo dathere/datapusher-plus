@@ -37,14 +37,16 @@ import pytest
 @pytest.fixture
 def qsv_command():
     pytest.importorskip("ckan")
-    # ``QSVCommand.__init__`` verifies the qsv binary exists and runs a
-    # version check — neither is interesting for these tests. Patch
-    # both before constructing.
+    # ``QSVCommand.__init__`` verifies the qsv binary exists and runs its
+    # version check through ``qsv --capabilities``. Fake both, so the
+    # capabilities probe is done here and not inside a test's RUN_SYNC mock.
     from ckanext.datapusher_plus import qsv_utils
 
-    with mock.patch.object(qsv_utils.Path, "is_file", return_value=True), \
-         mock.patch.object(qsv_utils.QSVCommand, "check_version", return_value=None):
-        yield qsv_utils.QSVCommand(logger=mock.Mock())
+    capabilities = json.dumps({"binary": "qsvdp", "version": "99.0.0", "features": [], "commands": []})
+    with mock.patch.object(qsv_utils.Path, "is_file", return_value=True):
+        with mock.patch(RUN_SYNC, return_value=_raw(capabilities)):
+            qsv_command = qsv_utils.QSVCommand(logger=mock.Mock())
+        yield qsv_command
 
 
 def _completed(stdout: str = "", returncode: int = 0) -> subprocess.CompletedProcess:

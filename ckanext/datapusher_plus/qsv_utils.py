@@ -14,7 +14,7 @@ import ckanext.datapusher_plus.config as conf
 import ckanext.datapusher_plus.utils as utils
 from typing import Optional, Dict, Any, List, Union
 
-from qsv_client import Qsv, QsvError, QsvNotFound, QsvTimeout
+from qsv_client import Qsv, QsvError, QsvNotFound, QsvTimeout, QsvVersionError
 from qsv_client.errors import error_from_run
 
 from ckanext.datapusher_plus.logging_utils import TRACE
@@ -137,23 +137,25 @@ class QSVCommand:
 
     def version(self) -> str:
         """
-        Get the qsv version.
-
-        Read from ``qsv --capabilities`` on qsv versions that have it, and
-        from ``qsv --version`` otherwise.
+        Get the qsv version, read from ``qsv --capabilities``.
 
         Returns:
-            The qsv version string, e.g. ``"24.0.0"``
+            The qsv version string, e.g. ``"25.0.0"``
 
         Raises:
-            utils.JobError: If the version command fails
-            ValueError: If the version output cannot be parsed
+            utils.JobError: If the binary is older than qsv-client's minimum
+                (qsv 25.0.0), or ``--capabilities`` fails
         """
         try:
             return self._qsv.version
+        except QsvVersionError as e:
+            raise utils.JobError(
+                f"At least qsv version {conf.MINIMUM_QSV_VERSION} required. {e}. "
+                f"You can get the latest release at https://github.com/dathere/qsv/releases/latest"
+            ) from e
         except QsvError as e:
             raise utils.JobError(
-                f"Cannot get qsv version info. Command: {self.qsv_bin} --version. {e}"
+                f"Cannot get qsv version info. Command: {self.qsv_bin} --capabilities. {e}"
             ) from e
 
     def check_version(self) -> bool:
