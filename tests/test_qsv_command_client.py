@@ -26,7 +26,11 @@ import json, os, subprocess, sys, time
 
 args = sys.argv[1:]
 cmd = args[0] if args else ""
-if cmd == "--capabilities":
+if cmd == "--capabilities" and os.environ.get("FAKE_QSV_NO_CAPABILITIES"):
+    # qsv before 25.0.0
+    print("Unknown flag: '--capabilities'", file=sys.stderr)
+    sys.exit(1)
+elif cmd == "--capabilities":
     print(json.dumps({"binary": "qsvdp", "version": os.environ.get("FAKE_QSV_VERSION", "99.0.0"),
                       "features": [], "commands": ["count"], "error_formats": ["text", "json"]}))
 elif cmd == "ok":
@@ -90,6 +94,19 @@ def test_constructor_rejects_a_too_old_qsv(fake_qsv, monkeypatch):
     monkeypatch.setenv("FAKE_QSV_VERSION", "1.0.0")
     with mock.patch.object(qsv_utils.conf, "QSV_BIN", fake_qsv), pytest.raises(
         _job_error(), match="At least qsv version"
+    ):
+        qsv_utils.QSVCommand(logger=mock.Mock())
+
+
+def test_constructor_rejects_a_qsv_without_capabilities(fake_qsv, monkeypatch):
+    # qsv before 25.0.0 has no --capabilities; qsv-client 0.4.0+ raises
+    # QsvVersionError, which must surface as DP+'s minimum-version error
+    pytest.importorskip("ckan")
+    from ckanext.datapusher_plus import qsv_utils
+
+    monkeypatch.setenv("FAKE_QSV_NO_CAPABILITIES", "1")
+    with mock.patch.object(qsv_utils.conf, "QSV_BIN", fake_qsv), pytest.raises(
+        _job_error(), match="At least qsv version.*does not support --capabilities"
     ):
         qsv_utils.QSVCommand(logger=mock.Mock())
 
