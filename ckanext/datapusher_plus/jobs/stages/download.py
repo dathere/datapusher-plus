@@ -173,8 +173,8 @@ class DownloadStage(BaseStage):
         # Validate resource URL scheme
         self._validate_url_scheme(context)
 
-        # Start timing
-        context.timer_start = time.perf_counter()
+        # Local fetch timer; context.timer_start is the job's time.time() stamp
+        fetch_start = time.perf_counter()
 
         # Download the file
         file_hash, length, resource_format, response_headers = self._download_file(context)
@@ -195,7 +195,7 @@ class DownloadStage(BaseStage):
         context.resource["hash"] = file_hash
 
         # Log download completion
-        fetch_elapsed = time.perf_counter() - context.timer_start
+        fetch_elapsed = time.perf_counter() - fetch_start
         context.logger.info(
             f"Fetched {DataSize(length):.2MB} file in {fetch_elapsed:,.2f} seconds."
         )
