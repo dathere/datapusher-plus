@@ -6,15 +6,16 @@ pandas==2.2.3
 shapely==2.1.0
 pyproj>=3.7.1
 prefect>=3.7,<3.8
-# fastapi: prefect 3.7 only requires fastapi<1.0, but FastAPI 0.155.0
-# (2026-10-20) removed the deprecated ``min_items`` argument that
-# prefect/server/api/concurrency_limits_v2.py still passes to ``Body()``.
-# A fresh install then fails on ``import prefect`` with
-# ``TypeError: Body() got an unexpected keyword argument 'min_items'``,
-# which takes down the unit suite, ``prefect server start`` and the
-# integration CI (issue #353). Drop the pin once a Prefect release stops
-# passing ``min_items``.
-fastapi<0.155
+# fastapi: prefect 3.7 only requires fastapi<1.0, but the FastAPI releases
+# of 2026-10-18..23 (0.144 through 0.162) break Prefect 3.7.8 twice. From
+# 0.155, ``import prefect`` fails because concurrency_limits_v2.py passes the
+# removed ``min_items`` argument to ``Body()``. Between 0.144 and 0.154 the
+# server starts, but ``Body(None)`` on an ``int`` parameter no longer treats
+# a JSON ``null`` as "missing", so the client's ``workers/filter`` call
+# (``limit: null``) is rejected with 422 and ``prefect-deploy`` fails. 0.143.x
+# is what main's last green CI run installed (issue #353). Drop the pin once
+# a Prefect release in range passes on current FastAPI.
+fastapi<0.144
 # importlib_metadata: declared explicitly because prefect 3.7.1's
 # ``workers/base.py`` imports it unconditionally but doesn't list it
 # as a direct dep — it was being satisfied transitively by
