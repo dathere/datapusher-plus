@@ -6,6 +6,9 @@ pandas==2.2.3
 shapely==2.1.0
 pyproj>=3.7.1
 prefect>=3.7,<3.8
+# fastapi 0.155+ breaks `import prefect` (removed min_items); 0.144-0.154 reject
+# the Prefect client's `limit: null` with 422.
+fastapi<0.144
 # importlib_metadata: declared explicitly because prefect 3.7.1's
 # ``workers/base.py`` imports it unconditionally but doesn't list it
 # as a direct dep — it was being satisfied transitively by
